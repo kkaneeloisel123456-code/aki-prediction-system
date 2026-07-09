@@ -1,0 +1,3 @@
+﻿Risk_Group,N,Percent,AKI_Events,Observed_Rate,Mean_Predicted_Prob
+High Risk,26,31.0,23,0.885,0.99
+Low Risk,58,69.0,2,0.034,0.011

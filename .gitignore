@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Data (sensitive / generated)
+data/raw/
+data/processed/
+data/tables/
+
+# Large outputs
+outputs.zip
+*.pdf
+
+# Temp / IDE
+catboost_info/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Streamlit
+.streamlit/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini

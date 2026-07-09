@@ -1,0 +1,35 @@
+============================================================
+AKI 逻辑校验报告 — AKI Logic Validation Report
+============================================================
+
+总记录数: 420
+AKI患者数 (AKI分组=1): 125
+
+--- 1. AKI分期 vs KDIGO Scr标准 ---
+不一致记录数: 18
+不一致详情:
+  行1: AKI分期=3, AKI分期=3但Scr仅满足Stage1标准 (max_delta=79.0μmol/L, max_ratio=1.96x)
+  行13: AKI分期=2, AKI分期=2但Scr仅满足Stage1标准 (max_delta=86.0μmol/L, max_ratio=1.82x)
+  行16: AKI分期=2, AKI分期=2但Scr仅满足Stage1标准 (max_delta=68.0μmol/L, max_ratio=1.73x)
+  行34: AKI分期=2, AKI分期=2但Scr仅满足Stage1标准 (max_delta=90.0μmol/L, max_ratio=1.89x)
+  行35: AKI分期=2, AKI分期=2但Scr仅满足Stage1标准 (max_delta=84.0μmol/L, max_ratio=1.87x)
+  行42: AKI分期=1, AKI分期=1但Scr变化不满足KDIGO标准 (max_delta=24.0μmol/L, max_ratio=1.18x, max_scr=157.0μmol/L)
+  行52: AKI分期=2, AKI分期=2但Scr仅满足Stage1标准 (max_delta=79.0μmol/L, max_ratio=1.71x)
+  行53: AKI分期=3, AKI分期=3但Scr仅满足Stage1标准 (max_delta=95.0μmol/L, max_ratio=1.99x)
+  行58: AKI分期=2, AKI分期=2但Scr仅满足Stage1标准 (max_delta=79.0μmol/L, max_ratio=1.87x)
+  行61: AKI分期=3, AKI分期=3但Scr仅满足Stage2标准 (max_delta=106.0μmol/L, max_ratio=3.08x)
+  行62: AKI分期=3, AKI分期=3但Scr仅满足Stage2标准 (max_delta=109.0μmol/L, max_ratio=2.42x)
+  行72: AKI分期=2, AKI分期=2但Scr仅满足Stage1标准 (max_delta=73.0μmol/L, max_ratio=1.87x)
+  行89: AKI分期=3, AKI分期=3但Scr仅满足Stage1标准 (max_delta=67.0μmol/L, max_ratio=1.74x)
+  行92: AKI分期=3, AKI分期=3但Scr仅满足Stage1标准 (max_delta=73.0μmol/L, max_ratio=1.87x)
+  行100: AKI分期=3, AKI分期=3但Scr仅满足Stage2标准 (max_delta=85.0μmol/L, max_ratio=2.18x)
+  行118: AKI分期=3, AKI分期=3但Scr仅满足Stage2标准 (max_delta=102.0μmol/L, max_ratio=2.85x)
+  行121: AKI分期=3, AKI分期=3但Scr仅满足Stage2标准 (max_delta=91.0μmol/L, max_ratio=2.38x)
+  行123: AKI分期=3, AKI分期=3但Scr仅满足Stage2标准 (max_delta=113.0μmol/L, max_ratio=3.57x)
+
+--- 2. AKI分组 vs AKI分期 对应关系 ---
+不一致记录数: 0
+
+============================================================
+校验完成
+============================================================
