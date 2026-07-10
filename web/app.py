@@ -64,7 +64,9 @@ with st.sidebar:
 def load_all():
     """Load model, scaler, features, and evaluation results."""
     result = {'model': None, 'scaler': None, 'features': None, 'eval_df': None,
-              'best_name': None, 'models': {}}
+              'best_name': None, 'models': {},
+              'validation_report': None, 'validation_flags': None,
+              'n_staging_issues': 0, 'n_group_stage_issues': 0}
 
     # Load evaluation results
     eval_path = TAB_DIR / 'model_comparison.csv'

@@ -22,8 +22,8 @@ catboost_info/
 *.swp
 *.swo
 
-# Streamlit
-.streamlit/
+# Streamlit (config is needed for deployment)
+# .streamlit/ — intentionally tracked
 
 # OS
 .DS_Store
