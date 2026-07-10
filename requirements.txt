@@ -9,7 +9,8 @@ plotly>=5.14.0
 scikit-learn>=1.2.0
 xgboost>=1.7.0
 lightgbm>=3.3.0
-catboost>=1.2.0
+# catboost is optional — uncomment if CatBoost model prediction is needed
+# catboost>=1.2.0
 imbalanced-learn>=0.10.0
 # torch and pytorch-tabnet are optional — the web app can run without TabNet model
 # uncomment below if TabNet prediction is needed:
