@@ -156,4 +156,4 @@ streamlit run web/app.py
 
 ## 📜 License
 
-MIT License — 仅限学术用途
+仅限学术用途
