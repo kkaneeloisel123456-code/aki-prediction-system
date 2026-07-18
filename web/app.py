@@ -68,16 +68,19 @@ def load_all():
               'validation_report': None, 'validation_flags': None,
               'n_staging_issues': 0, 'n_group_stage_issues': 0}
 
-    # Load evaluation results
-    eval_path = TAB_DIR / 'model_comparison.csv'
+    # Load evaluation results (clean version)
+    eval_path = TAB_DIR / 'model_summary_clean.csv'
+    if not eval_path.exists():
+        eval_path = TAB_DIR / 'model_comparison.csv'
     if eval_path.exists():
         result['eval_df'] = pd.read_csv(eval_path)
 
-    # Load all models
+    # Load all models (clean versions, no data leakage)
     if MODEL_DIR.exists():
-        for f in MODEL_DIR.glob('*.pkl'):
+        for f in MODEL_DIR.glob('*_clean.pkl'):
             try:
-                result['models'][f.stem] = joblib.load(f)
+                name = f.stem.replace('_clean', '')  # CatBoost_clean -> CatBoost
+                result['models'][name] = joblib.load(f)
             except:
                 pass
 
@@ -92,13 +95,17 @@ def load_all():
             except:
                 pass
 
-    # Load scaler
-    scaler_path = MODEL_DIR / 'scaler.pkl'
+    # Load scaler (clean version, fitted on raw pre-operative data)
+    scaler_path = MODEL_DIR / 'scaler_clean.pkl'
+    if not scaler_path.exists():
+        scaler_path = MODEL_DIR / 'scaler.pkl'  # fallback
     if scaler_path.exists():
         result['scaler'] = joblib.load(scaler_path)
 
-    # Load feature names
-    feat_path = MODEL_DIR / 'feature_names.txt'
+    # Load feature names (pre-operative only, no leakage)
+    feat_path = MODEL_DIR / 'clean_features.txt'
+    if not feat_path.exists():
+        feat_path = MODEL_DIR / 'feature_names.txt'  # fallback
     if feat_path.exists():
         with open(feat_path, encoding='utf-8') as f:
             result['features'] = [l.strip() for l in f if l.strip()]
@@ -430,81 +437,72 @@ def page_prediction(assets):
     st.info(f"✅ 当前使用模型: **{assets['best_name']}** | 特征数: {len(assets.get('features',[]))}")
 
     with st.form("pred_form"):
-        st.markdown("### 📝 患者基本信息")
-        c1,c2,c3 = st.columns(3)
+        st.markdown("### 基本信息")
+        c1, c2, c3 = st.columns(3)
         with c1:
-            age = st.number_input("年龄", 18, 100, 55)
-            gender = st.selectbox("性别", ["男","女"], index=0)
-            ht = st.selectbox("高血压", ["否","是"], index=0)
-            dm = st.selectbox("糖尿病", ["否","是"], index=0)
-            chd = st.selectbox("冠心病", ["否","是"], index=0)
-        with c2:
-            surgery = st.selectbox("手术类型", ["心脏瓣膜手术","联合手术","结构性心脏病手术","冠状动脉旁路移植术","其他手术","大血管疾病手术"])
             surgery_time = st.number_input("手术时间 (min)", 30, 1440, 300)
+        with c2:
             apache = st.number_input("APACHE II 评分", 0, 60, 18)
-            blood_loss = st.number_input("术中失血量 (ml)", 0, 5000, 400)
-            vent_time = st.number_input("术后通气时间 (min)", 0, 50000, 360)
         with c3:
-            total_days = st.number_input("总住院天数", 1, 200, 22)
-            icu_days = st.number_input("ICU 住院天数", 0.0, 50.0, 2.0, 0.5)
-            cost = st.number_input("总住院费用 (元)", 10000.0, 500000.0, 90000.0, 1000.0)
+            pre_sbp = st.number_input("术前 SBP (mmHg)", 70, 200, 135)
 
-        st.markdown("### 🔬 术前实验室指标")
-        c1,c2,c3 = st.columns(3)
+        st.markdown("### 肾功能相关")
+        c1, c2, c3 = st.columns(3)
         with c1:
-            scr = st.number_input("术前 Scr (μmol/L)", 20.0, 500.0, 80.0, 1.0)
+            scr = st.number_input("术前 Scr (umol/L)", 20.0, 500.0, 80.0, 1.0)
+        with c2:
             egfr = st.number_input("术前 eGFR", 10.0, 150.0, 90.0, 1.0)
-            alb = st.number_input("术前 Alb (g/L)", 15.0, 60.0, 40.0, 0.1)
-            hb = st.number_input("术前 Hb (g/L)", 50.0, 200.0, 130.0, 1.0)
+        with c3:
+            ua = st.number_input("术前 UA (umol/L)", 100.0, 900.0, 400.0, 10.0)
+
+        st.markdown("### 血液学指标")
+        c1, c2, c3 = st.columns(3)
+        with c1:
             wbc = st.number_input("术前 WBC (x10e9/L)", 1.0, 30.0, 7.0, 0.1)
         with c2:
-            crp = st.number_input("术前 CRP (mg/L)", 0.0, 200.0, 5.0, 0.1)
-            lactate = st.number_input("术前 Lactate (mmol/L)", 0.1, 15.0, 1.0, 0.1)
-            nlr = st.number_input("术前 NLR", 0.1, 30.0, 3.0, 0.1)
-            bnp = st.number_input("术前 BNP (pg/mL)", 10.0, 25000.0, 500.0, 10.0)
-            ph = st.number_input("术前 pH", 7.0, 7.6, 7.4, 0.01)
+            neut = st.number_input("术前 NEUT (x10e9/L)", 0.5, 25.0, 5.0, 0.1)
         with c3:
-            k_val = st.number_input("术前 K+ (mmol/L)", 2.5, 7.0, 4.0, 0.01)
-            urea = st.number_input("术前 Urea (mmol/L)", 1.0, 25.0, 5.5, 0.1)
-            ua = st.number_input("术前 UA (μmol/L)", 100.0, 900.0, 400.0, 10.0)
+            mono = st.number_input("术前 MONO (x10e9/L)", 0.1, 5.0, 0.5, 0.1)
+
+        st.markdown("### 心脏/炎症指标")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            hstn = st.number_input("术前 hsTn (pg/mL)", 1.0, 5000.0, 50.0, 1.0)
+        with c2:
+            bnp = st.number_input("术前 BNP (pg/mL)", 10.0, 25000.0, 500.0, 10.0)
+        with c3:
             plt = st.number_input("术前 PLT (x10e9/L)", 50, 800, 250)
 
-        st.markdown("### 🏥 术中/术后指标")
-        c1,c2,c3 = st.columns(3)
+        st.markdown("### 其他指标")
+        c1, c2, c3 = st.columns(3)
         with c1:
-            intra_urine = st.number_input("术中尿量 (ml)", 0, 10000, 1000)
-            intra_cryst = st.number_input("术中晶体液量 (ml)", 0, 5000, 700, 10)
-            intra_colloid = st.number_input("术中胶体液量 (ml)", 0, 3000, 700, 10)
+            plr = st.number_input("术前 PLR", 10.0, 500.0, 150.0, 1.0)
         with c2:
-            pre_sbp = st.number_input("术前 SBP (mmHg)", 70, 200, 135)
-            pre_dbp = st.number_input("术前 DBP (mmHg)", 30, 120, 75)
+            b2mg = st.number_input("术前 B2MG (mg/L)", 0.5, 10.0, 2.2, 0.1)
         with c3:
-            icu_scr = st.number_input("ICU入院 Scr (μmol/L)", 20.0, 500.0, 80.0, 1.0)
-            icu_egfr = st.number_input("ICU入院 eGFR", 10.0, 150.0, 90.0, 1.0)
+            rbp = st.number_input("术前 RBP (mg/L)", 10.0, 100.0, 40.0, 1.0)
 
-        submitted = st.form_submit_button("🔍 开始预测", type="primary", width='stretch')
+        submitted = st.form_submit_button("开始预测", type="primary", width='stretch')
 
     if submitted:
         with st.spinner("正在使用 ML 模型进行预测..."):
             # Build input dict from form values
             input_dict = {
-                '年龄': age, '性别': 1 if gender=='男' else 2,
-                '高血压': 1 if ht=='是' else 0,
-                '糖尿病': 1 if dm=='是' else 0,
-                '冠心病': 1 if chd=='是' else 0,
-                'APACHEII': apache, '手术时间': surgery_time,
-                '术中失血量': blood_loss, '术中尿量': intra_urine,
-                '术中晶体液量': intra_cryst, '术中胶体液量': intra_colloid,
-                '术前Scr': scr, '术前eGFR': egfr, '术前Alb': alb,
-                '术前Hb': hb, '术前WBC': wbc, '术前CRP': crp,
-                '术前Lactate': lactate, '术前NLR': nlr, '术前BNP': bnp,
-                '术前pH': ph, '术前K': k_val, '术前Urea': urea,
-                '术前UA': ua, '术前PLT': plt,
-                '术前SBP': pre_sbp, '术前DBP': pre_dbp,
-                'ICUAdmSCr': icu_scr, 'ICUAdmeGFR': icu_egfr,
-                '总住院天数': total_days, '总住院费用': cost,
-                '术后通气时间': vent_time, 'ICU住院天数': icu_days,
-                '手术类型': surgery,  # will be label-encoded
+                '手术时间': surgery_time,
+                'APACHEII': apache,
+                '术前SBP': pre_sbp,
+                '术前Scr': scr,
+                '术前eGFR': egfr,
+                '术前UA': ua,
+                '术前WBC': wbc,
+                '术前NEUT': neut,
+                '术前MONO': mono,
+                '术前hsTn': hstn,
+                '术前BNP': bnp,
+                '术前PLT': plt,
+                '术前PLR': plr,
+                '术前B2MG': b2mg,
+                '术前RBP': rbp,
             }
 
             # Make real prediction

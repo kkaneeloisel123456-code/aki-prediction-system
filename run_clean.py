@@ -48,7 +48,8 @@ def is_leakage(col_name):
     if '术中' in name:
         return True
     # 结局变量 → 泄漏
-    if name in ['住院费用', '住院天数', '机械通气时间', 'ICU住院时间']:
+    # 结局变量（用子串匹配，覆盖 总住院/住院/ICU住院 等变体）
+    if any(kw in name for kw in ['住院费', '住院天', '住院日', '机械通气', 'ICU住院']):
         return True
     return False
 
