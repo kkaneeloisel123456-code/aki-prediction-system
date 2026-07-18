@@ -71,14 +71,14 @@ pip install -r requirements.txt
 ### 3. 运行完整流程
 
 ```bash
-# 一键运行全部流程（数据清洗 → 建模 → SHAP → Web应用）
-python run.py --all
+# 修复版：仅术前特征 + 5折交叉验证（推荐用于比赛展示）
+python run_clean.py
 
-# 或分步运行
-python run.py --data         # 仅数据清洗 + EDA
-python run.py --model        # 仅模型训练 + 评估
-python run.py --shap         # 仅 SHAP 分析
-python run.py --web          # 启动 Web 应用
+# 综合评估图表：ROC/PR/校准曲线/DCA/SHAP
+python run_evaluation.py
+
+# 原始版：一键运行全部流程（数据清洗 → 建模 → SHAP → Web应用）
+python run_full_pipeline.py
 ```
 
 ### 4. 启动 Web 应用
@@ -102,9 +102,25 @@ streamlit run web/app.py
 | MLP | 深度学习 | 非线性特征交互 |
 | TabNet | 深度学习 | 可解释的深度表格模型 |
 
+## 🔬 模型可靠性优化
+
+初始模型在单次随机划分验证中表现异常优异（AUC>0.99），经数据审查发现存在**数据泄漏**——特征中包含术后48h/7d肌酐等指标，而这些正是 KDIGO 急性肾损伤诊断标准本身。团队随后进行了系统性修复：
+
+1. **特征审查**: 剔除全部术后/术中/结局变量（50个），仅保留术前可获得特征（47个）
+2. **严格验证**: 改用分层5折交叉验证，避免单次划分的随机性
+3. **正则化**: 限制树深度、增加 L1/L2 正则化，防止过拟合
+4. **多维评价**: 引入校准曲线（Calibration）和决策曲线（DCA），从临床效用角度评估
+
+| 阶段 | AUC | 验证方式 | 评价 |
+|------|-----|---------|------|
+| 初始模型 | 0.99 | 单次划分 | 存在过拟合风险 |
+| 优化后 | 0.75±0.04 | 5折交叉验证 | 泛化性能稳定 |
+
+> 这一过程体现了从"追求指标"到"追求可信"的建模理念转变，更符合真实临床预测场景的要求。
+
 ## 📊 评估指标
 
-- **区分度**: AUC-ROC, Precision-Recall AUC
+- **区分度**: AUC-ROC, Precision-Recall AUC（含5折交叉验证 + Bootstrap 95%CI）
 - **校准度**: Brier Score, Calibration Curve
 - **临床效用**: Decision Curve Analysis (DCA)
 - **综合指标**: Accuracy, Precision, Recall, F1, Specificity, NPV, PPV

@@ -1,0 +1,6 @@
+﻿Model,AUC,Accuracy,Precision,Recall,F1
+RandomForest,0.7363,0.6667,0.4634,0.76,0.5758
+CatBoost,0.72,0.6429,0.4324,0.64,0.5161
+XGBoost,0.7112,0.631,0.4118,0.56,0.4746
+LightGBM,0.701,0.6429,0.4286,0.6,0.5
+LogisticRegression,0.6929,0.631,0.425,0.68,0.5231
