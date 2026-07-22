@@ -259,8 +259,10 @@ def generate_pdf_report(patient_info, result, shap_info=None):
 
         # Risk level (use sidebar slider values for consistency)
         prob = result['probability']
-        _rl = risk_low if 'risk_low' in dir() else 0.3
-        _rh = risk_high if 'risk_high' in dir() else 0.7
+        try: _rl = risk_low
+        except NameError: _rl = 0.3
+        try: _rh = risk_high
+        except NameError: _rh = 0.7
         risk = 'High' if prob > _rh else ('Medium' if prob > _rl else 'Low')
         risk_colors = {'Low': (39,174,96), 'Medium': (243,156,18), 'High': (231,76,60)}
         pdf.set_fill_color(*risk_colors[risk])
