@@ -26,6 +26,7 @@ FIG_DIR = OUTPUT_DIR / 'figures'
 TAB_DIR = OUTPUT_DIR / 'tables'
 PHASE1_FIG_DIR = OUTPUT_DIR / 'phase1' / 'figures'
 PHASE1_TAB_DIR = OUTPUT_DIR / 'phase1' / 'tables'
+PHASE2_FIG_DIR = OUTPUT_DIR / 'phase2' / 'figures'
 
 # ============================================
 # CSS
@@ -400,7 +401,7 @@ def page_performance(assets):
         st.warning("⚠️ 未找到模型评估结果。请先运行 run_models.py 训练模型。")
         return
 
-    tab1,tab2,tab3,tab4,tab5 = st.tabs(["📊 性能对比", "📈 ROC/PR曲线", "🎯 校准与DCA", "📉 CV可信度", "🔬 消融实验"])
+    tab1,tab2,tab3,tab4,tab5,tab6 = st.tabs(["📊 性能对比", "📈 ROC/PR曲线", "🎯 校准与DCA", "📉 CV可信度", "🔬 消融实验", "🤝 集成对比"])
 
     with tab1:
         st.markdown("### 模型性能总览（50次重复CV）")
@@ -530,6 +531,23 @@ def page_performance(assets):
             st.dataframe(abl_df, width='stretch', hide_index=True)
             st.success("💡 **消融实验核心发现**: 移除特定特征组后AUC下降越大，说明该组特征贡献越高。")
 
+    with tab6:
+        st.markdown("### 🤝 集成方法对比 (Phase 2)")
+        st.caption("Voting vs Stacking vs Weighted Average")
+
+        ens_path = PHASE2_FIG_DIR / 'ensemble_comparison.png'
+        if not ens_path.exists():
+            ens_path = FIG_DIR / 'ensemble_comparison.png'
+        if ens_path.exists():
+            st.image(str(ens_path), width='stretch')
+        else:
+            st.info("📌 集成对比图未生成。请运行 Phase 2 Ensemble Pipeline。")
+
+        c1, c2, c3 = st.columns(3)
+        with c1: st.markdown("**Voting (投票法)**: Soft Voting概率平均, 简单稳定")
+        with c2: st.markdown("**Stacking (堆叠法)**: 元学习器组合, 通常最强")
+        with c3: st.markdown("**Weighted Avg (加权)**: 灵活可调, 可解释性强")
+
 
 # ============================================
 # PAGE 3: Risk Prediction (CORE - REAL MODEL)
@@ -656,8 +674,13 @@ def page_prediction(assets):
         with c2:
             st.metric("预测概率", f"{prob:.1%}")
         with c3:
-            kdigo_stage = "Stage 0" if prob < 0.3 else ("Stage 1" if prob < 0.5 else ("Stage 2" if prob < 0.7 else "Stage 3"))
-            st.metric("预估KDIGO", kdigo_stage)
+            try:
+                from src.models.calibration import map_kdigo_stage
+                kdigo = map_kdigo_stage(prob)
+                st.metric("预估KDIGO", kdigo['label'])
+            except:
+                kdigo_stage = "Stage 0" if prob < 0.3 else ("Stage 1" if prob < 0.5 else ("Stage 2" if prob < 0.7 else "Stage 3"))
+                st.metric("预估KDIGO", kdigo_stage)
 
         st.markdown("---")
         c1,c2 = st.columns([1,1])
