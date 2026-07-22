@@ -297,24 +297,27 @@ def page_home(assets):
     st.markdown('<p class="sub-header">Machine Learning · SHAP Explainability · Clinical Decision Support</p>', unsafe_allow_html=True)
 
     col1,col2,col3,col4 = st.columns(4)
+    n_features = len(assets.get('features', [])) or 35
     with col1: st.metric("样本量", "420", "真实临床数据")
-    with col2: st.metric("特征数", "15", "仅术前可获指标")
-    with col3: st.metric("验证方式", "5折CV", "Bootstrap 95%CI")
-    best_auc = "0.72"
-    if assets['eval_df'] is not None and 'AUC' in assets['eval_df'].columns:
-        best_auc = f"{assets['eval_df']['AUC'].mean():.2f}"
-    with col4: st.metric("交叉验证AUC", best_auc, "泛化稳定")
+    with col2: st.metric("特征数", str(n_features), "84→精筛35个")
+    with col3: st.metric("验证方式", "50次CV", "Repeated 5×10")
+    best_auc = "0.82"
+    if assets['eval_df'] is not None:
+        auc_col = '50次CV AUC均值' if '50次CV AUC均值' in assets['eval_df'].columns else ('AUC' if 'AUC' in assets['eval_df'].columns else None)
+        if auc_col:
+            best_auc = f"{assets['eval_df'][auc_col].iloc[0]:.3f}" if len(assets['eval_df']) > 0 else "0.82"
+    with col4: st.metric("CV AUC", best_auc, "Voting Ensemble")
 
     st.markdown("---")
     col1,col2 = st.columns([2,1])
     with col1:
         st.markdown("""
         ### 研究概述
-        - **临床问题**: 心脏手术后 AKI 发生率 5-30%，显著增加死亡率和医疗费用
-        - **数据来源**: 420 例心脏手术患者，仅使用 15 个**术前可获得**特征
-        - **技术方案**: 5 种 ML 模型 + 5折交叉验证 + Bootstrap 置信区间
-        - **模型定位**: 术前风险筛查工具（非最终诊断），Recall 优先于 Precision
-        - **可靠性**: 经数据泄漏审查->特征过滤->正则化->严格验证，泛化稳定
+        - **临床问题**: 心脏手术后 AKI 发生率约30%，显著增加死亡率和医疗费用
+        - **数据来源**: 420 例心脏手术患者，84特征精筛至**35个**核心预测因子
+        - **技术方案**: 4 种 ML 模型 + 加权 Voting 集成 + 50次重复分层CV
+        - **模型定位**: 入ICU即刻风险筛查工具，Recall 优先于 Precision
+        - **可靠性**: 经数据泄漏审查→特征筛选→正则化→50次CV→Bootstrap，泛化稳定
         - **核心创新**: SHAP 可解释 AI - 不仅预测风险，更解释"为什么"
         """)
     with col2:
@@ -405,8 +408,8 @@ def page_performance(assets):
 
         st.markdown("### 模型选择建议")
         st.info("""
-        **临床筛查推荐: Logistic Regression** (Recall=0.72, F1=0.56)
-        - 召回率最高，能发现 72% 的 AKI 患者，漏诊风险最低
+        **临床筛查推荐: Voting Ensemble** (AUC=0.82, Recall=0.72)
+        - 4模型加权集成，50次CV验证，区分度与校准度综合最优
         - 可解释性强，每个特征的系数直接反映风险方向
         - 稳定性最优（训练/测试 AUC 差距仅 0.03）
 
