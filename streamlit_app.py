@@ -52,7 +52,7 @@ st.markdown("""
 with st.sidebar:
     st.markdown("## 🏥 AKI 预测系统")
     st.markdown("---")
-    page = st.radio("导航", ["🏠 首页", "📊 模型性能", "🔮 风险预测", "📋 报告"],
+    page = st.radio("导航", ["🏠 首页", "📊 模型性能", "🔮 风险预测", "📋 报告", "🔍 数据治理"],
                      label_visibility="collapsed")
     st.markdown("---")
     st.markdown("### ⚙️ 设置")
@@ -257,9 +257,11 @@ def generate_pdf_report(patient_info, result, shap_info=None):
         pdf.cell(0, 8, f'Patient: {patient_info.get("name","N/A")}', align='C', new_x="LMARGIN", new_y="NEXT")
         pdf.ln(10)
 
-        # Risk level
+        # Risk level (use sidebar slider values for consistency)
         prob = result['probability']
-        risk = 'High' if prob > 0.7 else ('Medium' if prob > 0.3 else 'Low')
+        _rl = risk_low if 'risk_low' in dir() else 0.3
+        _rh = risk_high if 'risk_high' in dir() else 0.7
+        risk = 'High' if prob > _rh else ('Medium' if prob > _rl else 'Low')
         risk_colors = {'Low': (39,174,96), 'Medium': (243,156,18), 'High': (231,76,60)}
         pdf.set_fill_color(*risk_colors[risk])
         pdf.set_text_color(255,255,255)
@@ -293,7 +295,7 @@ def page_home(assets):
 
     col1,col2,col3,col4,col5 = st.columns(5)
     with col1: st.metric("📊 样本量", "420", "真实临床数据")
-    with col2: st.metric("🧬 特征数", "48", "LASSO筛选")
+    with col2: st.metric("🧬 特征数", "94", "处理后")
     with col3: st.metric("🤖 模型数", "8", "全部训练完成")
 
     best_auc = "N/A"
@@ -316,7 +318,7 @@ def page_home(assets):
         ### 📖 研究概述
         - **临床问题**: 心脏手术后 AKI 发生率 5-30%，显著增加死亡率和医疗费用
         - **数据来源**: 420 例心脏手术患者，95+ 临床特征
-        - **技术方案**: 8 种 ML 模型系统比较 + LASSO 特征筛选 + SMOTE 类别平衡
+        - **技术方案**: 5 种 ML 模型系统比较 + 94 特征 + SMOTE 类别平衡
         - **核心创新**: SHAP 可解释 AI — 不仅预测风险，更解释"为什么"
         - **系统功能**: 在线预测 → 风险分层 → 危险因素 → 干预建议 → PDF 报告
         """)
@@ -364,7 +366,7 @@ def page_home(assets):
 
     st.markdown("---")
     col1,col2,col3 = st.columns(3)
-    col1.success("### 📊 模型性能\n查看 7 个模型的\nROC/PR/校准曲线")
+    col1.success("### 📊 模型性能\n查看 5 个模型的\nROC/PR/校准曲线")
     col2.info("### 🔮 风险预测\n输入患者信息\n实时预测 AKI 风险")
     col3.warning("### 📋 报告导出\n一键生成个体化\nAKI 风险评估报告")
 
@@ -448,7 +450,7 @@ def page_performance(assets):
         if cv_roc_path.exists():
             st.image(str(cv_roc_path), width='stretch')
         else:
-            st.info("📌 五折CV ROC曲线未生成。请运行: python run_phase1.py --skip-ablation --skip-dca --skip-shap --skip-datagov")
+            st.info("📌 五折CV ROC曲线未生成。请运行: python run_models.py --skip-ablation --skip-dca --skip-shap --skip-datagov")
 
         st.markdown("---")
         st.markdown("### 🎲 Bootstrap AUC分布")
@@ -483,14 +485,18 @@ def page_performance(assets):
         if abl_heat_path.exists():
             st.image(str(abl_heat_path), width='stretch')
         else:
-            st.info("📌 消融热力图未生成。请运行: python run_phase1.py --skip-cv --skip-dca --skip-shap --skip-datagov")
+            st.info("📌 消融热力图未生成。请运行: python run_models.py --skip-cv --skip-dca --skip-shap --skip-datagov")
 
-        # Ablation bar chart
-        abl_bar_path = PHASE1_FIG_DIR / 'ablation_barchart.png'
-        if not abl_bar_path.exists():
-            abl_bar_path = FIG_DIR / 'ablation_barchart.png'
+        # Individual model ablation charts
+        st.markdown("---")
+        st.markdown("#### 📊 各模型消融详情")
+        abl_model = st.selectbox("选择模型", ["xgboost", "randomforest", "catboost", "lightgbm", "logisticregression"],
+                                  format_func=lambda x: x.upper() if x == 'xgboost' else x.title())
+        abl_bar_path = PHASE1_FIG_DIR / f'ablation_{abl_model}.png'
         if abl_bar_path.exists():
             st.image(str(abl_bar_path), width='stretch')
+        else:
+            st.info(f"📌 {abl_model} 消融图未生成。")
 
         # Ablation comparison table
         abl_table_path = PHASE1_TAB_DIR / 'ablation_results.csv'
@@ -930,13 +936,13 @@ def page_prediction(assets):
                 ax_cf.plot(cf_values, cf_probs, 'b-', linewidth=2.5, marker='o', markersize=4)
                 ax_cf.axhline(y=prob, color='gray', linestyle='--', alpha=0.5, label=f'当前风险: {prob:.1%}')
                 ax_cf.fill_between(
-                    cf_values, 0, 0.3, alpha=0.1, color='green', label='低风险区 (<30%)'
+                    cf_values, 0, risk_low, alpha=0.1, color='green', label=f'低风险区 (<{risk_low:.0%})'
                 )
                 ax_cf.fill_between(
-                    cf_values, 0.3, 0.7, alpha=0.1, color='orange', label='中风险区 (30-70%)'
+                    cf_values, risk_low, risk_high, alpha=0.1, color='orange', label=f'中风险区 ({risk_low:.0%}-{risk_high:.0%})'
                 )
                 ax_cf.fill_between(
-                    cf_values, 0.7, 1.0, alpha=0.1, color='red', label='高风险区 (>70%)'
+                    cf_values, risk_high, 1.0, alpha=0.1, color='red', label=f'高风险区 (>{risk_high:.0%})'
                 )
                 ax_cf.set_xlabel(f'{cf_selected} 值', fontsize=11)
                 ax_cf.set_ylabel('AKI 预测风险', fontsize=11)
@@ -1065,7 +1071,7 @@ def page_data_governance(assets):
         if dg_flow_path.exists():
             st.image(str(dg_flow_path), width='stretch')
         else:
-            st.info("📌 数据治理流程图未生成。请运行: python run_phase1.py --skip-cv --skip-ablation --skip-dca --skip-shap")
+            st.info("📌 数据治理流程图未生成。请运行: python run_models.py --skip-cv --skip-ablation --skip-dca --skip-shap")
 
         st.markdown("---")
         st.markdown("### 🔽 特征筛选漏斗")
@@ -1078,16 +1084,7 @@ def page_data_governance(assets):
             st.info("📌 特征筛选漏斗图未生成。")
 
     with tab2:
-        st.markdown("### 📉 缺失值分析")
-
-        # Missing values summary
-        dg_missing_path = PHASE1_FIG_DIR / 'missing_values_summary.png'
-        if not dg_missing_path.exists():
-            dg_missing_path = FIG_DIR / 'missing_values_summary.png'
-        if dg_missing_path.exists():
-            st.image(str(dg_missing_path), width='stretch')
-        else:
-            st.info("📌 缺失值分析图未生成。")
+        st.markdown("### 📉 数据质量验证")
 
         # AKI logic validation (existing, from load_all)
         if assets.get('validation_report'):

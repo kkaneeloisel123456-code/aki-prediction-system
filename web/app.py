@@ -51,7 +51,7 @@ st.markdown("""
 with st.sidebar:
     st.markdown("## 🏥 AKI 预测系统")
     st.markdown("---")
-    page = st.radio("导航", ["🏠 首页", "📊 模型性能", "🔮 风险预测", "📋 报告"],
+    page = st.radio("导航", ["🏠 首页", "📊 模型性能", "🔮 风险预测", "📋 报告", "🔍 数据治理"],
                      label_visibility="collapsed")
     st.markdown("---")
     st.markdown("### ⚙️ 设置")
@@ -267,7 +267,9 @@ def generate_pdf_report(patient_info, result, shap_info=None):
 
         # Risk level
         prob = result['probability']
-        risk = 'High' if prob > 0.7 else ('Medium' if prob > 0.3 else 'Low')
+        _rl = risk_low if 'risk_low' in dir() else 0.3
+        _rh = risk_high if 'risk_high' in dir() else 0.7
+        risk = 'High' if prob > _rh else ('Medium' if prob > _rl else 'Low')
         risk_colors = {'Low': (39,174,96), 'Medium': (243,156,18), 'High': (231,76,60)}
         pdf.set_fill_color(*risk_colors[risk])
         pdf.set_text_color(255,255,255)
@@ -321,8 +323,8 @@ def page_home(assets):
         st.markdown("""
         ### 研究概述
         - **临床问题**: 心脏手术后 AKI 发生率约30%，显著增加死亡率和医疗费用
-        - **数据来源**: 420 例心脏手术患者，84特征精筛至**35个**核心预测因子
-        - **技术方案**: 4 种 ML 模型 + 加权 Voting 集成 + 50次重复分层CV
+        - **数据来源**: 420 例心脏手术患者，94特征经特征工程处理
+        - **技术方案**: 5 种 ML 模型 + Voting/Stacking 集成 + 50次重复分层CV
         - **模型定位**: 入ICU即刻风险筛查工具，Recall 优先于 Precision
         - **可靠性**: 经数据泄漏审查→特征筛选→正则化→50次CV→Bootstrap，泛化稳定
         - **核心创新**: SHAP 可解释 AI - 不仅预测风险，更解释"为什么"
@@ -330,12 +332,12 @@ def page_home(assets):
     with col2:
         st.markdown("""
         ### 模型可靠性优化
-        1. 初始模型 AUC > 0.99
-        2. 发现术后特征泄漏
-        3. 排除 13 个泄漏特征（KDIGO标准+结局变量）
-        4. 84特征精筛至35个（RF重要性Top35）
-        5. 50次重复分层CV验证
-        6. **AUC 0.82**, Voting Ensemble (LR+RF+XGB+ET)
+        1. 初始模型 AUC > 0.99（含数据泄漏）
+        2. 发现并排除术后特征泄漏
+        3. 排除KDIGO标准+结局变量等泄漏特征
+        4. 94特征经LASSO+RF重要性筛选
+        5. 5折分层CV + Bootstrap验证
+        6. Voting + Stacking集成 (LR+RF+XGB+LGB+CatBoost)
 
         *一个可信的 0.82，胜过一百个泄漏的 0.99*
         """)
@@ -385,7 +387,7 @@ def page_home(assets):
 
     st.markdown("---")
     col1,col2,col3 = st.columns(3)
-    col1.success("### 📊 模型性能\n查看 7 个模型的\nROC/PR/校准曲线")
+    col1.success("### 📊 模型性能\n查看 5 个模型的\nROC/PR/校准曲线")
     col2.info("### 🔮 风险预测\n输入患者信息\n实时预测 AKI 风险")
     col3.warning("### 📋 报告导出\n一键生成个体化\nAKI 风险评估报告")
 
@@ -515,9 +517,11 @@ def page_performance(assets):
         else:
             st.info("📌 消融热力图未生成。请运行: python run_phase1.py --skip-cv --skip-dca --skip-shap --skip-datagov")
 
-        abl_bar_path = PHASE1_FIG_DIR / 'ablation_barchart.png'
-        if not abl_bar_path.exists():
-            abl_bar_path = FIG_DIR / 'ablation_barchart.png'
+        st.markdown("---")
+        st.markdown("#### 📊 各模型消融详情")
+        abl_model = st.selectbox("选择模型", ["xgboost", "randomforest", "catboost", "lightgbm", "logisticregression"],
+                                  format_func=lambda x: x.upper() if x == 'xgboost' else x.title())
+        abl_bar_path = PHASE1_FIG_DIR / f'ablation_{abl_model}.png'
         if abl_bar_path.exists():
             st.image(str(abl_bar_path), width='stretch')
 
@@ -874,9 +878,9 @@ def page_prediction(assets):
                 fig_cf, ax_cf = plt.subplots(figsize=(8, 4))
                 ax_cf.plot(cf_values, cf_probs, 'b-', linewidth=2.5, marker='o', markersize=4)
                 ax_cf.axhline(y=prob, color='gray', linestyle='--', alpha=0.5, label=f'当前风险: {prob:.1%}')
-                ax_cf.fill_between(cf_values, 0, 0.3, alpha=0.1, color='green', label='低风险区')
-                ax_cf.fill_between(cf_values, 0.3, 0.7, alpha=0.1, color='orange', label='中风险区')
-                ax_cf.fill_between(cf_values, 0.7, 1.0, alpha=0.1, color='red', label='高风险区')
+                ax_cf.fill_between(cf_values, 0, risk_low, alpha=0.1, color='green', label=f'低风险区 (<{risk_low:.0%})')
+                ax_cf.fill_between(cf_values, risk_low, risk_high, alpha=0.1, color='orange', label=f'中风险区 ({risk_low:.0%}-{risk_high:.0%})')
+                ax_cf.fill_between(cf_values, risk_high, 1.0, alpha=0.1, color='red', label=f'高风险区 (>{risk_high:.0%})')
                 ax_cf.set_xlabel(f'{cf_selected} 值', fontsize=11)
                 ax_cf.set_ylabel('AKI 预测风险', fontsize=11)
                 ax_cf.set_title(f'反事实曲线: {cf_selected} 对 AKI 风险的影响', fontweight='bold')
@@ -977,12 +981,7 @@ def page_data_governance(assets):
             st.image(str(dg_funnel_path), width='stretch')
 
     with tab2:
-        st.markdown("### 📉 缺失值分析")
-        dg_missing_path = PHASE1_FIG_DIR / 'missing_values_summary.png'
-        if not dg_missing_path.exists():
-            dg_missing_path = FIG_DIR / 'missing_values_summary.png'
-        if dg_missing_path.exists():
-            st.image(str(dg_missing_path), width='stretch')
+        st.markdown("### 📉 数据质量验证")
 
         if assets.get('validation_report'):
             st.markdown("---")
