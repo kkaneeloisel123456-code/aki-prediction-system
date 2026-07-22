@@ -1,180 +1,170 @@
 # AKI 急性肾损伤智能预测系统
 
-## 🏥 项目简介
+## 项目简介
 
-基于广西某三甲医院临床数据，利用多种机器学习算法构建急性肾损伤（AKI）预测模型，并通过 SHAP 可解释性分析为临床决策提供透明、可信的个体化风险评估。最终部署为在线临床决策支持系统。
+基于广西某三甲医院临床数据（420例），利用多种机器学习算法构建急性肾损伤（AKI）预测模型。通过 SHAP 可解释性分析 + DCA 决策曲线 + Bootstrap 内部验证，为临床决策提供透明、可信的个体化风险评估。最终部署为 Streamlit 在线临床决策支持系统。
 
-## 📁 项目结构
+**🏆 暑期数创 2026 · 白菜卷队 · 广西科技大学**
+
+---
+
+## 模型性能
+
+| 指标 | 数值 |
+|------|------|
+| **50次重复CV AUC** | **0.816 ± 0.044** |
+| 测试集 AUC | 0.802 |
+| Bootstrap AUC (1000次) | 0.976 [0.967, 0.986] |
+| 过拟合差距 | 0.092（可接受范围 < 0.12） |
+| 最佳模型 | Voting Ensemble (LR:2, RF:2, XGB:1, ET:1) |
+| 使用特征 | 82 → 精筛 35 个 |
+| 验证方式 | RepeatedStratifiedKFold (5折 × 10次 = 50次评估) |
+
+| 模型 | 50次CV AUC | 标准差 |
+|------|-----------|--------|
+| LogisticRegression | 0.808 | 0.044 |
+| RandomForest | 0.815 | 0.043 |
+| XGBoost | 0.819 | 0.043 |
+| ExtraTrees | 0.809 | 0.044 |
+| **Voting Ensemble** | **0.821** | **0.043** |
+
+---
+
+## 特征方案
+
+| 类别 | 数量 | 说明 |
+|------|------|------|
+| 术前特征 | 44 | 人口学、实验室检查、生命体征 |
+| 术中特征 | 4 | 失血量、输液量、尿量 |
+| ICU入室值 | 2 | 入ICU即刻eGFR、肌酐 |
+| 术后早期非肌酐 | 33 | 血常规、炎症标志物、血气 |
+| **精筛后** | **35** | RF重要性筛选 Top35 |
+| **已排除** | **13** | KDIGO诊断标准 + 结局变量 + 术后7d |
+
+### 数据泄漏控制
+
+初始模型 AUC > 0.99，经审查发现特征中包含术后48h/7d肌酐——这正是 KDIGO 急性肾损伤诊断标准本身（"用答案预测答案"）。团队进行了系统性修复：
+
+| 排除类别 | 示例 | 原因 |
+|----------|------|------|
+| KDIGO诊断标准 | 术后48hSCr, 术后48heGFR, 术后7dSCr, 术后7deGFR | 诊断标准本身 |
+| 结局变量 | 总住院天数, 总住院费用, ICU住院天数 | 预测时点之后的结局 |
+| 术后7天指标 | 术后7dRBP | AKI在7天内已确诊 |
+| 术后通气时间 | 术后通气时间 | 接近结局变量 |
+
+**保留特征论证**: 所有保留特征在AKI诊断（术后48h/7d）之前即可获取。预测时点为"入ICU即刻"，临床可操作性强。
+
+| 阶段 | AUC | 验证 | 说明 |
+|------|-----|------|------|
+| 初始模型（含泄漏） | >0.99 | 单次划分 | 用KDIGO标准预测AKI — 不可信 |
+| 纯术前（保守） | 0.74 | 5折CV | 仅术前特征，完全无泄漏 |
+| 术前+术中+ICU入室 | 0.79 | 5折CV | 临床可论证的预测时点 |
+| **最终版（+术后早期）** | **0.82** | **50次重复CV** | **当前最优，过拟合可控** |
+
+> **"一个可信的 0.82，胜过一百个泄漏的 0.99。"**
+
+---
+
+## 项目结构
 
 ```
 aki-project/
-├── data/                       # 数据目录
-│   ├── raw/                    # 原始数据
-│   └── processed/              # 清洗后数据
-├── notebooks/                  # Jupyter Notebooks
-│   ├── 01_data_cleaning.ipynb         # 数据清洗
-│   ├── 02_eda_analysis.ipynb          # 探索性数据分析
-│   ├── 03_feature_engineering.ipynb    # 特征工程
-│   ├── 04_model_training.ipynb        # 模型训练
-│   ├── 05_model_evaluation.ipynb      # 模型评估
-│   └── 06_shap_analysis.ipynb         # SHAP 可解释性分析
-├── src/                        # 源代码
-│   ├── data/
-│   │   ├── cleaning.py                # 数据清洗
-│   │   ├── eda.py                     # EDA 分析
-│   │   └── features.py                # 特征工程
-│   ├── models/
-│   │   ├── train.py                   # 模型训练
-│   │   ├── evaluate.py                # 模型评估
-│   │   ├── calibration.py             # 校准分析 + DCA
-│   │   └── ensemble.py                # 模型集成
-│   ├── visualization/
-│   │   ├── plots.py                   # 通用图表
-│   │   ├── roc_pr.py                  # ROC/PR 曲线
-│   │   └── shap_viz.py                # SHAP 可视化
-│   └── utils/
-│       └── helpers.py                 # 工具函数
-├── web/                        # Streamlit Web 应用
-│   ├── app.py                         # 主入口
-│   ├── pages/                         # 页面模块
-│   ├── components/
-│   │   ├── prediction.py              # 预测组件
-│   │   ├── shap_explain.py            # SHAP 解释组件
-│   │   └── report.py                  # PDF 报告生成
-│   └── assets/
-│       └── style.css
-├── models/                     # 保存的模型文件
-├── outputs/                    # 输出图表和报告
-│   ├── figures/                # 论文用图
-│   ├── tables/                 # 论文用表
-│   └── reports/                # PDF 报告
-├── paper/                      # 论文
-│   └── chapters/               # 论文章节
-├── ppt/                        # 答辩素材
+├── data/                         # 数据
+│   ├── raw/AKI数据.xlsx          # 原始数据
+│   └── tables/                   # 数据字典、质量报告
+├── models/                       # 训练好的模型
+│   ├── final_voting_model.pkl    # 最终Voting模型
+│   ├── scaler.pkl                # 标准化器
+│   └── selected_features.txt     # 选中的35个特征
+├── outputs/                      # 输出
+│   ├── figures/                  # ROC/PR/DCA/校准/SHAP图
+│   └── tables/                   # 模型对比、特征排名
+├── src/                          # 源代码
+│   ├── data/                     # 数据处理模块
+│   ├── models/                   # 模型训练/评估/校准
+│   └── visualization/            # 可视化模块
+├── web/                          # Streamlit Web应用
+│   ├── app.py                    # 主入口
+│   └── components/               # 预测/SHAP/报告组件
+├── paper/                        # 论文
+├── ppt/                          # 答辩素材
+├── run_clean.py                  # ★ 一键运行（最终版）
+├── run_evaluation.py             # 综合评估图表
 ├── requirements.txt
-├── run.py                      # 一键运行
 └── README.md
 ```
 
-## 🚀 快速开始
+---
 
-### 1. 安装依赖
+## 快速开始
 
 ```bash
+# 1. 安装依赖
 pip install -r requirements.txt
-```
 
-### 2. 数据准备
-
-将原始数据文件放入 `data/raw/` 目录。
-
-### 3. 运行完整流程
-
-```bash
-# 修复版：仅术前特征 + 5折交叉验证（推荐用于比赛展示）
+# 2. 运行最终模型（特征筛选 → 训练 → CV → 过拟合检查）
 python run_clean.py
 
-# 综合评估图表：ROC/PR/校准曲线/DCA/SHAP
+# 3. 生成比赛图表（ROC/PR/校准/DCA/SHAP）
 python run_evaluation.py
 
-# 原始版：一键运行全部流程（数据清洗 → 建模 → SHAP → Web应用）
-python run_full_pipeline.py
-```
-
-### 4. 启动 Web 应用
-
-```bash
+# 4. 启动 Web 应用
 streamlit run web/app.py
+# → http://localhost:8501
 ```
 
-浏览器访问 `http://localhost:8501`
+---
 
-## 🧠 模型列表
+## 评价体系
 
-| 模型 | 类型 | 描述 |
-|------|------|------|
-| Logistic Regression | 线性 | 基线模型，可解释性强 |
-| Random Forest | 树集成 | 鲁棒性强，自动特征选择 |
-| XGBoost | 梯度提升 | 高性能，工业标准 |
-| LightGBM | 梯度提升 | 快速训练，内存高效 |
-| CatBoost | 梯度提升 | 原生支持类别特征 |
-| ExtraTrees | 树集成 | 高方差控制 |
-| MLP | 深度学习 | 非线性特征交互 |
-| TabNet | 深度学习 | 可解释的深度表格模型 |
+| 维度 | 方法 |
+|------|------|
+| **区分度** | AUC-ROC, Precision-Recall AUC, 50次重复CV, Bootstrap 95%CI |
+| **校准度** | Brier Score, Calibration Curve |
+| **临床效用** | Decision Curve Analysis (DCA) |
+| **可解释性** | SHAP Summary/Bar/Force/Dependence Plot |
+| **过拟合控制** | 训练-测试AUC差距, 加强正则化 |
+| **综合指标** | Accuracy, Precision, Recall, F1, Specificity |
 
-## 🔬 模型可靠性优化
+---
 
-初始模型在单次随机划分验证中表现异常优异（AUC>0.99），经数据审查发现存在**数据泄漏**——特征中包含术后48h/7d肌酐等指标，而这些正是 KDIGO 急性肾损伤诊断标准本身。团队随后进行了系统性修复：
-
-1. **特征审查**: 剔除全部术后/术中/结局变量（50个），仅保留术前可获得特征（47个）
-2. **严格验证**: 改用分层5折交叉验证，避免单次划分的随机性
-3. **正则化**: 限制树深度、增加 L1/L2 正则化，防止过拟合
-4. **多维评价**: 引入校准曲线（Calibration）和决策曲线（DCA），从临床效用角度评估
-
-| 阶段 | AUC | 验证方式 | 评价 |
-|------|-----|---------|------|
-| 初始模型 | >0.99 | 单次划分（含术后特征） | 数据泄漏，不可信 |
-| 优化后 | 0.72±0.03 | 5折交叉验证 + Bootstrap | 泛化稳定，真实可信 |
-
-**最终模型选择**: Logistic Regression（临床筛查模型）
-- 召回率 72% — 能发现 72% 的 AKI 患者
-- 仅用 15 个术前特征 — 预测在手术前即可完成
-- 训练/测试 AUC 差距仅 0.03 — 无过拟合
-
-> 这一过程体现了从"追求指标"到"追求可信"的建模理念转变，更符合真实临床预测场景的要求。
-
-## 📊 评估指标
-
-- **区分度**: AUC-ROC, Precision-Recall AUC（含5折交叉验证 + Bootstrap 95%CI）
-- **校准度**: Brier Score, Calibration Curve
-- **临床效用**: Decision Curve Analysis (DCA)
-- **综合指标**: Accuracy, Precision, Recall, F1, Specificity, NPV, PPV
-
-## 🔍 可解释性
-
-采用 SHAP (SHapley Additive exPlanations) 提供：
-- **全局解释**: 特征重要性排序（Summary Plot, Bar Plot）
-- **个体解释**: 单人 Force Plot，展示每个特征的贡献
-- **交互解释**: Dependence Plot，展示特征交互效应
-- **临床解读**: 自动生成中文临床解释报告
-
-## 🌐 Web 系统功能
+## Web 系统功能
 
 1. **数据概览**: 交互式数据探索、Table 1、流行病学分析
-2. **模型性能**: ROC/PR/校准曲线、模型对比热力图
-3. **风险预测** (核心):
-   - 输入患者临床信息
-   - 实时预测 AKI 发生概率
-   - 风险等级（低/中/高）
-   - 危险因素 Top 5
-   - SHAP 个体解释
-   - 临床干预建议
-   - 一键导出 PDF 报告
+2. **模型性能**: ROC/PR/校准曲线、模型对比雷达图
+3. **风险预测** (核心): 输入患者信息 → 实时预测 → SHAP解释 → PDF报告
 4. **报告中心**: 历史预测记录、批量导出
 
-## 📄 论文结构
+---
 
-1. 第一章 绪论 — 研究背景、意义、创新点
-2. 第二章 文献综述 — AKI 预测模型现状
-3. 第三章 数据与方法 — 数据来源、预处理、模型
-4. 第四章 实验结果 — 模型比较、SHAP、DCA
-5. 第五章 讨论与结论 — 临床意义、局限、展望
+## 技术栈
 
-## 👥 团队分工
+- **语言**: Python 3.10+
+- **数据处理**: pandas, numpy, scikit-learn
+- **模型**: LogisticRegression, RandomForest, XGBoost, ExtraTrees
+- **可解释性**: SHAP
+- **可视化**: matplotlib, seaborn
+- **Web**: Streamlit
+- **验证**: RepeatedStratifiedKFold, Bootstrap
+
+---
+
+## 团队分工
 
 | 角色 | 负责人 | 主要职责 |
 |------|--------|---------|
-| 队长 | 蓝可 | 技术路线、论文框架、统筹 |
-| 数据 | 李婷、蓝可 | 数据清洗、特征工程 |
-| 建模 | 梁日娇、蓝可 | 模型训练、评估、SHAP |
-| 开发 | 王若兮 | Web 系统开发 |
-| 论文 | 叶宇晨、蓝可 | 论文撰写 |
+| 队长/技术路线/论文框架 | 蓝可 | 统筹、建模、优化 |
+| 数据清洗/特征工程 | 李婷、蓝可 | 数据预处理、EDA |
+| 建模/SHAP | 梁日娇、蓝可 | 模型训练、评估、可解释性 |
+| Web开发 | 王若兮 | Streamlit系统开发 |
+| 论文撰写 | 叶宇晨、蓝可 | 论文撰写 |
 
-## ⚠️ 免责声明
+---
 
-本系统仅供学术研究和临床参考，不作为最终诊断依据。
-所有临床决策应由合格医疗专业人员根据综合患者评估做出。
+## 免责声明
 
-## 📜 License
+本系统仅供学术研究和临床参考，不作为最终诊断依据。所有临床决策应由合格医疗专业人员根据综合患者评估做出。
+
+## License
 
 仅限学术用途
