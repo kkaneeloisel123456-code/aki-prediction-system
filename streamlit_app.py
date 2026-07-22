@@ -79,14 +79,14 @@ def load_all():
     if eval_path.exists():
         result['eval_df'] = pd.read_csv(eval_path)
 
-    # Load final Voting model (AUC 0.82) — from app_data/ (non-LFS for Streamlit Cloud)
+    # Load final Voting model (AUC 0.821) — from app_data/ (non-LFS for Streamlit Cloud)
     voting_path = BASE_DIR / 'app_data' / 'final_model.joblib'
     if not voting_path.exists():
         voting_path = MODEL_DIR / 'final_voting_model.pkl'  # fallback
     if voting_path.exists():
         try:
             result['model'] = joblib.load(voting_path)
-            result['best_name'] = 'Voting Ensemble (LR+RF+XGB+ET, AUC 0.82)'
+            result['best_name'] = 'Voting Ensemble (LR+RF+XGB+ET, AUC 0.821)'
         except:
             pass
 
