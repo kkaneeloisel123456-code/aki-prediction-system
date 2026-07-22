@@ -325,7 +325,7 @@ def page_home(assets):
         st.markdown("""
         ### 研究概述
         - **临床问题**: 心脏手术后 AKI 发生率约30%，显著增加死亡率和医疗费用
-        - **数据来源**: 420 例心脏手术患者，94特征经特征工程处理
+        - **数据来源**: 420 例心脏手术患者，86候选特征经RF特征筛选
         - **技术方案**: 5 种 ML 模型 + Voting/Stacking 集成 + 50次重复分层CV
         - **模型定位**: 入ICU即刻风险筛查工具，Recall 优先于 Precision
         - **可靠性**: 经数据泄漏审查→特征筛选→正则化→50次CV→Bootstrap，泛化稳定
@@ -337,9 +337,9 @@ def page_home(assets):
         1. 初始模型 AUC > 0.99（含数据泄漏）
         2. 发现并排除术后特征泄漏
         3. 排除KDIGO标准+结局变量等泄漏特征
-        4. 94特征经LASSO+RF重要性筛选
+        4. 86候选特征经RF重要性筛选
         5. 5折分层CV + Bootstrap验证
-        6. Voting + Stacking集成 (LR+RF+XGB+LGB+CatBoost)
+        6. Voting + Stacking集成 (LR+RF+XGB+ET)
 
         *一个可信的 0.82，胜过一百个泄漏的 0.99*
         """)
@@ -850,7 +850,7 @@ def page_prediction(assets):
                 # Build reference input from form values
                 form_refs = {
                     'Scr': scr, 'eGFR': egfr, 'APACHE': apache,
-                    '年龄': age, '手术时间': surgery_time,
+                    '手术时间': surgery_time,
                     'WBC': wbc, 'PLT': plt, 'SBP': pre_sbp, 'UA': ua,
                     'NEUT': neut, 'MONO': mono, 'BNP': bnp,
                     'PLR': plr, 'B2MG': b2mg, 'RBP': rbp,

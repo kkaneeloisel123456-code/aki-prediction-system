@@ -1,4 +1,11 @@
 """
+⚠️ DEPRECATED — 此脚本基于旧版数据（AKI=156, 非AKI=264）和旧版方法（LASSO, 8模型）。
+    请勿用于最终提交。当前项目以 run_clean.py 为权威来源：
+    — AKI=125/420, 非AKI=295
+    — 特征筛选: RF重要性 Top35
+    — 模型: LR + RF + XGBoost + ExtraTrees + Voting Ensemble (AUC 0.821±0.043)
+    — 生成PDF报告请使用 scripts/gen_final_report_pdf.py
+
 Generate a Word document for the AKI test report.
 """
 import sys, os

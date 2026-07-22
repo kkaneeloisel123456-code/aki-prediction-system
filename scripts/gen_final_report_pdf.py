@@ -137,7 +137,7 @@ def generate():
     pdf.sub_title('1.2 核心模块拆解')
     modules = [
         ('数据加载与清洗', 'src/data/cleaning.py', '420例原始数据 → 异常值处理 → 缺失值填补 → 数据泄漏审查'),
-        ('特征工程', 'run_clean.py (模块3)', '84候选特征 → RF特征重要性排序 → Top35关键特征'),
+        ('特征工程', 'run_clean.py (模块3)', '86候选特征 → RF特征重要性排序 → Top35关键特征'),
         ('模型训练与CV', 'run_clean.py (模块4)', '4模型 + Voting集成 → 50次重复分层5折CV → AUC评估'),
         ('可解释性分析', 'src/visualization/shap_viz.py', 'SHAP全局+局部解释 → 反事实What-If分析'),
         ('数据治理可视化', 'src/visualization/data_governance.py', '7阶段治理流程 → 特征筛选漏斗 → 质量仪表盘'),
@@ -292,7 +292,7 @@ def generate():
         'Voting Ensemble以AUC 0.821±0.043的表现优于所有单一模型，在四种基模型中，'
         'XGBoost（0.819）和随机森林（0.815）是集成的主要贡献者。Bootstrap 95%CI为'
         '[0.779, 0.865]，Brier Score 0.152表明预测概率校准良好。\n\n'
-        'SHAP分析揭示术前肾功能（eGFR/Scr）、年龄、APACHE II评分和术中尿量为前四位'
+        'SHAP分析揭示术前肾功能（eGFR/Scr）、年龄、CPB时间和术中尿量为前四位'
         '预测因子，与临床共识一致，增强了模型的可信度。'
     )
 

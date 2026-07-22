@@ -297,12 +297,14 @@ def page_home(assets):
 
     col1,col2,col3,col4,col5 = st.columns(5)
     with col1: st.metric("📊 样本量", "420", "真实临床数据")
-    with col2: st.metric("🧬 特征数", "94", "处理后")
+    with col2: st.metric("🧬 特征数", "35", "RF Top35")
     with col3: st.metric("🤖 模型数", "4+Voting", "集成系统")
 
     best_auc = "N/A"
     if assets['eval_df'] is not None:
-        best_auc = f"{assets['eval_df'].iloc[0]['AUC']:.4f}"
+        eval_df = assets['eval_df']
+        auc_col = '50次CV AUC均值' if '50次CV AUC均值' in eval_df.columns else 'AUC'
+        best_auc = f"{eval_df.iloc[0][auc_col]:.4f}"
     with col4: st.metric("🎯 最佳AUC", best_auc, assets.get('best_name',''))
 
     # Show data quality validation status
