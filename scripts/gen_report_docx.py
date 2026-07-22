@@ -121,12 +121,12 @@ doc.add_page_break()
 add_heading_styled(doc, '一、程序整体概述以及核心模块拆解', level=1)
 
 add_heading_styled(doc, '1.1 项目概述', level=2)
-add_para(doc, '本项目构建了一套完整的急性肾损伤（AKI）智能预测辅助决策系统，用于心脏手术后AKI风险的早期预警。以420例体外循环心脏手术患者的临床数据为基础，通过8种机器学习模型（XGBoost、LightGBM、Random Forest、CatBoost、GBDT、SVM、Logistic回归、KNN）的系统比较与五折交叉验证，选取最优模型（XGBoost，AUC=0.821），结合SHAP可解释性框架，最终部署为Streamlit Web应用，辅助临床医生进行多时间点的AKI风险评估。')
+add_para(doc, '本项目构建了一套完整的急性肾损伤（AKI）智能预测辅助决策系统，用于心脏手术后AKI风险的早期预警。以420例体外循环心脏手术患者的临床数据为基础，通过4种机器学习模型及Voting集成（Logistic回归、RandomForest、XGBoost、ExtraTrees及Voting Ensemble）的系统比较与五折交叉验证，选取最优模型（XGBoost，AUC=0.821），结合SHAP可解释性框架，最终部署为Streamlit Web应用，辅助临床医生进行多时间点的AKI风险评估。')
 
 add_heading_styled(doc, '1.2 核心架构', level=2)
 add_para(doc, '系统分为六大层：')
 add_para(doc, '• 数据层（data/）：原始EHR数据 → MICE插补 → IQR异常值处理 → LASSO筛选 → 训练/测试划分')
-add_para(doc, '• 模型层（src/models/）：8种ML模型训练 + RandomizedSearchCV调优 + SMOTE')
+add_para(doc, '• 模型层（src/models/）：4种ML模型及Voting训练 + RandomizedSearchCV调优 + SMOTE')
 add_para(doc, '• 集成层（ensemble.py）：Voting（Soft/Hard）、Stacking、加权概率融合')
 add_para(doc, '• 可解释性层（SHAP）：全局特征重要性、局部Force Plot、特征依赖图')
 add_para(doc, '• 可视化评估层（visualization/）：ROC/PR曲线、混淆矩阵、校准曲线、DCA决策曲线')
@@ -173,7 +173,7 @@ add_styled_table(doc,
     ['项目', '内容'],
     [
         ['数据来源', '广西某三级甲等医院心脏外科EHR系统（2019-2023）'],
-        ['样本量', '420例，AKI发生率37.1%（156/420）'],
+        ['样本量', '420例，AKI发生率29.8%（125/420）'],
         ['初始维度', '97个临床特征 → 最终35个特征（LASSO筛选）'],
         ['结局标准', 'KDIGO标准，术后7天内发生AKI'],
     ])
@@ -213,7 +213,7 @@ add_heading_styled(doc, '3.1 模型选择', level=2)
 add_para(doc, '覆盖三大类别：线性模型（Logistic回归）+ 集成学习（XGBoost/LightGBM/CatBoost/RF/GBDT）+ 其他（SVM/KNN），XGBoost为核心模型（AUC=0.821最优）。')
 
 add_heading_styled(doc, '3.2 类别不平衡处理（SMOTE）', level=2)
-add_para(doc, 'AKI发生率37.1%，采用SMOTE在训练集内合成少数类样本，仅在交叉验证每折训练集内使用。SMOTE后AUC（0.865）与原始（0.821）基本一致。')
+add_para(doc, 'AKI发生率29.8%，采用SMOTE在训练集内合成少数类样本，仅在交叉验证每折训练集内使用。SMOTE后AUC（0.865）与原始（0.821）基本一致。')
 
 add_heading_styled(doc, '3.3 超参数调优', level=2)
 add_para(doc, 'RandomizedSearchCV（100次）+ Stratified 5-Fold CV + AUC评分，种子42确保可重复。XGBoost最优参数：n_estimators=300, max_depth=5, lr=0.05, subsample=0.8, colsample_bytree=0.8。')
@@ -268,7 +268,7 @@ add_heading_styled(doc, '5.1 八种模型性能对比', level=2)
 add_styled_table(doc,
     ['模型', 'AUC(95%CI)', '准确率', '灵敏度', '特异度', 'F1'],
     [
-        ['XGBoost', '0.821(0.831-0.913)', '0.814', '0.795', '0.827', '0.774'],
+        ['XGBoost', '0.821(0.779-0.865)', '0.814', '0.795', '0.827', '0.774'],
         ['LightGBM', '0.861(0.818-0.904)', '0.806', '0.782', '0.821', '0.763'],
         ['CatBoost', '0.858(0.812-0.904)', '0.802', '0.775', '0.819', '0.758'],
         ['Random Forest', '0.853(0.807-0.899)', '0.798', '0.768', '0.816', '0.753'],
