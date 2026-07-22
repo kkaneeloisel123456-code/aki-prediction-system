@@ -51,7 +51,7 @@ st.markdown("""
 with st.sidebar:
     st.markdown("## 🏥 AKI 预测系统")
     st.markdown("---")
-    page = st.radio("导航", ["🏠 首页", "📊 模型性能", "🔮 风险预测", "📋 报告", "🔍 数据治理"],
+    page = st.radio("导航", ["🏠 首页", "📊 模型性能", "🔮 风险预测", "🏥 医生工作台", "📊 管理仪表盘", "📋 报告", "🔍 数据治理"],
                      label_visibility="collapsed")
     st.markdown("---")
     st.markdown("### ⚙️ 设置")
@@ -1015,6 +1015,131 @@ def page_data_governance(assets):
 
 
 # ============================================
+# PAGE 6: Doctor Workstation (Phase 3)
+# ============================================
+def page_doctor_workstation(assets):
+    st.markdown("## 🏥 医生工作台")
+    st.info("📋 患者列表 + 批量风险评估")
+
+    if assets['model'] is None:
+        st.warning("⚠️ 模型未加载。")
+        return
+
+    tab1, tab2 = st.tabs(["📋 患者列表", "🔢 批量评估"])
+
+    with tab1:
+        np.random.seed(42)
+        demo = []
+        for i in range(20):
+            age = np.random.randint(25, 85)
+            scr = np.random.uniform(50, 180)
+            egfr_val = max(15, 120 - age * 0.8 + np.random.normal(0, 10))
+            apache = np.random.randint(5, 35)
+            demo.append({'ID': f'P{1001+i:04d}', '年龄': age, '术前Scr': round(scr,1),
+                         '术前eGFR': round(egfr_val,1), 'APACHE II': apache})
+
+        model = assets['model']; scaler = assets['scaler']; flist = assets['features']
+        if flist:
+            for p in demo:
+                try:
+                    vec = np.zeros(len(flist))
+                    for j, f in enumerate(flist):
+                        if 'Scr' in f: vec[j] = p['术前Scr']
+                        elif 'eGFR' in f: vec[j] = p['术前eGFR']
+                        elif 'APACHE' in f: vec[j] = p['APACHE II']
+                        elif '年龄' in f: vec[j] = p['年龄']
+                    X_in = vec.reshape(1,-1)
+                    if scaler:
+                        try: X_in = scaler.transform(X_in)
+                        except: pass
+                    prob = model.predict_proba(X_in)[0,1] if hasattr(model,'predict_proba') else float(model.predict(X_in)[0])
+                    p['风险'] = f'{prob:.1%}'
+                    p['等级'] = '高' if prob>0.7 else ('中' if prob>0.3 else '低')
+                except:
+                    p['风险'] = 'N/A'; p['等级'] = '-'
+
+        df = pd.DataFrame(demo)
+        st.dataframe(df, width='stretch', hide_index=True)
+        hi = sum(1 for p in demo if p.get('等级')=='高')
+        md = sum(1 for p in demo if p.get('等级')=='中')
+        lo = sum(1 for p in demo if p.get('等级')=='低')
+        c1,c2,c3 = st.columns(3)
+        with c1: st.metric("🔴 高风险", f"{hi}人")
+        with c2: st.metric("🟡 中风险", f"{md}人")
+        with c3: st.metric("🟢 低风险", f"{lo}人")
+
+    with tab2:
+        st.markdown("### 🔢 批量评估")
+        uploaded = st.file_uploader("上传CSV", type=['csv'])
+        if uploaded:
+            batch = pd.read_csv(uploaded)
+            st.success(f"已加载 {len(batch)} 条")
+            if st.button("🚀 开始批量预测"):
+                with st.spinner("预测中..."):
+                    res = []
+                    for _, row in batch.iterrows():
+                        try:
+                            vec = np.zeros(len(flist))
+                            for j, f in enumerate(flist):
+                                if f in batch.columns: vec[j] = float(row[f])
+                            X_in = vec.reshape(1,-1)
+                            if scaler:
+                                try: X_in = scaler.transform(X_in)
+                                except: pass
+                            prob = model.predict_proba(X_in)[0,1] if hasattr(model,'predict_proba') else float(model.predict(X_in)[0])
+                            res.append({'probability': prob, 'risk': 'High' if prob>0.7 else ('Medium' if prob>0.3 else 'Low')})
+                        except: res.append({'probability': None, 'risk': 'Error'})
+                    st.dataframe(pd.DataFrame(res), width='stretch')
+                    st.download_button("📥 下载结果", pd.DataFrame(res).to_csv(index=False).encode('utf-8'), "results.csv", "text/csv")
+
+
+# ============================================
+# PAGE 7: Management Dashboard (Phase 3)
+# ============================================
+def page_dashboard(assets):
+    st.markdown("## 📊 管理仪表盘")
+    st.info("📈 AKI趋势 + 科室分布 + 高危监控")
+
+    tab1, tab2 = st.tabs(["📈 趋势", "🏥 分布"])
+
+    with tab1:
+        c1,c2,c3,c4 = st.columns(4)
+        with c1: st.metric("📊 总病例", "420")
+        with c2: st.metric("🏥 AKI率", "29.8%")
+        with c3: st.metric("🤖 AUC", "0.821")
+        with c4: st.metric("✅ 状态", "Active")
+
+        # Simple trend using st.bar_chart
+        trend = pd.DataFrame({
+            'month': ['Sep','Oct','Nov','Dec','Jan','Feb','Mar','Apr','May','Jun'],
+            'AKI Incidence': [32.5,31.2,33.8,30.1,29.5,28.7,27.3,28.1,26.8,25.9],
+        })
+        trend_melted = trend.set_index('month')
+        st.line_chart(trend_melted)
+        st.caption("💡 AKI发生率呈逐步下降趋势（演示数据）")
+
+    with tab2:
+        col1,col2 = st.columns(2)
+        with col1:
+            dept = pd.DataFrame({
+                '科室': ['心血管外科','大血管外科','结构性心脏病','胸外科','其他'],
+                '病例数': [180,95,72,45,28],
+            }).set_index('科室')
+            st.bar_chart(dept)
+            st.caption("病例分布")
+        with col2:
+            rf = pd.DataFrame({
+                '危险因素': ['eGFR<60','APACHE>20','Scr>100','年龄>65','糖尿病','高血压','手术>6h','CRP升高'],
+                '患病率%': [38.5,42.1,35.2,44.8,22.6,58.3,28.7,31.5],
+            }).set_index('危险因素')
+            st.bar_chart(rf)
+            st.caption("危险因素患病率")
+
+    st.markdown("---")
+    st.warning("**高危预警**: eGFR<60 + APACHE>20患者建议启动KDIGO Bundle + ICU监护")
+
+
+# ============================================
 # Router
 # ============================================
 assets = load_all()
@@ -1022,6 +1147,8 @@ pages = {
     "🏠 首页": page_home,
     "📊 模型性能": page_performance,
     "🔮 风险预测": page_prediction,
+    "🏥 医生工作台": page_doctor_workstation,
+    "📊 管理仪表盘": page_dashboard,
     "📋 报告": page_report,
     "🔍 数据治理": page_data_governance,
 }
