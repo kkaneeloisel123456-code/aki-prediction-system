@@ -12,7 +12,8 @@ import joblib
 import warnings
 warnings.filterwarnings('ignore')
 
-import sys
+import sys, os
+from pathlib import Path
 sys.path.append('..')
 from src.utils.helpers import logger, MODELS_DIR, save_figure
 import matplotlib.pyplot as plt
@@ -506,14 +507,17 @@ def _bootstrap_auc_ci(model, X, y, n_bootstrap=500, random_state=42):
 
 
 def _bootstrap_auc_ci_weighted(model_probs, X, y, weights, n_bootstrap=500, random_state=42):
-    """Bootstrap AUC CI for weighted average ensemble."""
+    """Bootstrap AUC CI for weighted average ensemble.
+    Bootstraps from the test set probabilities."""
     rng = np.random.RandomState(random_state)
     aucs = []
-    n = len(y)
+    # Use test set size (model_probs values)
+    test_size = len(list(model_probs.values())[0])
+    # Use corresponding y values (last test_size elements)
+    y_test = y[-test_size:] if len(y) > test_size else y[:test_size]
     for _ in range(n_bootstrap):
-        idx = rng.randint(0, n, n)
-        y_boot = y[idx]
-        # For weighted avg, just resample the precomputed probs
+        idx = rng.randint(0, test_size, test_size)
+        y_boot = y_test[idx]
         probs_boot = {k: v[idx] for k, v in model_probs.items()}
         avg = weighted_model_averaging(probs_boot, weights)
         aucs.append(roc_auc_score(y_boot, avg))
@@ -587,8 +591,12 @@ def plot_ensemble_comparison_v2(evaluation, output_dir=None):
     plt.tight_layout()
 
     if output_dir:
-        save_path = Path(output_dir) / 'figures' / 'ensemble_comparison.png' if not str(output_dir).endswith('.png') else output_dir
-        os.makedirs(os.path.dirname(str(save_path)), exist_ok=True)
+        if str(output_dir).endswith('.png'):
+            save_path = Path(output_dir)
+        else:
+            save_dir = Path(output_dir) / 'figures'
+            save_dir.mkdir(parents=True, exist_ok=True)
+            save_path = save_dir / 'ensemble_comparison.png'
         fig.savefig(str(save_path), dpi=150, bbox_inches='tight', facecolor='white')
         print(f"  Ensemble comparison saved: {save_path}")
         plt.close(fig)

@@ -26,6 +26,8 @@ FIG_DIR = OUTPUT_DIR / 'figures'
 TAB_DIR = OUTPUT_DIR / 'tables'
 PHASE1_FIG_DIR = OUTPUT_DIR / 'phase1' / 'figures'
 PHASE1_TAB_DIR = OUTPUT_DIR / 'phase1' / 'tables'
+PHASE2_FIG_DIR = OUTPUT_DIR / 'phase2' / 'figures'
+PHASE2_TAB_DIR = OUTPUT_DIR / 'phase2' / 'tables'
 
 # ============================================
 # CSS
@@ -378,7 +380,7 @@ def page_performance(assets):
         st.warning("⚠️ 未找到模型评估结果。请先运行 run_models.py 训练模型。")
         return
 
-    tab1,tab2,tab3,tab4,tab5 = st.tabs(["📊 性能对比", "📈 ROC/PR曲线", "🎯 校准与DCA", "📉 CV可信度", "🔬 消融实验"])
+    tab1,tab2,tab3,tab4,tab5,tab6 = st.tabs(["📊 性能对比", "📈 ROC/PR曲线", "🎯 校准与DCA", "📉 CV可信度", "🔬 消融实验", "🤝 集成对比"])
 
     with tab1:
         st.markdown("### 模型性能总览（50次重复CV）")
@@ -501,6 +503,45 @@ def page_performance(assets):
             st.dataframe(abl_df, width='stretch', hide_index=True)
             # Highlight key insight
             st.success("💡 **消融实验核心发现**: 移除特定特征组后AUC下降越大，说明该组特征贡献越高。可用于答辩中解释特征工程的价值。")
+
+    with tab6:
+        st.markdown("### 🤝 集成方法对比 (Phase 2)")
+        st.caption("Voting vs Stacking vs Weighted Average — 三种集成策略完整对比")
+
+        # Ensemble comparison chart
+        ens_path = PHASE2_FIG_DIR / 'ensemble_comparison.png'
+        if not ens_path.exists():
+            ens_path = FIG_DIR / 'ensemble_comparison.png'
+        if ens_path.exists():
+            st.image(str(ens_path), width='stretch')
+        else:
+            st.info("📌 集成对比图未生成。请运行 Phase 2 Ensemble Pipeline。")
+
+        # Ensemble summary
+        st.markdown("---")
+        st.markdown("### 💡 集成方法说明")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown("""
+            **Voting (投票法)**
+            - 多个模型"投票"决定最终预测
+            - Soft Voting: 概率平均
+            - 简单稳定，不易过拟合
+            """)
+        with c2:
+            st.markdown("""
+            **Stacking (堆叠法)**
+            - 元学习器学习如何组合基模型
+            - 自动发现最优组合权重
+            - 通常比Voting更强
+            """)
+        with c3:
+            st.markdown("""
+            **Weighted Avg (加权平均)**
+            - 手动/自动分配模型权重
+            - 灵活可调，可解释性强
+            - 网格搜索最优权重
+            """)
 
 
 # ============================================
@@ -640,9 +681,14 @@ def page_prediction(assets):
         with c2:
             st.metric("预测概率", f"{prob:.1%}")
         with c3:
-            # KDIGO stage estimate
-            kdigo_stage = "Stage 0" if prob < 0.3 else ("Stage 1" if prob < 0.5 else ("Stage 2" if prob < 0.7 else "Stage 3"))
-            st.metric("预估KDIGO", kdigo_stage)
+            # KDIGO stage estimate (Phase 2: using map_kdigo_stage)
+            try:
+                from src.models.calibration import map_kdigo_stage
+                kdigo = map_kdigo_stage(prob)
+                st.metric("预估KDIGO", kdigo['label'])
+            except:
+                kdigo_stage = "Stage 0" if prob < 0.3 else ("Stage 1" if prob < 0.5 else ("Stage 2" if prob < 0.7 else "Stage 3"))
+                st.metric("预估KDIGO", kdigo_stage)
 
         st.markdown("---")
         c1,c2 = st.columns([1,1])
@@ -927,7 +973,7 @@ def page_prediction(assets):
         else:
             st.info("📌 反事实分析需要模型和SHAP值支持。请先运行预测获取SHAP解释。")
 
-        # PDF Export
+        # PDF Export (Phase 2: enhanced with gauge chart + counterfactual)
         st.markdown("---")
         c1,c2,c3 = st.columns([1,1,1])
         with c2:
@@ -938,7 +984,40 @@ def page_prediction(assets):
                 'preop_eGFR': str(egfr), 'preop_Scr': str(scr),
                 'preop_Alb': str(alb), 'preop_Hb': str(hb),
             }
-            pdf_bytes = generate_pdf_report(patient_info, result)
+            # Phase 2: Generate risk report for enhanced PDF
+            try:
+                from src.models.calibration import generate_risk_report as gen_report
+                risk_report_data = gen_report(
+                    prob, shap_values=result.get('shap_values'),
+                    feature_names=assets['features'],
+                )
+                # Build counterfactual summary for PDF
+                cf_for_pdf = None
+                if result.get('shap_values') is not None and assets['features']:
+                    cf_for_pdf = {
+                        'feature': cf_selected if 'cf_selected' in dir() else 'N/A',
+                        'current_risk': prob,
+                        'target_risk': cf_best_prob if 'cf_best_prob' in dir() else prob,
+                        'risk_change': cf_delta if 'cf_delta' in dir() else 0,
+                    }
+            except:
+                risk_report_data = None
+                cf_for_pdf = None
+
+            # Use enhanced Phase 2 PDF generator if available
+            try:
+                from web.components.report import generate_pdf_report as gen_pdf_v2
+                pdf_bytes = gen_pdf_v2(
+                    patient_info,
+                    {'probability': prob, 'risk_level': risk_level},
+                    [],  # risk_factors handled internally
+                    {},  # recommendations handled internally
+                    counterfactual=cf_for_pdf,
+                    risk_report=risk_report_data,
+                )
+            except:
+                pdf_bytes = generate_pdf_report(patient_info, result)
+
             if pdf_bytes:
                 st.download_button(
                     "📥 下载 PDF 报告", data=pdf_bytes,
