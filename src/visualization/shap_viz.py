@@ -382,5 +382,260 @@ def run_full_shap_analysis(model, X, y=None, model_type='tree',
     }
 
 
+# ============================================
+# Counterfactual Explanation (反事实解释)
+# ============================================
+def generate_counterfactual(
+    model, X, shap_values, feature_names,
+    patient_idx=0, feature_to_vary=None,
+    vary_range=None, n_steps=20,
+):
+    """
+    Generate counterfactual predictions: "What if feature X changes?"
+
+    Computes how the predicted risk changes when a single feature is
+    varied across a range of values, holding all other features constant.
+
+    Args:
+        model: Trained model with predict_proba
+        X: Feature DataFrame
+        shap_values: SHAP values array
+        feature_names: List of feature names
+        patient_idx: Index of patient to explain
+        feature_to_vary: Feature name to manipulate
+        vary_range: (min, max) range to sweep. If None, uses ±50% of current value.
+        n_steps: Number of steps in the sweep
+
+    Returns:
+        dict with: feature_name, original_value, original_prob,
+                   vary_values, counterfactual_probs, risk_changes
+    """
+    import numpy as np
+
+    if not isinstance(X, pd.DataFrame):
+        X = pd.DataFrame(X, columns=feature_names)
+
+    if feature_to_vary is None:
+        # Auto-select the feature with highest SHAP impact for this patient
+        if isinstance(shap_values, list):
+            sv = shap_values[1] if len(shap_values) > 1 else shap_values[0]
+        else:
+            sv = shap_values
+        top_idx = np.argmax(np.abs(sv[patient_idx]))
+        feature_to_vary = feature_names[top_idx]
+
+    # Get original prediction
+    X_patient = X.iloc[[patient_idx]].copy()
+    original_prob = model.predict_proba(X_patient)[:, 1][0]
+    original_value = X_patient[feature_to_vary].values[0]
+
+    # Determine range
+    if vary_range is None:
+        current = float(original_value)
+        if current == 0:
+            vary_range = (0, 1)
+        else:
+            vary_range = (current * 0.5, current * 1.5)
+
+    vary_values = np.linspace(vary_range[0], vary_range[1], n_steps)
+
+    counterfactual_probs = []
+    for val in vary_values:
+        X_modified = X_patient.copy()
+        X_modified[feature_to_vary] = val
+        prob = model.predict_proba(X_modified)[:, 1][0]
+        counterfactual_probs.append(prob)
+
+    counterfactual_probs = np.array(counterfactual_probs)
+    risk_changes = counterfactual_probs - original_prob
+
+    logger.info(f"Counterfactual for '{feature_to_vary}': "
+                f"original={original_value:.2f}, prob={original_prob:.3f}, "
+                f"range=[{vary_range[0]:.2f}, {vary_range[1]:.2f}]")
+
+    return {
+        'feature_name': feature_to_vary,
+        'original_value': original_value,
+        'original_prob': original_prob,
+        'vary_values': vary_values,
+        'counterfactual_probs': counterfactual_probs,
+        'risk_changes': risk_changes,
+    }
+
+
+def plot_counterfactual_curve(
+    counterfactual_result,
+    save_name='counterfactual_curve.png',
+    figsize=(8, 5),
+):
+    """
+    Plot counterfactual risk curve.
+
+    Shows how predicted AKI risk changes as a single feature varies,
+    with risk zones highlighted.
+
+    Args:
+        counterfactual_result: Dict from generate_counterfactual()
+        save_name: Output filename
+        figsize: Figure size
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    feature = counterfactual_result['feature_name']
+    vary_vals = counterfactual_result['vary_values']
+    probs = counterfactual_result['counterfactual_probs']
+    orig_val = counterfactual_result['original_value']
+    orig_prob = counterfactual_result['original_prob']
+
+    # Risk zone backgrounds
+    ax.axhspan(0, 0.3, alpha=0.08, color='#27ae60', label='低风险 (<30%)')
+    ax.axhspan(0.3, 0.7, alpha=0.08, color='#f39c12', label='中风险 (30-70%)')
+    ax.axhspan(0.7, 1.0, alpha=0.08, color='#e74c3c', label='高风险 (>70%)')
+
+    # Main curve
+    ax.plot(vary_vals, probs, '-', color='#2a78d6', linewidth=2.5, label='预测风险')
+    ax.fill_between(vary_vals, probs, alpha=0.1, color='#2a78d6')
+
+    # Current value marker
+    ax.plot(orig_val, orig_prob, 'o', color='#e34948', markersize=12,
+            markeredgecolor='white', markeredgewidth=2, zorder=5)
+    ax.annotate(
+        f'当前值: {orig_val:.2f}\n风险: {orig_prob:.1%}',
+        xy=(orig_val, orig_prob),
+        xytext=(orig_val + (vary_vals[-1] - vary_vals[0]) * 0.15, orig_prob + 0.08),
+        fontsize=9, ha='center',
+        bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='#e34948', alpha=0.9),
+        arrowprops=dict(arrowstyle='->', color='#e34948', lw=1.5),
+    )
+
+    ax.set_xlabel(f'{feature} 值', fontsize=12)
+    ax.set_ylabel('预测AKI风险概率', fontsize=12)
+    ax.set_title(f'反事实解释 | Counterfactual Analysis\n'
+                 f'"{feature}" 变化对AKI风险的影响',
+                 fontsize=14, fontweight='bold')
+    ax.set_ylim(0, 1)
+    ax.legend(loc='upper left', fontsize=8, framealpha=0.8)
+    ax.grid(True, alpha=0.3)
+
+    # Annotation
+    # Find where risk crosses thresholds
+    cross_low = None
+    cross_high = None
+    for i in range(1, len(vary_vals)):
+        if probs[i-1] < 0.3 and probs[i] >= 0.3:
+            cross_low = vary_vals[i]
+        if probs[i-1] < 0.7 and probs[i] >= 0.7:
+            cross_high = vary_vals[i]
+
+    annotations = []
+    if cross_low is not None:
+        annotations.append(f'中风险阈值 ≈ {cross_low:.1f}')
+    if cross_high is not None:
+        annotations.append(f'高风险阈值 ≈ {cross_high:.1f}')
+
+    if annotations:
+        ax.text(0.98, 0.02, '\n'.join(annotations),
+                transform=ax.transAxes, ha='right', va='bottom',
+                fontsize=8, color='#52514e',
+                bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8))
+
+    plt.tight_layout()
+    save_figure(fig, save_name)
+    logger.info(f"Counterfactual curve saved: {save_name}")
+
+    return fig, ax
+
+
+def compute_counterfactual_report(
+    model, X, shap_values, feature_names,
+    patient_idx=0, top_n=5,
+):
+    """
+    Generate a counterfactual report for top N features.
+
+    For each top SHAP feature, computes:
+    - What if the value was normal/better?
+    - How much would risk decrease?
+
+    Returns:
+        List of dicts with counterfactual analysis per feature
+    """
+    import numpy as np
+
+    if not isinstance(X, pd.DataFrame):
+        X = pd.DataFrame(X, columns=feature_names)
+
+    if isinstance(shap_values, list):
+        sv = shap_values[1] if len(shap_values) > 1 else shap_values[0]
+    else:
+        sv = shap_values
+
+    # Get top features by SHAP impact for this patient
+    patient_shap = sv[patient_idx]
+    top_indices = np.argsort(np.abs(patient_shap))[::-1][:top_n]
+
+    report = []
+    for idx in top_indices:
+        feature = feature_names[idx]
+        current_val = X.iloc[patient_idx, idx]
+        shap_impact = patient_shap[idx]
+
+        # Define "improved" direction
+        if shap_impact > 0:
+            # Positive SHAP = pushes risk UP, so "improved" = lower value
+            improved_val = current_val * 0.7 if current_val > 0 else current_val * 0.5
+            direction = '降低'
+            direction_en = 'decrease'
+        else:
+            # Negative SHAP = pushes risk DOWN, so "improved" = higher value
+            improved_val = current_val * 1.3 if current_val > 0 else current_val * 1.5
+            direction = '升高'
+            direction_en = 'increase'
+
+        # Compute counterfactual
+        X_mod = X.iloc[[patient_idx]].copy()
+        X_mod[feature] = improved_val
+        new_prob = model.predict_proba(X_mod)[:, 1][0]
+        orig_prob = model.predict_proba(X.iloc[[patient_idx]])[:, 1][0]
+        risk_change = new_prob - orig_prob
+
+        report.append({
+            'feature': feature,
+            'current_value': float(current_val),
+            'shap_impact': float(shap_impact),
+            'suggested_direction': direction,
+            'counterfactual_value': float(improved_val),
+            'original_risk': round(orig_prob, 4),
+            'counterfactual_risk': round(new_prob, 4),
+            'risk_change': round(risk_change, 4),
+            'risk_change_pct': round(abs(risk_change) * 100, 1),
+        })
+
+    return report
+
+
+def print_counterfactual_report(report):
+    """Print a human-readable counterfactual report."""
+    print("\n" + "=" * 70)
+    print("🔄 反事实解释报告 | Counterfactual Explanation Report")
+    print("=" * 70)
+    print("问题: \"如果关键特征发生变化，风险会怎么变？\"\n")
+
+    for i, item in enumerate(report, 1):
+        direction_symbol = '↓' if item['risk_change'] < 0 else '↑'
+        print(f"{i}. {item['feature']}")
+        print(f"   当前值: {item['current_value']:.2f}  →  "
+              f"如果{item['suggested_direction']}到 {item['counterfactual_value']:.2f}")
+        print(f"   预测风险: {item['original_risk']:.1%} → "
+              f"{item['counterfactual_risk']:.1%} "
+              f"({direction_symbol}{item['risk_change_pct']:.1f}%)")
+        print()
+
+    print("💡 临床意义: 反事实分析帮助医生理解哪些干预措施可能最有效降低AKI风险。")
+
+
 if __name__ == '__main__':
     print("SHAP visualization module loaded successfully.")

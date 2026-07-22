@@ -161,53 +161,146 @@ def compute_treat_all_net_benefit(y_true, thresholds):
 
 
 def plot_decision_curve(y_true, model_probs_dict, thresholds=None,
-                         save_name='decision_curve.png'):
+                         save_name='decision_curve.png',
+                         show_ci=True, n_bootstrap=200):
     """
-    Plot Decision Curve Analysis (DCA) for all models.
+    Plot Decision Curve Analysis (DCA) — Professional Medical Journal Style.
+
+    Key features:
+    - Professional color palette with clear model differentiation
+    - Chinese/English bilingual labels
+    - Clinical utility zone highlighted
+    - Bootstrap CI for the best model (optional)
+    - Net benefit summary at key thresholds
 
     Args:
         y_true: True labels
         model_probs_dict: {model_name: predicted_probabilities}
+        thresholds: Threshold array (default: 0.01-0.99)
+        show_ci: If True, add bootstrap CI for best model
+        n_bootstrap: Number of bootstrap resamples for CI
     """
     if thresholds is None:
         thresholds = np.linspace(0.01, 0.99, 99)
 
-    fig, ax = plt.subplots(figsize=(10, 7))
+    # Professional palette
+    _DCA_COLORS = [
+        '#2a78d6',  # blue
+        '#1baf7a',  # aqua
+        '#eda100',  # yellow
+        '#e34948',  # red
+        '#4a3aa7',  # violet
+        '#eb6834',  # orange
+        '#e87ba4',  # magenta
+    ]
 
-    # Colors
-    colors = plt.cm.tab10(np.linspace(0, 1, len(model_probs_dict) + 2))
+    fig, ax = plt.subplots(figsize=(11, 8))
+    fig.patch.set_facecolor('#fcfcfb')
+    ax.set_facecolor('#fcfcfb')
 
-    # Treat all
+    # Treat None (reference, always 0)
+    ax.plot(thresholds, np.zeros_like(thresholds), '-', color='#0b0b0b',
+            linewidth=2.5, label='Treat None (全不干预)', alpha=0.85)
+
+    # Treat All
     nb_treat_all = compute_treat_all_net_benefit(y_true, thresholds)
-    ax.plot(thresholds, nb_treat_all, '--', color='gray', linewidth=2,
-            label='Treat All', alpha=0.7)
-
-    # Treat none (always 0)
-    ax.plot(thresholds, np.zeros_like(thresholds), '-', color='black',
-            linewidth=2, label='Treat None', alpha=0.7)
+    ax.plot(thresholds, nb_treat_all, '--', color='#898781', linewidth=2,
+            label='Treat All (全干预)', alpha=0.75)
 
     # Each model
+    best_name = list(model_probs_dict.keys())[0] if model_probs_dict else None
     for i, (name, y_prob) in enumerate(model_probs_dict.items()):
-        thresholds_vals, net_benefits, _ = compute_net_benefit_curve(y_true, y_prob, thresholds)
-        ax.plot(thresholds_vals, net_benefits, '-', color=colors[i + 2],
-                linewidth=2, label=name)
+        color = _DCA_COLORS[i % len(_DCA_COLORS)]
+        _, net_benefits, _ = compute_net_benefit_curve(y_true, y_prob, thresholds)
+        ax.plot(thresholds, net_benefits, '-', color=color,
+                linewidth=2.5, label=name, alpha=0.92)
 
-    ax.set_xlabel('Threshold Probability', fontsize=12)
-    ax.set_ylabel('Net Benefit', fontsize=12)
-    ax.set_title('Decision Curve Analysis (DCA)', fontsize=14, fontweight='bold')
-    ax.legend(loc='best', fontsize=9)
+    # Bootstrap CI for best model
+    if show_ci and best_name and len(model_probs_dict) > 0:
+        best_prob = model_probs_dict[best_name]
+        n = len(y_true)
+        nb_bootstrap = np.zeros((n_bootstrap, len(thresholds)))
+        rng = np.random.RandomState(42)
+
+        for b in range(n_bootstrap):
+            idx = rng.choice(n, n, replace=True)
+            _, nb_vals, _ = compute_net_benefit_curve(
+                y_true[idx], best_prob[idx], thresholds)
+            nb_bootstrap[b] = nb_vals
+
+        nb_lower = np.percentile(nb_bootstrap, 2.5, axis=0)
+        nb_upper = np.percentile(nb_bootstrap, 97.5, axis=0)
+        _, nb_mean, _ = compute_net_benefit_curve(y_true, best_prob, thresholds)
+
+        ax.fill_between(thresholds, nb_lower, nb_upper,
+                        alpha=0.12, color=_DCA_COLORS[0],
+                        label=f'{best_name} 95% CI')
+
+    # === Clinical utility zone ===
+    # Shade region where model > treat-all (clinically useful)
+    if best_name and len(model_probs_dict) > 0:
+        best_prob = model_probs_dict[best_name]
+        _, nb_model, _ = compute_net_benefit_curve(y_true, best_prob, thresholds)
+        utility_mask = nb_model > nb_treat_all
+        if np.any(utility_mask):
+            util_start = thresholds[np.where(utility_mask)[0][0]]
+            util_end = thresholds[np.where(utility_mask)[0][-1]]
+            ax.axvspan(util_start, util_end, alpha=0.06, color='#1baf7a')
+            ax.annotate(
+                f'临床有用区域\nClinical Utility Zone\n({util_start:.2f} - {util_end:.2f})',
+                xy=((util_start + util_end) / 2, ax.get_ylim()[1] * 0.85),
+                fontsize=9, ha='center', color='#1baf7a',
+                bbox=dict(boxstyle='round,pad=0.4', facecolor='white',
+                          edgecolor='#1baf7a', alpha=0.85),
+            )
+
+    # === Axis labels ===
+    ax.set_xlabel('风险阈值概率 Threshold Probability\n(反映医生对AKI的担忧程度)',
+                  fontsize=12, color='#0b0b0b')
+    ax.set_ylabel('净获益 Net Benefit', fontsize=12, color='#0b0b0b')
+    ax.set_title('临床决策曲线分析 | Decision Curve Analysis (DCA)\n'
+                 f'数据量 N={len(y_true)}, AKI患病率 {np.mean(y_true):.1%}',
+                 fontsize=15, fontweight='bold', color='#0b0b0b')
+
+    # === Legend ===
+    ax.legend(loc='upper right', fontsize=9, framealpha=0.9,
+              edgecolor='#e1e0d9', ncol=1)
+
     ax.set_xlim(0, 0.5)  # Clinically relevant range
-    ax.grid(True, alpha=0.3)
+    ax.grid(True, alpha=0.25, color='#e1e0d9', linewidth=0.5)
 
-    # Add interpretation annotation
+    # Style cleanup
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color('#c3c2b7')
+    ax.spines['bottom'].set_color('#c3c2b7')
+    ax.tick_params(colors='#898781')
+
+    # === DCA Summary statistics ===
+    summary_text = "📊 DCA 摘要 | Summary:\n"
+    summary_text += f"━━━━━━━━━━━━━━━━━━\n"
+    for i, (name, y_prob) in enumerate(model_probs_dict.items()):
+        nb_at_20, _ = compute_net_benefit(y_true, y_prob, 0.2), None
+        nb_20_val = compute_net_benefit(y_true, y_prob, 0.2)
+        nb_all_20 = compute_treat_all_net_benefit(y_true, np.array([0.2]))[0]
+        summary_text += f"{name}: NB@20%={nb_20_val:.4f}\n"
+
+    ax.text(0.98, 0.98, summary_text, transform=ax.transAxes,
+            fontsize=8, ha='right', va='top', fontfamily='monospace',
+            bbox=dict(boxstyle='round,pad=0.4', facecolor='white',
+                      edgecolor='#e1e0d9', alpha=0.9))
+
+    # === Key insight annotation ===
     ax.annotate(
-        'Higher net benefit = better clinical utility\n'
-        'Model above "Treat All/None" = clinically useful',
-        xy=(0.02, 0.98), xycoords='axes fraction',
-        fontsize=8, ha='left', va='top',
-        bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8)
+        '💡 曲线在"全干预"线之上 = 模型具有临床净获益\n'
+        '📌 横轴反映临床决策的风险阈值偏好',
+        xy=(0.02, 0.04), xycoords='axes fraction',
+        fontsize=8, ha='left', va='bottom', color='#52514e',
+        bbox=dict(boxstyle='round,pad=0.3', facecolor='#fffde7',
+                  edgecolor='#eda100', alpha=0.85),
     )
 
+    fig.tight_layout()
     save_figure(fig, save_name)
     logger.info(f"DCA saved: {save_name}")
 

@@ -534,11 +534,16 @@ def page_prediction(assets):
                 return
 
             prob = result['probability']
-            risk_level, risk_class, risk_emoji = (
-                ("低风险","risk-low","🟢") if prob < risk_low else
-                ("中风险","risk-medium","🟡") if prob < risk_high else
-                ("高风险","risk-high","🔴")
+            # Star rating: 0-20%=1★, 20-40%=2★, 40-60%=3★, 60-80%=4★, 80-100%=5★
+            n_stars = min(5, max(1, int(prob * 5) + 1))
+            stars_filled = "★" * n_stars
+            stars_empty = "☆" * (5 - n_stars)
+            risk_level, risk_class, risk_color = (
+                ("低风险","risk-low","#27ae60") if prob < risk_low else
+                ("中风险","risk-medium","#f39c12") if prob < risk_high else
+                ("高风险","risk-high","#e74c3c")
             )
+            risk_emoji = {"低风险":"🟢","中风险":"🟡","高风险":"🔴"}[risk_level]
 
         # ---- Display Results ----
         st.markdown("---")
@@ -546,15 +551,30 @@ def page_prediction(assets):
 
         c1,c2,c3 = st.columns([1,2,1])
         with c2:
+            # Star rating display
             st.markdown(f"""
             <div class="{risk_class}">
+                <div style="font-size:2.8rem;letter-spacing:6px;margin-bottom:8px;
+                     text-shadow:0 2px 8px rgba(0,0,0,0.3);">
+                    {stars_filled}<span style="opacity:0.5;">{stars_empty}</span>
+                </div>
                 {risk_emoji} AKI风险等级: <strong>{risk_level}</strong><br>
                 <span style="font-size:2.5rem;">{prob:.1%}</span>
             </div>
             """, unsafe_allow_html=True)
 
+        # Risk gauge visual
         st.markdown("#### 风险概率")
         st.progress(float(prob))
+        c1,c2,c3 = st.columns(3)
+        with c1:
+            st.metric("风险等级", f"{risk_level} ({n_stars}/5★)")
+        with c2:
+            st.metric("预测概率", f"{prob:.1%}")
+        with c3:
+            # KDIGO stage estimate
+            kdigo_stage = "Stage 0" if prob < 0.3 else ("Stage 1" if prob < 0.5 else ("Stage 2" if prob < 0.7 else "Stage 3"))
+            st.metric("预估KDIGO", kdigo_stage)
 
         st.markdown("---")
         c1,c2 = st.columns([1,1])
