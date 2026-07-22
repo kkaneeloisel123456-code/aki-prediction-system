@@ -1,0 +1,6 @@
+﻿模型 Model,CV AUC (均值),CV AUC (标准差),Bootstrap AUC,95% CI 下限,95% CI 上限,Brier Score
+XGBoost,1.0,0.0,1.0,1.0,1.0,0.0
+CatBoost,1.0,0.0,1.0,1.0,1.0,0.0
+LightGBM,1.0,0.0,1.0,1.0,1.0,0.0
+LogisticRegression,0.9993,0.0014,1.0,1.0,1.0,0.008
+RandomForest,0.9992,0.0011,1.0,1.0,1.0,0.0368

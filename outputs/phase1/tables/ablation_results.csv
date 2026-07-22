@@ -1,0 +1,41 @@
+﻿模型 Model,特征组 Feature Group,特征数,AUC (5-fold CV),AUC Std,Δ vs Full Model
+LogisticRegression,其他,4,1.0,0.0,0.0007
+LogisticRegression,所有特征 (All Features),94,0.9993,0.0014,-0.0
+LogisticRegression,排除肾功能指标,94,0.9993,0.0014,-0.0
+LogisticRegression,术后指标,44,0.926,0.0196,-0.0733
+LogisticRegression,术中指标,5,0.6965,0.0943,-0.3028
+LogisticRegression,术前实验室指标,36,0.677,0.0519,-0.3223
+LogisticRegression,基础人口学变量,2,0.6547,0.0356,-0.3446
+LogisticRegression,合并症,3,0.6033,0.0592,-0.396
+RandomForest,其他,4,1.0,0.0,0.0008
+RandomForest,所有特征 (All Features),94,0.9992,0.0011,0.0
+RandomForest,排除肾功能指标,94,0.9992,0.0011,0.0
+RandomForest,术后指标,44,0.9492,0.0102,-0.05
+RandomForest,术前实验室指标,36,0.6782,0.0203,-0.321
+RandomForest,术中指标,5,0.6235,0.0615,-0.3757
+RandomForest,基础人口学变量,2,0.6167,0.0425,-0.3825
+RandomForest,合并症,3,0.6116,0.0496,-0.3876
+XGBoost,所有特征 (All Features),94,1.0,0.0,0.0
+XGBoost,排除肾功能指标,94,1.0,0.0,0.0
+XGBoost,其他,4,1.0,0.0,0.0
+XGBoost,术后指标,44,0.9425,0.0125,-0.0575
+XGBoost,术前实验室指标,36,0.674,0.0717,-0.326
+XGBoost,基础人口学变量,2,0.6289,0.0443,-0.3711
+XGBoost,合并症,3,0.6138,0.0516,-0.3862
+XGBoost,术中指标,5,0.6009,0.0684,-0.3991
+LightGBM,所有特征 (All Features),94,1.0,0.0,0.0
+LightGBM,排除肾功能指标,94,1.0,0.0,0.0
+LightGBM,其他,4,1.0,0.0,0.0
+LightGBM,术后指标,44,0.9531,0.0124,-0.0469
+LightGBM,术前实验室指标,36,0.6656,0.052,-0.3344
+LightGBM,合并症,3,0.6108,0.0604,-0.3892
+LightGBM,术中指标,5,0.5973,0.0756,-0.4027
+LightGBM,基础人口学变量,2,0.5927,0.0482,-0.4073
+CatBoost,所有特征 (All Features),94,1.0,0.0,0.0
+CatBoost,排除肾功能指标,94,1.0,0.0,0.0
+CatBoost,其他,4,1.0,0.0,0.0
+CatBoost,术后指标,44,0.95,0.0087,-0.05
+CatBoost,术前实验室指标,36,0.702,0.0469,-0.298
+CatBoost,基础人口学变量,2,0.6207,0.0414,-0.3793
+CatBoost,合并症,3,0.6138,0.0516,-0.3862
+CatBoost,术中指标,5,0.5765,0.0667,-0.4235

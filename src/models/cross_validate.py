@@ -402,9 +402,17 @@ def plot_cv_auc_distribution(
         ci_upper = np.percentile(auc_arr, 97.5)
         color = _PALETTE[list(models_dict.keys()).index(model_name) % len(_PALETTE)]
 
-        # Histogram
-        ax.hist(auc_arr, bins=35, alpha=0.7, color=color, edgecolor="white",
-                density=True, linewidth=0.3)
+        # Histogram - adaptive bins based on data range
+        auc_range = max(auc_arr) - min(auc_arr)
+        if auc_range < 1e-8:
+            # All AUC values are effectively identical - skip histogram, just show mean
+            ax.text(0.5, 0.5, f"AUC = {mean_auc:.4f}\n(All values identical)",
+                   ha="center", va="center", transform=ax.transAxes,
+                   fontsize=14, color=color, fontweight="bold")
+        else:
+            bins = min(30, max(10, int(n_bootstrap ** 0.4)))
+            ax.hist(auc_arr, bins=bins, alpha=0.7, color=color, edgecolor="white",
+                    density=True, linewidth=0.3)
 
         # Mean line
         ax.axvline(mean_auc, color="#e34948", lw=2, linestyle="-",

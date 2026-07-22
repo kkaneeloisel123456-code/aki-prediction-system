@@ -1,0 +1,31 @@
+﻿Model,Fold,AUC,Accuracy,Precision,Recall,F1,Brier
+LogisticRegression,Fold 1,1.0,0.9881,0.9615,1.0,0.9804,0.0086
+LogisticRegression,Fold 2,1.0,0.9881,0.9615,1.0,0.9804,0.0082
+LogisticRegression,Fold 3,0.9966,0.9881,0.9615,1.0,0.9804,0.0126
+LogisticRegression,Fold 4,1.0,0.9881,0.9615,1.0,0.9804,0.0063
+LogisticRegression,Fold 5,1.0,1.0,1.0,1.0,1.0,0.0043
+LogisticRegression,Mean ± Std,0.9993 ± 0.0014,,,,,
+RandomForest,Fold 1,1.0,1.0,1.0,1.0,1.0,0.0341
+RandomForest,Fold 2,1.0,1.0,1.0,1.0,1.0,0.0336
+RandomForest,Fold 3,0.9986,0.9762,1.0,0.92,0.9583,0.0404
+RandomForest,Fold 4,0.9973,0.9643,1.0,0.88,0.9362,0.0402
+RandomForest,Fold 5,1.0,1.0,1.0,1.0,1.0,0.0355
+RandomForest,Mean ± Std,0.9992 ± 0.0011,,,,,
+XGBoost,Fold 1,1.0,1.0,1.0,1.0,1.0,0.0
+XGBoost,Fold 2,1.0,1.0,1.0,1.0,1.0,0.0
+XGBoost,Fold 3,1.0,1.0,1.0,1.0,1.0,0.0
+XGBoost,Fold 4,1.0,1.0,1.0,1.0,1.0,0.0
+XGBoost,Fold 5,1.0,1.0,1.0,1.0,1.0,0.0
+XGBoost,Mean ± Std,1.0000 ± 0.0000,,,,,
+LightGBM,Fold 1,1.0,1.0,1.0,1.0,1.0,0.0
+LightGBM,Fold 2,1.0,1.0,1.0,1.0,1.0,0.0
+LightGBM,Fold 3,1.0,1.0,1.0,1.0,1.0,0.0
+LightGBM,Fold 4,1.0,1.0,1.0,1.0,1.0,0.0
+LightGBM,Fold 5,1.0,1.0,1.0,1.0,1.0,0.0
+LightGBM,Mean ± Std,1.0000 ± 0.0000,,,,,
+CatBoost,Fold 1,1.0,1.0,1.0,1.0,1.0,0.0
+CatBoost,Fold 2,1.0,1.0,1.0,1.0,1.0,0.0
+CatBoost,Fold 3,1.0,1.0,1.0,1.0,1.0,0.0
+CatBoost,Fold 4,1.0,1.0,1.0,1.0,1.0,0.0
+CatBoost,Fold 5,1.0,1.0,1.0,1.0,1.0,0.0
+CatBoost,Mean ± Std,1.0000 ± 0.0000,,,,,

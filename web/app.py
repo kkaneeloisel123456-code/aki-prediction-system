@@ -485,7 +485,9 @@ def page_performance(assets):
 
         st.markdown("---")
         st.markdown("### 🎲 Bootstrap AUC分布")
-        cv_auc_path = PHASE1_FIG_DIR / 'cv_auc_distribution.png'
+        cv_auc_path = PHASE1_FIG_DIR / 'bootstrap_auc_dist.png'
+        if not cv_auc_path.exists():
+            cv_auc_path = PHASE1_FIG_DIR / 'cv_auc_distribution.png'
         if not cv_auc_path.exists():
             cv_auc_path = FIG_DIR / 'cv_auc_distribution.png'
         if cv_auc_path.exists():
@@ -933,7 +935,9 @@ def page_data_governance(assets):
 
     with tab1:
         st.markdown("### 🔄 数据治理流程")
-        dg_flow_path = PHASE1_FIG_DIR / 'data_governance_flowchart.png'
+        dg_flow_path = PHASE1_FIG_DIR / 'data_governance_flow.png'
+        if not dg_flow_path.exists():
+            dg_flow_path = PHASE1_FIG_DIR / 'data_governance_flowchart.png'
         if not dg_flow_path.exists():
             dg_flow_path = FIG_DIR / 'data_governance_flowchart.png'
         if dg_flow_path.exists():
