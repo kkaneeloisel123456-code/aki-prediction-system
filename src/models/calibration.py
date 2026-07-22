@@ -570,7 +570,7 @@ def run_full_calibration_analysis(model_results_dict, output_dir=None):
 
     # 4. Clinical Impact Curve for best model
     best_name = list(model_results_dict.keys())[0]
-    best_prob = model_results_dict[best_name]
+    best_prob = model_results_dict[best_name]['y_prob']
     plot_clinical_impact_curve(y_true, best_prob)
 
     # 5. Calibration summary table
@@ -588,5 +588,354 @@ def run_full_calibration_analysis(model_results_dict, output_dir=None):
     }
 
 
-if __name__ == '__main__':
-    print("Calibration module loaded successfully.")
+# ====================================================================
+# Phase 2: KDIGO Staging & Risk Report
+# ====================================================================
+def map_kdigo_stage(probability, scr_ratio=None, urine_output=None):
+    """
+    Map predicted AKI probability to KDIGO staging.
+
+    Args:
+        probability: Predicted AKI probability (0-1)
+        scr_ratio: Current Scr / baseline Scr ratio (optional)
+        urine_output: Urine output in ml/kg/h (optional)
+
+    Returns:
+        dict: {'stage': 0-3, 'label': str, 'description': str, 'urgency': str}
+    """
+    KDIGO_STAGES = {
+        0: {
+            'label': 'KDIGO Stage 0',
+            'description': 'No AKI — Scr within normal range, adequate urine output',
+            'urgency': 'Routine monitoring',
+            'color': '#27ae60',
+            'icon': '&#9989;',  # Checkmark
+        },
+        1: {
+            'label': 'KDIGO Stage 1',
+            'description': 'Scr 1.5-1.9x baseline OR >= 0.3 mg/dL increase OR UO < 0.5 ml/kg/h for 6-12h',
+            'urgency': 'Increased monitoring, avoid nephrotoxins',
+            'color': '#f39c12',
+            'icon': '&#9888;',  # Warning
+        },
+        2: {
+            'label': 'KDIGO Stage 2',
+            'description': 'Scr 2.0-2.9x baseline OR UO < 0.5 ml/kg/h for >= 12h',
+            'urgency': 'Nephrology consult, strict I/O monitoring',
+            'color': '#e67e22',
+            'icon': '&#9888;',  # Warning
+        },
+        3: {
+            'label': 'KDIGO Stage 3',
+            'description': 'Scr >= 3.0x baseline OR >= 4.0 mg/dL OR RRT initiation OR UO < 0.3 ml/kg/h for >= 24h',
+            'urgency': 'URGENT: Consider RRT, ICU admission',
+            'color': '#e74c3c',
+            'icon': '&#128680;',  # Alert
+        },
+    }
+
+    # Probability-to-stage mapping
+    if probability < 0.2:
+        stage = 0
+    elif probability < 0.4:
+        stage = 1
+    elif probability < 0.7:
+        stage = 2
+    else:
+        stage = 3
+
+    # Refine with Scr ratio if available
+    if scr_ratio is not None:
+        if scr_ratio >= 3.0:
+            stage = max(stage, 3)
+        elif scr_ratio >= 2.0:
+            stage = max(stage, 2)
+        elif scr_ratio >= 1.5:
+            stage = max(stage, 1)
+
+    return KDIGO_STAGES[stage]
+
+
+def generate_risk_report(probability, shap_values=None, feature_names=None,
+                          patient_data=None, top_n=8):
+    """
+    Generate a comprehensive risk assessment report.
+
+    Args:
+        probability: Predicted AKI probability
+        shap_values: SHAP values for this prediction (optional)
+        feature_names: List of feature names (optional)
+        patient_data: Dict of patient clinical data (optional)
+        top_n: Number of top risk factors to include
+
+    Returns:
+        dict: Complete risk report with all sections
+    """
+    report = {}
+
+    # ---- 1. Risk Level ----
+    if probability < 0.2:
+        risk_level = 'Low'
+        risk_emoji = '✅'  # Checkmark
+        n_stars = 1
+    elif probability < 0.4:
+        risk_level = 'Low-Medium'
+        risk_emoji = 'ℹ️'  # Info
+        n_stars = 2
+    elif probability < 0.5:
+        risk_level = 'Medium'
+        risk_emoji = '⚠️'  # Warning
+        n_stars = 3
+    elif probability < 0.7:
+        risk_level = 'Medium-High'
+        risk_emoji = '⚠️'
+        n_stars = 4
+    else:
+        risk_level = 'High'
+        risk_emoji = '\U0001f6a8'  # Alarm
+        n_stars = 5
+
+    stars_filled = '★' * n_stars
+    stars_empty = '☆' * (5 - n_stars)
+
+    report['risk_level'] = risk_level
+    report['probability'] = probability
+    report['stars_display'] = f'{stars_filled}{stars_empty}'
+    report['stars_count'] = n_stars
+
+    # ---- 2. KDIGO Staging ----
+    kdigo = map_kdigo_stage(probability)
+    report['kdigo_stage'] = kdigo['label']
+    report['kdigo_description'] = kdigo['description']
+    report['kdigo_urgency'] = kdigo['urgency']
+
+    # ---- 3. Top Risk Factors (from SHAP) ----
+    risk_factors = []
+    if shap_values is not None and feature_names is not None:
+        abs_sv = np.abs(shap_values)
+        top_idx = np.argsort(abs_sv)[::-1][:top_n]
+        for i in top_idx:
+            feat_name = feature_names[i] if i < len(feature_names) else f'F{i}'
+            sv = shap_values[i]
+            risk_factors.append({
+                'feature': feat_name,
+                'shap_value': float(sv),
+                'importance': float(abs_sv[i]),
+                'direction': 'risk_increasing' if sv > 0 else 'risk_decreasing',
+                'impact': 'increases AKI risk' if sv > 0 else 'decreases AKI risk',
+            })
+
+    # If no SHAP, use heuristic rules
+    if not risk_factors and patient_data:
+        heuristic_rules = _heuristic_risk_rules(patient_data)
+        risk_factors = heuristic_rules
+
+    report['risk_factors'] = risk_factors
+    report['top_factor'] = risk_factors[0] if risk_factors else None
+
+    # ---- 4. Modifiable vs Non-modifiable ----
+    modifiable_keywords = ['Scr', 'eGFR', 'Cr', 'ALB', 'Albumin', 'Hb', 'WBC',
+                            'Na', 'K', 'BUN', 'Lac', '乳酸', 'CRP', 'hsTn',
+                            'BNP', 'PLT', 'SBP', 'SODIUM', 'POTASSIUM',
+                            '手术时间', '通气时间', '失血', '尿量']
+    modifiable = []
+    non_modifiable = []
+    for rf in risk_factors:
+        is_mod = any(kw.lower() in rf['feature'].lower() for kw in modifiable_keywords)
+        if is_mod:
+            modifiable.append(rf)
+        else:
+            non_modifiable.append(rf)
+
+    report['modifiable_factors'] = modifiable
+    report['non_modifiable_factors'] = non_modifiable
+    report['n_modifiable'] = len(modifiable)
+    report['n_non_modifiable'] = len(non_modifiable)
+
+    # ---- 5. Clinical Recommendations ----
+    report['recommendations'] = _get_clinical_recommendations(risk_level, probability)
+
+    # ---- 6. Monitoring Plan ----
+    report['monitoring_plan'] = _get_monitoring_plan(risk_level)
+
+    # ---- 7. Summary Narrative ----
+    report['summary'] = _generate_clinical_summary(
+        risk_level, probability, kdigo, risk_factors, modifiable
+    )
+
+    return report
+
+
+def _heuristic_risk_rules(patient_data):
+    """Generate risk factors from patient data using heuristic rules."""
+    rules = []
+    checks = [
+        ('age', 60, 'Age > 60 years', 'risk_increasing'),
+        ('eGFR', 60, 'eGFR < 60 ml/min', 'risk_increasing'),
+        ('APACHE II', 20, 'APACHE II > 20', 'risk_increasing'),
+        ('Scr', 100, 'Elevated Scr', 'risk_increasing'),
+        ('diabetes', '是', 'Diabetes mellitus', 'risk_increasing'),
+        ('hypertension', '是', 'Hypertension', 'risk_increasing'),
+        ('surgery_time', 360, 'Surgery > 6 hours', 'risk_increasing'),
+        ('lactate', 2, 'Elevated Lactate', 'risk_increasing'),
+        ('CRP', 10, 'Elevated CRP', 'risk_increasing'),
+        ('Alb', 35, 'Low Albumin', 'risk_increasing'),
+        ('Hb', 120, 'Low Hemoglobin', 'risk_increasing'),
+        ('WBC', 10, 'Elevated WBC', 'risk_increasing'),
+    ]
+
+    for key, threshold, label, direction in checks:
+        val = patient_data.get(key)
+        if val is None:
+            continue
+        try:
+            val = float(val)
+        except (ValueError, TypeError):
+            # String comparison
+            if str(val) == str(threshold):
+                rules.append({'feature': label, 'direction': direction,
+                             'impact': 'increases AKI risk' if direction == 'risk_increasing' else 'decreases AKI risk',
+                             'importance': 0.5})
+            continue
+
+        if val > threshold if 'eGFR' not in key else val < threshold:
+            rules.append({'feature': label, 'direction': direction,
+                         'impact': 'increases AKI risk' if direction == 'risk_increasing' else 'decreases AKI risk',
+                         'importance': 0.5})
+
+    return rules[:8]
+
+
+def _get_clinical_recommendations(risk_level, probability):
+    """Generate clinical recommendations based on risk level."""
+    recs = {
+        'Low': {
+            'summary': 'Patient has low AKI risk. Routine monitoring recommended.',
+            'monitoring': [
+                'Record urine output every 12 hours',
+                'Check Scr and eGFR on post-op day 1 and 3',
+                'Monitor hemodynamics',
+            ],
+            'prevention': [
+                'Maintain adequate hydration',
+                'Avoid nephrotoxic drugs (NSAIDs, aminoglycosides, contrast)',
+                'Maintain MAP > 65 mmHg',
+            ],
+            'follow_up': 'If oliguria (< 0.5 ml/kg/h > 6h) or Scr increase develops, escalate monitoring.',
+        },
+        'Low-Medium': {
+            'summary': 'Patient has low-to-medium AKI risk. Enhanced monitoring advised.',
+            'monitoring': [
+                'Monitor urine output every 8-12 hours',
+                'Daily Scr, eGFR, and electrolytes',
+                'Fluid balance charting',
+            ],
+            'prevention': [
+                'Goal-directed fluid therapy',
+                'Review medication list for nephrotoxins',
+                'Maintain renal perfusion pressure',
+            ],
+            'follow_up': 'Continue monitoring through post-op day 3.',
+        },
+        'Medium': {
+            'summary': 'Patient has moderate AKI risk. Initiate preventive interventions.',
+            'monitoring': [
+                'Monitor urine output every 6 hours',
+                'Daily Scr, eGFR, electrolytes, blood gas',
+                'Continuous hemodynamic monitoring (CVP, MAP)',
+            ],
+            'prevention': [
+                'Goal-directed fluid therapy, maintain UO > 0.5 ml/kg/h',
+                'Cautious diuretic use, avoid volume depletion',
+                'Optimize cardiac output, maintain renal perfusion',
+                'Consider nephrology consultation',
+            ],
+            'follow_up': 'Monitor through post-op day 5. Escalate if condition worsens.',
+        },
+        'Medium-High': {
+            'summary': 'Patient has elevated AKI risk. Aggressive prevention protocol indicated.',
+            'monitoring': [
+                'Hourly urine output with Foley catheter',
+                'Check Scr, eGFR every 12 hours',
+                'Invasive arterial pressure monitoring',
+                'Daily renal ultrasound assessment',
+            ],
+            'prevention': [
+                'KDIGO Bundle: optimize volume + stop nephrotoxins + maintain renal perfusion',
+                'Functional hemodynamic monitoring for fluid management',
+                'Strict glucose control (110-150 mg/dL)',
+                'Nephrology consultation strongly recommended',
+            ],
+            'follow_up': 'ICU-level monitoring. Prepare for potential RRT.',
+        },
+        'High': {
+            'summary': 'Patient at HIGH AKI risk. Immediate comprehensive intervention required.',
+            'monitoring': [
+                'Hourly urine output (Foley catheter mandatory)',
+                'Continuous invasive arterial BP monitoring',
+                'Scr, eGFR, electrolytes every 4-6 hours',
+                'Daily renal ultrasound',
+                'Continuous ECG monitoring',
+            ],
+            'prevention': [
+                'Full KDIGO Bundle activation',
+                'Functional hemodynamic monitoring',
+                'Strict glucose control',
+                'Consider renal protective agents',
+                'Multidisciplinary team activation',
+            ],
+            'follow_up': 'Emergency nephrology consult. Prepare RRT. ICU admission.',
+        },
+    }
+
+    return recs.get(risk_level, recs['Medium'])
+
+
+def _get_monitoring_plan(risk_level):
+    """Generate structured monitoring plan."""
+    plans = {
+        'Low': {'frequency': 'BID', 'duration': '48 hours', 'escalation_criteria': 'UO < 0.5 ml/kg/h x 6h'},
+        'Low-Medium': {'frequency': 'q8-12h', 'duration': '72 hours', 'escalation_criteria': 'Scr increase > 26.5 umol/L'},
+        'Medium': {'frequency': 'q6h', 'duration': '5 days', 'escalation_criteria': 'Scr 1.5x baseline or UO < 0.5 x 6h'},
+        'Medium-High': {'frequency': 'q4-6h', 'duration': '7 days', 'escalation_criteria': 'Scr 2x baseline'},
+        'High': {'frequency': 'q1-4h', 'duration': 'ICU stay', 'escalation_criteria': 'Scr 3x baseline or RRT criteria'},
+    }
+    return plans.get(risk_level, plans['Medium'])
+
+
+def _generate_clinical_summary(risk_level, probability, kdigo, risk_factors, modifiable):
+    """Generate a human-readable clinical summary narrative."""
+    templates = {
+        'Low': (
+            f"Based on the ML model assessment, this patient has a LOW AKI risk "
+            f"(predicted probability: {probability:.1%}).\n\n"
+            f"This corresponds to {kdigo['label']}. "
+            f"The model identified {len(modifiable)} potentially modifiable risk factors "
+            f"that can be addressed preemptively.\n\n"
+            f"Recommendation: Routine post-operative monitoring is sufficient. "
+            f"Focus on maintaining adequate hydration and avoiding nephrotoxic exposures."
+        ),
+        'Medium': (
+            f"This patient has a MODERATE AKI risk "
+            f"(predicted probability: {probability:.1%}).\n\n"
+            f"This corresponds to {kdigo['label']} — {kdigo['description']}.\n"
+            f"The top contributing factors suggest opportunities for clinical intervention.\n\n"
+            f"Recommendation: Enhanced monitoring with preventive KDIGO Bundle initiation. "
+            f"Nephrology consultation should be considered."
+        ),
+        'High': (
+            f"This patient has a HIGH AKI risk "
+            f"(predicted probability: {probability:.1%}).\n\n"
+            f"This corresponds to {kdigo['label']} — URGENT clinical attention required.\n"
+            f"Multiple risk factors are present, with {len(modifiable)} being potentially modifiable.\n\n"
+            f"Recommendation: Immediate KDIGO Bundle activation, nephrology consult, "
+            f"ICU-level monitoring, and preparation for potential RRT."
+        ),
+    }
+
+    if risk_level in templates:
+        return templates[risk_level]
+    elif 'Medium' in risk_level:
+        return templates['Medium'].replace('MODERATE', 'ELEVATED')
+    else:
+        return templates['High']
