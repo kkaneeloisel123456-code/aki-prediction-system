@@ -322,12 +322,12 @@ def page_home(assets):
         ### 模型可靠性优化
         1. 初始模型 AUC > 0.99
         2. 发现术后特征泄漏
-        3. 剔除 52 个泄漏特征
-        4. 保留 15 个术前特征
-        5. 5折交叉验证
-        6. AUC 0.72, 泛化稳定
+        3. 排除 13 个泄漏特征（KDIGO标准+结局变量）
+        4. 84特征精筛至35个（RF重要性Top35）
+        5. 50次重复分层CV验证
+        6. **AUC 0.82**, Voting Ensemble (LR+RF+XGB+ET)
 
-        *从"追求指标"到"追求可信"*
+        *一个可信的 0.82，胜过一百个泄漏的 0.99*
         """)
 
 
@@ -337,6 +337,9 @@ def page_home(assets):
         st.markdown("### 🔍 数据质量：AKI 诊断逻辑校验")
 
         val_col1, val_col2 = st.columns(2)
+
+        n_staging = assets.get('n_staging_issues', 0)
+        n_group = assets.get('n_group_stage_issues', 0)
 
         with val_col1:
             if n_staging == 0 and n_group == 0:
