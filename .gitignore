@@ -31,6 +31,7 @@ catboost_info/
 
 # Temp scripts (development only)
 run_optimize*.py
+run_final*.py
 run_review_upgrade.py
 export_review_materials.py
 write_review.py
