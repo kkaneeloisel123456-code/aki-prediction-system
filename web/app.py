@@ -419,61 +419,49 @@ def page_performance(assets):
 
         st.markdown("### 模型选择建议")
         st.info("""
-        **临床筛查推荐: Voting Ensemble** (AUC=0.82, Recall=0.72)
-        - 4模型加权集成，50次CV验证，区分度与校准度综合最优
-        - 可解释性强，每个特征的系数直接反映风险方向
-        - 稳定性最优（训练/测试 AUC 差距仅 0.03）
-
-        **区分度第一: LightGBM** (AUC=0.698)
-        - 但 Recall 仅 0.56，漏诊风险较高
-        - 作为辅助参考模型
-
-        本系统定位为**术前风险筛查工具**，优先保证召回率，宁愿多提醒也不要漏掉危险患者。
+        **临床推荐: Voting Ensemble** (AUC=0.82, CV 50次)
+        - LR+RF+XGB+ET 加权集成 (2:2:1:1)，区分度与校准度综合最优
+        - 过拟合差距 0.13，在小样本场景下可接受
+        - 配合 SHAP + DCA + Bootstrap 完整评价体系
         """)
 
-        st.markdown("### AUC 排行榜")
-        chart_df = eval_df[['Model','AUC']].set_index('Model').sort_values('AUC')
-        st.bar_chart(chart_df)
-
-        st.markdown("### F1 - Recall - Precision 对比")
-        radar_df = eval_df[['Model','F1','Recall','Precision','Accuracy']].set_index('Model')
-        st.bar_chart(radar_df, horizontal=True)
-
     with tab2:
-        st.markdown("### ROC 曲线")
-        roc_path = FIG_DIR / 'roc_curves.png'
-        if roc_path.exists(): st.image(str(roc_path), width='stretch')
-        else: st.warning("ROC曲线未生成。请运行 run_viz.py。")
+        st.markdown("### ROC + PR 曲线")
+        roc_pr = FIG_DIR / 'ROC_PR双图.png'
+        if roc_pr.exists():
+            st.image(str(roc_pr), width='stretch')
+        else:
+            roc_path = FIG_DIR / 'roc_curves.png'
+            if roc_path.exists(): st.image(str(roc_path), width='stretch')
+            else: st.warning("ROC曲线未生成")
 
-        st.markdown("### PR 曲线")
-        pr_path = FIG_DIR / 'pr_curves.png'
-        if pr_path.exists(): st.image(str(pr_path), width='stretch')
-        else: st.warning("PR曲线未生成。")
-
-        st.markdown("### 混淆矩阵")
-        cm_path = FIG_DIR / 'confusion_matrices.png'
-        if cm_path.exists(): st.image(str(cm_path), width='stretch')
-        else: st.warning("混淆矩阵未生成。")
+        st.markdown("### SHAP 特征重要性")
+        shap_path = FIG_DIR / 'shap_summary.png'
+        if shap_path.exists(): st.image(str(shap_path), width='stretch')
+        else: st.info("SHAP图未生成")
 
     with tab3:
-        st.markdown("### 校准曲线")
-        cal_path = FIG_DIR / 'calibration_curves.png'
+        st.markdown("### 校准曲线 (Calibration)")
+        cal_path = FIG_DIR / '校准曲线.png'
+        if not cal_path.exists():
+            cal_path = FIG_DIR / 'calibration_curves.png'
         if cal_path.exists(): st.image(str(cal_path), width='stretch')
 
         st.markdown("### 决策曲线 (DCA)")
-        dca_path = FIG_DIR / 'dca_curve.png'
+        dca_path = FIG_DIR / 'DCA决策曲线.png'
+        if not dca_path.exists():
+            dca_path = FIG_DIR / 'dca_curve.png'
         if not dca_path.exists():
             dca_path = FIG_DIR / 'decision_curve.png'
         if dca_path.exists(): st.image(str(dca_path), width='stretch')
 
-        st.markdown("### 临床影响曲线")
-        cic_path = FIG_DIR / 'clinical_impact_curve.png'
-        if cic_path.exists(): st.image(str(cic_path), width='stretch')
+        st.markdown("### PDP 非线性效应")
+        pdp_path = FIG_DIR / 'PDP非线性效应.png'
+        if pdp_path.exists(): st.image(str(pdp_path), width='stretch')
 
-        # SHAP
-        st.markdown("### SHAP 特征重要性")
-        shap_path = FIG_DIR / 'shap_summary.png'
-        if shap_path.exists(): st.image(str(shap_path), width='stretch')
+        st.markdown("### 亚组分析")
+        sub_path = FIG_DIR / '亚组分析.png'
+        if sub_path.exists(): st.image(str(sub_path), width='stretch')
 
 
 # ============================================
