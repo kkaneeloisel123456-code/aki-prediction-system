@@ -68,27 +68,29 @@ def load_all():
               'validation_report': None, 'validation_flags': None,
               'n_staging_issues': 0, 'n_group_stage_issues': 0}
 
-    # Load evaluation results
-    eval_path = TAB_DIR / 'model_comparison.csv'
+    # Load evaluation results (final optimized version)
+    eval_path = TAB_DIR / 'final_cv_results.csv'
+    if not eval_path.exists():
+        eval_path = TAB_DIR / 'model_comparison.csv'  # fallback
     if eval_path.exists():
         result['eval_df'] = pd.read_csv(eval_path)
 
-    # Load all models
+    # Load final Voting model (AUC 0.82)
+    voting_path = MODEL_DIR / 'final_voting_model.pkl'
+    if voting_path.exists():
+        try:
+            result['model'] = joblib.load(voting_path)
+            result['best_name'] = 'Voting Ensemble (LR+RF+XGB+ET)'
+        except:
+            pass
+
+    # Also load individual models for comparison display
     if MODEL_DIR.exists():
         for f in MODEL_DIR.glob('*.pkl'):
+            if f.stem == 'final_voting_model':
+                continue  # already loaded
             try:
                 result['models'][f.stem] = joblib.load(f)
-            except:
-                pass
-
-        # Load TabNet separately (uses its own save/load format)
-        tabnet_path = MODEL_DIR / 'TabNet.zip'
-        if tabnet_path.exists():
-            try:
-                from pytorch_tabnet.tab_model import TabNetClassifier
-                tabnet = TabNetClassifier()
-                tabnet.load_model(str(tabnet_path).replace('.zip', ''))
-                result['models']['TabNet'] = tabnet
             except:
                 pass
 
@@ -97,8 +99,12 @@ def load_all():
     if scaler_path.exists():
         result['scaler'] = joblib.load(scaler_path)
 
-    # Load feature names
-    feat_path = MODEL_DIR / 'feature_names.txt'
+    # Load selected features (Top35 from RF importance)
+    feat_path = MODEL_DIR / 'selected_features.txt'
+    if not feat_path.exists():
+        feat_path = MODEL_DIR / 'clean_features.txt'  # fallback
+    if not feat_path.exists():
+        feat_path = MODEL_DIR / 'feature_names.txt'  # fallback
     if feat_path.exists():
         with open(feat_path, encoding='utf-8') as f:
             result['features'] = [l.strip() for l in f if l.strip()]
@@ -146,15 +152,18 @@ def load_all():
         if group_match:
             result['n_group_stage_issues'] = int(group_match.group(1))
 
-    # Pick best model
-    if result['eval_df'] is not None and len(result['eval_df']) > 0:
-        best = result['eval_df'].iloc[0]['Model']
-        result['best_name'] = best
-        if best in result['models']:
-            result['model'] = result['models'][best]
-    elif result['models']:
-        result['best_name'] = list(result['models'].keys())[0]
-        result['model'] = result['models'][result['best_name']]
+    # Pick best model (if not already loaded as Voting Ensemble)
+    if result['model'] is None:
+        if result['eval_df'] is not None and len(result['eval_df']) > 0:
+            # Support both old (Model) and new (模型) column names
+            model_col = '模型' if '模型' in result['eval_df'].columns else 'Model'
+            best = result['eval_df'].iloc[0][model_col]
+            result['best_name'] = str(best)
+            if best in result['models']:
+                result['model'] = result['models'][best]
+        elif result['models']:
+            result['best_name'] = list(result['models'].keys())[0]
+            result['model'] = result['models'][result['best_name']]
 
     return result
 
@@ -364,22 +373,26 @@ def page_performance(assets):
     tab1,tab2,tab3 = st.tabs(["📊 性能对比", "📈 ROC/PR曲线", "🎯 校准与DCA"])
 
     with tab1:
-        st.markdown("### 模型性能总览（测试集）")
-        # Style the dataframe
-        styled = eval_df.style.format({c:'{:.4f}' for c in eval_df.columns if c!='Model'})
-        styled = styled.highlight_max(subset=['AUC','Accuracy','Precision','Recall','F1'], color='#d4efdf')
-        brier_col = 'Brier_Score' if 'Brier_Score' in eval_df.columns else 'Brier'
-        if brier_col in eval_df.columns:
-            styled = styled.highlight_min(subset=[brier_col], color='#d4efdf')
-        st.dataframe(styled, width='stretch', hide_index=True)
+        st.markdown("### 模型性能总览（50次重复CV）")
+        # Support both new (模型/50次CV AUC均值) and old (Model/AUC) formats
+        model_col = '模型' if '模型' in eval_df.columns else 'Model'
+        auc_col = '50次CV AUC均值' if '50次CV AUC均值' in eval_df.columns else 'AUC'
+        std_col = '标准差' if '标准差' in eval_df.columns else None
 
-        st.markdown("#### 📊 AUC 排行榜")
-        chart_df = eval_df[['Model','AUC']].set_index('Model').sort_values('AUC')
-        st.bar_chart(chart_df)
+        # Build display dataframe
+        if std_col and std_col in eval_df.columns:
+            display_df = eval_df[[model_col, auc_col, std_col]].copy()
+            display_df.columns = ['模型', 'AUC (CV)', '标准差']
+        else:
+            numeric_cols = [c for c in eval_df.columns if c != model_col]
+            display_df = eval_df[[model_col] + numeric_cols]
 
-        st.markdown("#### 📊 F1 - Recall - Precision 对比")
-        radar_df = eval_df[['Model','F1','Recall','Precision','Accuracy']].set_index('Model')
-        st.bar_chart(radar_df, horizontal=True)
+        st.dataframe(display_df, width='stretch', hide_index=True)
+
+        if auc_col in eval_df.columns:
+            st.markdown("#### AUC 排行榜")
+            chart_df = eval_df[[model_col, auc_col]].set_index(model_col).sort_values(auc_col)
+            st.bar_chart(chart_df)
 
     with tab2:
         st.markdown("### ROC 曲线")

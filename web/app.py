@@ -68,23 +68,34 @@ def load_all():
               'validation_report': None, 'validation_flags': None,
               'n_staging_issues': 0, 'n_group_stage_issues': 0}
 
-    # Load evaluation results (clean version)
-    eval_path = TAB_DIR / 'model_summary_clean.csv'
+    # Load evaluation results (final optimized version)
+    eval_path = TAB_DIR / 'final_cv_results.csv'
     if not eval_path.exists():
-        eval_path = TAB_DIR / 'model_comparison.csv'
+        eval_path = TAB_DIR / 'model_summary_clean.csv'  # fallback
+    if not eval_path.exists():
+        eval_path = TAB_DIR / 'model_comparison.csv'  # fallback
     if eval_path.exists():
         result['eval_df'] = pd.read_csv(eval_path)
 
-    # Load all models (clean versions, no data leakage)
+    # Load final Voting model (AUC 0.82)
+    voting_path = MODEL_DIR / 'final_voting_model.pkl'
+    if voting_path.exists():
+        try:
+            result['model'] = joblib.load(voting_path)
+            result['best_name'] = 'Voting Ensemble (LR+RF+XGB+ET)'
+        except:
+            pass
+
+    # Also load individual models for comparison
     if MODEL_DIR.exists():
-        for f in MODEL_DIR.glob('*_clean.pkl'):
+        for f in MODEL_DIR.glob('*.pkl'):
+            if f.stem == 'final_voting_model':
+                continue
             try:
-                name = f.stem.replace('_clean', '')  # CatBoost_clean -> CatBoost
-                result['models'][name] = joblib.load(f)
+                result['models'][f.stem] = joblib.load(f)
             except:
                 pass
 
-        # Load TabNet separately (uses its own save/load format)
         tabnet_path = MODEL_DIR / 'TabNet.zip'
         if tabnet_path.exists():
             try:
@@ -95,15 +106,17 @@ def load_all():
             except:
                 pass
 
-    # Load scaler (clean version, fitted on raw pre-operative data)
+    # Load scaler
     scaler_path = MODEL_DIR / 'scaler_clean.pkl'
     if not scaler_path.exists():
         scaler_path = MODEL_DIR / 'scaler.pkl'  # fallback
     if scaler_path.exists():
         result['scaler'] = joblib.load(scaler_path)
 
-    # Load feature names (pre-operative only, no leakage)
-    feat_path = MODEL_DIR / 'clean_features.txt'
+    # Load selected features (Top35 from RF importance)
+    feat_path = MODEL_DIR / 'selected_features.txt'
+    if not feat_path.exists():
+        feat_path = MODEL_DIR / 'clean_features.txt'  # fallback
     if not feat_path.exists():
         feat_path = MODEL_DIR / 'feature_names.txt'  # fallback
     if feat_path.exists():
@@ -153,15 +166,17 @@ def load_all():
         if group_match:
             result['n_group_stage_issues'] = int(group_match.group(1))
 
-    # Pick best model
-    if result['eval_df'] is not None and len(result['eval_df']) > 0:
-        best = result['eval_df'].iloc[0]['Model']
-        result['best_name'] = best
-        if best in result['models']:
-            result['model'] = result['models'][best]
-    elif result['models']:
-        result['best_name'] = list(result['models'].keys())[0]
-        result['model'] = result['models'][result['best_name']]
+    # Pick best model (if not already loaded as Voting Ensemble)
+    if result['model'] is None:
+        if result['eval_df'] is not None and len(result['eval_df']) > 0:
+            model_col = '模型' if '模型' in result['eval_df'].columns else 'Model'
+            best = result['eval_df'].iloc[0][model_col]
+            result['best_name'] = str(best)
+            if best in result['models']:
+                result['model'] = result['models'][best]
+        elif result['models']:
+            result['best_name'] = list(result['models'].keys())[0]
+            result['model'] = result['models'][result['best_name']]
 
     return result
 
