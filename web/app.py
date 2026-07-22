@@ -302,11 +302,15 @@ def page_home(assets):
     with col2: st.metric("特征数", str(n_features), "84→精筛35个")
     with col3: st.metric("验证方式", "50次CV", "Repeated 5×10")
     best_auc = "0.82"
-    if assets['eval_df'] is not None:
+    best_model_name = "Voting Ensemble"
+    if assets['eval_df'] is not None and len(assets['eval_df']) > 0:
         auc_col = '50次CV AUC均值' if '50次CV AUC均值' in assets['eval_df'].columns else ('AUC' if 'AUC' in assets['eval_df'].columns else None)
-        if auc_col:
-            best_auc = f"{assets['eval_df'][auc_col].iloc[0]:.3f}" if len(assets['eval_df']) > 0 else "0.82"
-    with col4: st.metric("CV AUC", best_auc, "Voting Ensemble")
+        model_col = '模型' if '模型' in assets['eval_df'].columns else 'Model'
+        if auc_col and model_col:
+            sorted_df = assets['eval_df'].sort_values(auc_col, ascending=False)
+            best_auc = f"{sorted_df[auc_col].iloc[0]:.3f}"
+            best_model_name = str(sorted_df[model_col].iloc[0])
+    with col4: st.metric("CV AUC", best_auc, best_model_name)
 
     st.markdown("---")
     col1,col2 = st.columns([2,1])
@@ -403,6 +407,9 @@ def page_performance(assets):
         auc_col = '50次CV AUC均值' if '50次CV AUC均值' in eval_df.columns else 'AUC'
         std_col = '标准差' if '标准差' in eval_df.columns else None
 
+        # Sort by AUC descending
+        eval_df = eval_df.sort_values(auc_col, ascending=False)
+
         if std_col and std_col in eval_df.columns:
             display_df = eval_df[[model_col, auc_col, std_col]].copy()
             display_df.columns = ['模型', 'AUC (50次CV)', '标准差']
@@ -413,7 +420,7 @@ def page_performance(assets):
 
         if auc_col in eval_df.columns:
             st.markdown("### AUC 排行榜")
-            chart_df = eval_df[[model_col, auc_col]].set_index(model_col)
+            chart_df = eval_df[[model_col, auc_col]].set_index(model_col).sort_values(auc_col)
             chart_df.columns = ['AUC']
             st.bar_chart(chart_df)
 
