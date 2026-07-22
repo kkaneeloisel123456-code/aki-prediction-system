@@ -397,14 +397,25 @@ def page_performance(assets):
     tab1,tab2,tab3 = st.tabs(["📊 性能对比", "📈 ROC/PR曲线", "🎯 校准与DCA"])
 
     with tab1:
-        st.markdown("### 模型性能总览（测试集）")
-        # Style the dataframe
-        styled = eval_df.style.format({c:'{:.4f}' for c in eval_df.columns if c!='Model'})
-        styled = styled.highlight_max(subset=['AUC','Accuracy','Precision','Recall','F1'], color='#d4efdf')
-        brier_col = 'Brier_Score' if 'Brier_Score' in eval_df.columns else 'Brier'
-        if brier_col in eval_df.columns:
-            styled = styled.highlight_min(subset=[brier_col], color='#d4efdf')
-        st.dataframe(styled, width='stretch', hide_index=True)
+        st.markdown("### 模型性能总览（50次重复CV）")
+        # Support both new (模型/50次CV AUC均值) and old (Model/AUC) formats
+        model_col = '模型' if '模型' in eval_df.columns else 'Model'
+        auc_col = '50次CV AUC均值' if '50次CV AUC均值' in eval_df.columns else 'AUC'
+        std_col = '标准差' if '标准差' in eval_df.columns else None
+
+        if std_col and std_col in eval_df.columns:
+            display_df = eval_df[[model_col, auc_col, std_col]].copy()
+            display_df.columns = ['模型', 'AUC (50次CV)', '标准差']
+        else:
+            display_df = eval_df.copy()
+
+        st.dataframe(display_df, width='stretch', hide_index=True)
+
+        if auc_col in eval_df.columns:
+            st.markdown("### AUC 排行榜")
+            chart_df = eval_df[[model_col, auc_col]].set_index(model_col)
+            chart_df.columns = ['AUC']
+            st.bar_chart(chart_df)
 
         st.markdown("### 模型选择建议")
         st.info("""
