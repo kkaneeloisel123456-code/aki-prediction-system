@@ -1,2 +1,4 @@
+models/final_voting_model.pkl -text
+models/selected_features.txt -text
 models/*.pkl filter=lfs diff=lfs merge=lfs -text
 models/*.zip filter=lfs diff=lfs merge=lfs -text
