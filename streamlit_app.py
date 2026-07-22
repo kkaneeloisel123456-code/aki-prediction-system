@@ -75,12 +75,14 @@ def load_all():
     if eval_path.exists():
         result['eval_df'] = pd.read_csv(eval_path)
 
-    # Load final Voting model (AUC 0.82)
-    voting_path = MODEL_DIR / 'final_voting_model.pkl'
+    # Load final Voting model (AUC 0.82) — from app_data/ (non-LFS for Streamlit Cloud)
+    voting_path = BASE_DIR / 'app_data' / 'final_model.joblib'
+    if not voting_path.exists():
+        voting_path = MODEL_DIR / 'final_voting_model.pkl'  # fallback
     if voting_path.exists():
         try:
             result['model'] = joblib.load(voting_path)
-            result['best_name'] = 'Voting Ensemble (LR+RF+XGB+ET)'
+            result['best_name'] = 'Voting Ensemble (LR+RF+XGB+ET, AUC 0.82)'
         except:
             pass
 
@@ -94,13 +96,17 @@ def load_all():
             except:
                 pass
 
-    # Load scaler
-    scaler_path = MODEL_DIR / 'scaler.pkl'
+    # Load scaler — from app_data/ (non-LFS) first
+    scaler_path = BASE_DIR / 'app_data' / 'scaler.joblib'
+    if not scaler_path.exists():
+        scaler_path = MODEL_DIR / 'scaler.pkl'  # fallback
     if scaler_path.exists():
         result['scaler'] = joblib.load(scaler_path)
 
-    # Load selected features (Top35 from RF importance)
-    feat_path = MODEL_DIR / 'selected_features.txt'
+    # Load selected features — from app_data/ (non-LFS) first
+    feat_path = BASE_DIR / 'app_data' / 'features.txt'
+    if not feat_path.exists():
+        feat_path = MODEL_DIR / 'selected_features.txt'  # fallback
     if not feat_path.exists():
         feat_path = MODEL_DIR / 'clean_features.txt'  # fallback
     if not feat_path.exists():
