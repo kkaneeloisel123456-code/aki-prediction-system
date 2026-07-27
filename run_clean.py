@@ -187,9 +187,9 @@ for name, model in models.items():
 # Voting评估
 voting_scores = cross_val_score(voting, X_selected, y, cv=rskf, scoring='roc_auc', n_jobs=-1)
 all_results['Voting Ensemble'] = {'mean': voting_scores.mean(), 'std': voting_scores.std()}
-print(f"  {'Voting Ensemble':<22} {voting_scores.mean():.4f}       {voting_scores.std():.4f}  ← 最佳")
+print(f"  {'Voting Ensemble':<22} {voting_scores.mean():.4f}       {voting_scores.std():.4f}  <-- 最佳")
 
-print(f"\n  ★ 最终AUC: {voting_scores.mean():.4f} ± {voting_scores.std():.4f}")
+print(f"\n  [*] 最终AUC: {voting_scores.mean():.4f} +/- {voting_scores.std():.4f}")
 print(f"  95% CI: [{np.percentile(voting_scores, 2.5):.4f}, {np.percentile(voting_scores, 97.5):.4f}]")
 
 # ============================================================
@@ -212,7 +212,7 @@ for name, model in models.items():
     train_auc = roc_auc_score(y_train, model.predict_proba(X_train)[:, 1])
     test_auc = roc_auc_score(y_test, model.predict_proba(X_test)[:, 1])
     gap = train_auc - test_auc
-    verdict = "✅ 良好" if gap < 0.08 else ("⚠️ 可接受" if gap < 0.12 else "❌ 需处理")
+    verdict = "[OK] 良好" if gap < 0.08 else ("[~] 可接受" if gap < 0.12 else "[!] 需处理")
     print(f"  {name:<22} {train_auc:<10.4f} {test_auc:<10.4f} {gap:<10.4f} {verdict}")
 
 # Voting
@@ -222,12 +222,86 @@ test_auc = roc_auc_score(y_test, voting.predict_proba(X_test)[:, 1])
 gap = train_auc - test_auc
 y_pred = voting.predict(X_test)
 
-print(f"  {'Voting Ensemble':<22} {train_auc:<10.4f} {test_auc:<10.4f} {gap:<10.4f} {'✅ 良好' if gap < 0.08 else '⚠️ 可接受'}")
+print(f"  {'Voting Ensemble':<22} {train_auc:<10.4f} {test_auc:<10.4f} {gap:<10.4f} {'[OK] 良好' if gap < 0.08 else '[~] 可接受'}")
 print(f"\n  测试集详细指标:")
 print(f"    Accuracy:  {accuracy_score(y_test, y_pred):.4f}")
 print(f"    Precision: {precision_score(y_test, y_pred, zero_division=0):.4f}")
 print(f"    Recall:    {recall_score(y_test, y_pred, zero_division=0):.4f}")
 print(f"    F1:        {f1_score(y_test, y_pred, zero_division=0):.4f}")
+
+# ============================================================
+# 模块5.5：生成最终ROC曲线图（4基模型 + Voting Ensemble）
+# ============================================================
+print("\n" + "=" * 65)
+print("  模块5.5：生成最终ROC曲线图（LR/RF/XGBoost/ExtraTrees + Voting）")
+print("=" * 65)
+
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, auc
+
+os.makedirs('outputs/figures', exist_ok=True)
+
+fig, ax = plt.subplots(figsize=(10, 8))
+fig.patch.set_facecolor('#F8F9FA')
+ax.set_facecolor('#F8F9FA')
+
+# ── Color palette（与项目风格统一）──
+model_colors = {
+    'LogisticRegression': '#2E86AB',
+    'RandomForest':      '#A23B72',
+    'XGBoost':           '#F18F01',
+    'ExtraTrees':        '#C73E1D',
+    'Voting Ensemble':   '#1B1B1B',
+}
+
+# ── Collect all models（基模型 + Voting）──
+all_models = dict(models)
+all_models['Voting Ensemble'] = voting
+
+roc_results = {}
+
+for name, model in all_models.items():
+    if name == 'Voting Ensemble':
+        y_prob = voting.predict_proba(X_test)[:, 1]
+    else:
+        y_prob = model.predict_proba(X_test)[:, 1]
+
+    fpr, tpr, _ = roc_curve(y_test, y_prob)
+    roc_auc = auc(fpr, tpr)
+    roc_results[name] = {'fpr': fpr, 'tpr': tpr, 'auc': roc_auc}
+
+    lw = 3.0 if name == 'Voting Ensemble' else 2.0
+    ls = '-' if name == 'Voting Ensemble' else '-'
+    ax.plot(fpr, tpr, color=model_colors[name], lw=lw, linestyle=ls,
+            label=f'{name} (AUC = {roc_auc:.4f})',
+            zorder=5 if name == 'Voting Ensemble' else 3)
+
+# ── Random baseline ──
+ax.plot([0, 1], [0, 1], 'k--', lw=1.2, alpha=0.35, label='Random Classifier (AUC = 0.5000)')
+
+# ── Labels & title ──
+ax.set_xlabel('False Positive Rate (1 − Specificity)', fontsize=13)
+ax.set_ylabel('True Positive Rate (Sensitivity)', fontsize=13)
+ax.set_title('ROC Curves — Final Models (Test Set, N=84)', fontsize=15, fontweight='bold')
+ax.legend(loc='lower right', fontsize=10, framealpha=0.85, edgecolor='#CCCCCC')
+ax.set_xlim([-0.02, 1.02])
+ax.set_ylim([-0.02, 1.02])
+ax.grid(True, alpha=0.3, linewidth=0.5, color='#CCCCCC')
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+ax.spines['left'].set_color('#999999')
+ax.spines['bottom'].set_color('#999999')
+ax.tick_params(colors='#666666')
+
+fig.savefig('outputs/figures/roc_curves.png', dpi=300, bbox_inches='tight',
+            facecolor=fig.get_facecolor())
+plt.close(fig)
+
+print(f"  [OK] ROC curves saved -> outputs/figures/roc_curves.png")
+for name, r in roc_results.items():
+    print(f"  {name:<22} AUC = {r['auc']:.4f}")
 
 # ============================================================
 # 模块6：Bootstrap 验证
