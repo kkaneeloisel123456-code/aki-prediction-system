@@ -320,6 +320,81 @@ for name in ['LogisticRegression', 'RandomForest', 'XGBoost', 'ExtraTrees', 'Vot
     cv_info = all_results[name]
     print(f"  {name:<22} {r['auc']:>8.4f}  {cv_info['mean']:>9.4f}")
 
+# ── 同时生成 ROC + PR 双面板图 ──
+from sklearn.metrics import precision_recall_curve, average_precision_score
+
+fig2, (ax_roc, ax_pr) = plt.subplots(1, 2, figsize=(18, 8))
+fig2.patch.set_facecolor('#F8F9FA')
+ax_roc.set_facecolor('#F8F9FA')
+ax_pr.set_facecolor('#F8F9FA')
+
+# Left: ROC
+for name in ['LogisticRegression', 'RandomForest', 'XGBoost', 'ExtraTrees']:
+    r = roc_results[name]
+    cv_auc = all_results[name]['mean']
+    ax_roc.plot(r['fpr'], r['tpr'], color=model_colors[name], lw=2.0,
+                label=f'{name} (AUC = {cv_auc:.4f})')
+# Voting (bold)
+r = roc_results['Voting Ensemble']
+cv_auc = all_results['Voting Ensemble']['mean']
+ax_roc.plot(r['fpr'], r['tpr'], color=model_colors['Voting Ensemble'], lw=3.0,
+            label=f'Voting Ensemble (AUC = {cv_auc:.4f})')
+ax_roc.plot([0, 1], [0, 1], 'k--', lw=1.2, alpha=0.35, label='Random (AUC = 0.5000)')
+ax_roc.set_xlabel('False Positive Rate', fontsize=12)
+ax_roc.set_ylabel('True Positive Rate', fontsize=12)
+ax_roc.set_title('ROC Curves', fontsize=14, fontweight='bold')
+ax_roc.legend(loc='lower right', fontsize=8, framealpha=0.85)
+ax_roc.set_xlim([-0.02, 1.02]); ax_roc.set_ylim([-0.02, 1.02])
+ax_roc.grid(True, alpha=0.3, linewidth=0.5)
+ax_roc.spines['top'].set_visible(False); ax_roc.spines['right'].set_visible(False)
+
+# Right: PR — compute OOF predictions for PR curves
+ap_results = {}
+for name, model in models.items():
+    y_prob_oof = cross_val_predict(
+        model, X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+    )[:, 1]
+    precision, recall, _ = precision_recall_curve(y, y_prob_oof)
+    ap = average_precision_score(y, y_prob_oof)
+    ap_results[name] = ap
+    ax_pr.plot(recall, precision, color=model_colors[name], lw=2.0,
+               label=f'{name} (AP = {ap:.4f})')
+
+# Voting PR
+y_prob_v = cross_val_predict(
+    voting, X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+)[:, 1]
+precision_v, recall_v, _ = precision_recall_curve(y, y_prob_v)
+ap_v = average_precision_score(y, y_prob_v)
+ap_results['Voting Ensemble'] = ap_v
+ax_pr.plot(recall_v, precision_v, color=model_colors['Voting Ensemble'], lw=3.0,
+           label=f'Voting Ensemble (AP = {ap_v:.4f})')
+
+# PR baseline (random = positive rate)
+baseline = y.mean()
+ax_pr.axhline(y=baseline, color='black', lw=1.2, linestyle='--', alpha=0.35,
+              label=f'Random (AP = {baseline:.4f})')
+ax_pr.set_xlabel('Recall (Sensitivity)', fontsize=12)
+ax_pr.set_ylabel('Precision (PPV)', fontsize=12)
+ax_pr.set_title('Precision-Recall Curves', fontsize=14, fontweight='bold')
+ax_pr.legend(loc='lower left', fontsize=8, framealpha=0.85)
+ax_pr.set_xlim([-0.02, 1.02]); ax_pr.set_ylim([-0.02, 1.02])
+ax_pr.grid(True, alpha=0.3, linewidth=0.5)
+ax_pr.spines['top'].set_visible(False); ax_pr.spines['right'].set_visible(False)
+
+fig2.suptitle('ROC + PR — Model Ranking & Positive Class Detection', fontsize=16, fontweight='bold', y=1.01)
+fig2.tight_layout()
+
+fig2.savefig('outputs/figures/ROC_PR双图.png', dpi=300, bbox_inches='tight',
+             facecolor=fig2.get_facecolor())
+plt.close(fig2)
+
+print(f"\n  [OK] ROC+PR dual panel saved -> outputs/figures/ROC_PR双图.png")
+print(f"  {'Model':<22} {'AP':>8}")
+print(f"  {'-'*30}")
+for name in ['LogisticRegression', 'RandomForest', 'XGBoost', 'ExtraTrees', 'Voting Ensemble']:
+    print(f"  {name:<22} {ap_results[name]:>8.4f}")
+
 # ============================================================
 # 模块6：Bootstrap 验证
 # ============================================================
