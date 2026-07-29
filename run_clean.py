@@ -588,6 +588,62 @@ fig6.savefig('outputs/figures/calibration_overlay.png', dpi=300, bbox_inches='ti
 plt.close(fig6)
 print(f"  [OK] Calibration overlay saved -> outputs/figures/calibration_overlay.png")
 
+# ── 校准指标热力图 ──
+cal_summary = []
+for name in model_order:
+    if name == 'Voting Ensemble':
+        y_prob = y_prob_voting_oof
+    else:
+        y_prob = cross_val_predict(
+            models[name], X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+        )[:, 1]
+
+    prob_true, prob_pred = calibration_curve(y, y_prob, n_bins=10, strategy='uniform')
+    brier = brier_score_loss(y, y_prob)
+    eci = np.mean(np.abs(prob_true - prob_pred))
+    e50 = np.median(np.abs(prob_true - prob_pred))
+    emax = np.max(np.abs(prob_true - prob_pred))
+
+    cal_summary.append({
+        'Model': name,
+        'Brier': brier,
+        'ECE': eci,
+        'E50': e50,
+        'E_max': emax,
+    })
+
+cal_df = pd.DataFrame(cal_summary).set_index('Model')
+metrics = ['Brier', 'ECE', 'E50', 'E_max']
+
+fig7, ax7 = plt.subplots(figsize=(8, 3))
+fig7.patch.set_facecolor('#F8F9FA')
+ax7.set_facecolor('#F8F9FA')
+
+im = ax7.imshow(cal_df[metrics].T.values, cmap='RdYlGn_r', aspect='auto', vmin=0)
+
+# Annotate
+for i in range(len(metrics)):
+    for j in range(len(model_order)):
+        val = cal_df[metrics].T.values[i, j]
+        color = 'white' if val > 0.15 else '#333333'
+        ax7.text(j, i, f'{val:.4f}', ha='center', va='center', fontsize=10,
+                 fontweight='bold', color=color)
+
+ax7.set_xticks(range(len(model_order)))
+ax7.set_xticklabels(model_order, fontsize=9, rotation=15, ha='right')
+ax7.set_yticks(range(len(metrics)))
+ax7.set_yticklabels(metrics, fontsize=10)
+ax7.set_title('Calibration Metrics — OOF Predictions', fontsize=13, fontweight='bold')
+
+cbar = fig7.colorbar(im, ax=ax7, shrink=0.85, pad=0.02)
+cbar.set_label('Error (lower = better)', fontsize=9)
+
+fig7.tight_layout()
+fig7.savefig('outputs/figures/calibration_heatmap.png', dpi=300, bbox_inches='tight',
+             facecolor=fig7.get_facecolor())
+plt.close(fig7)
+print(f"  [OK] Calibration heatmap saved -> outputs/figures/calibration_heatmap.png")
+
 # ============================================================
 # 模块6：Bootstrap 验证
 # ============================================================
