@@ -1021,6 +1021,46 @@ fig_abl.savefig('outputs/figures/ablation_heatmap.png', dpi=300, bbox_inches='ti
 plt.close(fig_abl)
 print(f"  [OK] Ablation heatmap saved -> outputs/figures/ablation_heatmap.png")
 
+# ── 各模型消融柱状图（累积AUC增益）──
+abl_model_map = {
+    'LogisticRegression': 'LR',
+    'RandomForest': 'RF',
+    'XGBoost': 'XGB',
+    'ExtraTrees': 'ET',
+}
+group_labels_short = ['Baseline', '+Pre-op\nLabs', '+Intra-op', '+ICU\nAdmission', '+Early\nPost-op']
+
+for full_name, short in abl_model_map.items():
+    fig_a, ax_a = plt.subplots(figsize=(10, 6))
+    fig_a.patch.set_facecolor('#F8F9FA')
+    ax_a.set_facecolor('#F8F9FA')
+
+    values = [ablation_results[r][short] for r in abl_rows]
+    colors_bar = plt.cm.Blues(np.linspace(0.3, 1.0, len(values)))
+
+    bars = ax_a.bar(range(len(values)), values, color=colors_bar, edgecolor='white', width=0.6)
+    for i, (bar, v) in enumerate(zip(bars, values)):
+        ax_a.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.005,
+                  f'{v:.4f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+    ax_a.set_xticks(range(len(group_labels_short)))
+    ax_a.set_xticklabels(group_labels_short, fontsize=10)
+    ax_a.set_ylabel('5-fold CV AUC', fontsize=12)
+    ax_a.set_title(f'Ablation Study — {full_name}', fontsize=13, fontweight='bold',
+                   color=model_colors[full_name])
+    ax_a.set_ylim([0.5, 0.9])
+    ax_a.grid(axis='y', alpha=0.3)
+    ax_a.spines['top'].set_visible(False); ax_a.spines['right'].set_visible(False)
+    ax_a.spines['left'].set_color('#999999'); ax_a.spines['bottom'].set_color('#999999')
+    ax_a.tick_params(colors='#666666')
+
+    fig_a.tight_layout()
+    fname = f'ablation_{full_name.lower()}.png'
+    fig_a.savefig(f'outputs/figures/{fname}', dpi=300, bbox_inches='tight',
+                  facecolor=fig_a.get_facecolor())
+    plt.close(fig_a)
+    print(f"  [OK] Ablation bar saved -> outputs/figures/{fname}")
+
 # ============================================================
 # 模块6：Bootstrap 验证
 # ============================================================
