@@ -350,6 +350,7 @@ ax_roc.spines['top'].set_visible(False); ax_roc.spines['right'].set_visible(Fals
 
 # Right: PR — compute OOF predictions for PR curves
 ap_results = {}
+pr_data = {}
 for name, model in models.items():
     y_prob_oof = cross_val_predict(
         model, X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
@@ -357,6 +358,7 @@ for name, model in models.items():
     precision, recall, _ = precision_recall_curve(y, y_prob_oof)
     ap = average_precision_score(y, y_prob_oof)
     ap_results[name] = ap
+    pr_data[name] = (precision, recall)
     ax_pr.plot(recall, precision, color=model_colors[name], lw=2.0,
                label=f'{name} (AP = {ap:.4f})')
 
@@ -367,6 +369,7 @@ y_prob_v = cross_val_predict(
 precision_v, recall_v, _ = precision_recall_curve(y, y_prob_v)
 ap_v = average_precision_score(y, y_prob_v)
 ap_results['Voting Ensemble'] = ap_v
+pr_data['Voting Ensemble'] = (precision_v, recall_v)
 ax_pr.plot(recall_v, precision_v, color=model_colors['Voting Ensemble'], lw=3.0,
            label=f'Voting Ensemble (AP = {ap_v:.4f})')
 
@@ -394,6 +397,38 @@ print(f"  {'Model':<22} {'AP':>8}")
 print(f"  {'-'*30}")
 for name in ['LogisticRegression', 'RandomForest', 'XGBoost', 'ExtraTrees', 'Voting Ensemble']:
     print(f"  {name:<22} {ap_results[name]:>8.4f}")
+
+# ── 单独 PR 曲线图（高清单图版）──
+fig3, ax3 = plt.subplots(figsize=(9, 8))
+fig3.patch.set_facecolor('#F8F9FA')
+ax3.set_facecolor('#F8F9FA')
+
+for name in ['LogisticRegression', 'RandomForest', 'XGBoost', 'ExtraTrees']:
+    precision, recall = pr_data[name]
+    ax3.plot(recall, precision, color=model_colors[name], lw=2.0,
+             label=f'{name} (AP = {ap_results[name]:.4f})')
+
+precision, recall = pr_data['Voting Ensemble']
+ax3.plot(recall, precision, color=model_colors['Voting Ensemble'], lw=3.0,
+         label=f'Voting Ensemble (AP = {ap_results["Voting Ensemble"]:.4f})')
+
+baseline = y.mean()
+ax3.axhline(y=baseline, color='black', lw=1.2, linestyle='--', alpha=0.35,
+            label=f'Random Classifier (AP = {baseline:.4f})')
+ax3.set_xlabel('Recall (Sensitivity)', fontsize=13)
+ax3.set_ylabel('Precision (Positive Predictive Value)', fontsize=13)
+ax3.set_title('Precision-Recall Curves — 5-Fold CV OOF Predictions', fontsize=14, fontweight='bold')
+ax3.legend(loc='lower left', fontsize=10, framealpha=0.85, edgecolor='#CCCCCC')
+ax3.set_xlim([-0.02, 1.02]); ax3.set_ylim([-0.02, 1.02])
+ax3.grid(True, alpha=0.3, linewidth=0.5, color='#CCCCCC')
+ax3.spines['top'].set_visible(False); ax3.spines['right'].set_visible(False)
+ax3.spines['left'].set_color('#999999'); ax3.spines['bottom'].set_color('#999999')
+ax3.tick_params(colors='#666666')
+
+fig3.savefig('outputs/figures/pr_curves.png', dpi=300, bbox_inches='tight',
+             facecolor=fig3.get_facecolor())
+plt.close(fig3)
+print(f"  [OK] PR curves saved -> outputs/figures/pr_curves.png")
 
 # ============================================================
 # 模块6：Bootstrap 验证
