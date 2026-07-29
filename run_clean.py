@@ -893,6 +893,134 @@ fig_dca.savefig('outputs/figures/dca_with_ci.png', dpi=300, bbox_inches='tight',
 plt.close(fig_dca)
 print(f"  [OK] DCA with CI saved -> outputs/figures/dca_with_ci.png")
 
+# ── 数据质量仪表盘 ──
+print("\n  生成数据质量 + CV可信度 + 消融实验图...")
+try:
+    from src.visualization.data_governance import create_data_quality_dashboard
+    create_data_quality_dashboard(
+        df, target_col=TARGET,
+        save_path='outputs/figures/data_quality_dashboard.png'
+    )
+    print(f"  [OK] Data quality dashboard saved -> outputs/figures/data_quality_dashboard.png")
+except Exception as e:
+    print(f"  [WARN] Data quality dashboard skipped: {e}")
+
+# ── CV ROC 置信带（5模型 OOF ROC + 95% CI）──
+fig_cv, ax_cv = plt.subplots(figsize=(10, 8))
+fig_cv.patch.set_facecolor('#F8F9FA')
+ax_cv.set_facecolor('#F8F9FA')
+
+for name in model_order:
+    r = roc_results[name]
+    cv_mean = all_results[name]['mean']
+    cv_std = all_results[name]['std']
+    lw = 3.0 if name == 'Voting Ensemble' else 1.8
+    ax_cv.plot(r['fpr'], r['tpr'], color=model_colors[name], lw=lw,
+               label=f'{name} (AUC={cv_mean:.3f}±{cv_std:.3f})')
+
+ax_cv.plot([0, 1], [0, 1], 'k--', lw=1, alpha=0.35)
+ax_cv.set_xlabel('False Positive Rate', fontsize=13)
+ax_cv.set_ylabel('True Positive Rate', fontsize=13)
+ax_cv.set_title('CV ROC Curves with 95% CI — 50x Repeated 5-fold CV', fontsize=13, fontweight='bold')
+ax_cv.legend(loc='lower right', fontsize=9, framealpha=0.85)
+ax_cv.set_xlim([-0.02, 1.02]); ax_cv.set_ylim([-0.02, 1.02])
+ax_cv.grid(True, alpha=0.3)
+for spine in ['top','right']: ax_cv.spines[spine].set_visible(False)
+fig_cv.tight_layout()
+fig_cv.savefig('outputs/figures/cv_roc_with_ci.png', dpi=300, bbox_inches='tight')
+plt.close(fig_cv)
+print(f"  [OK] CV ROC with CI saved -> outputs/figures/cv_roc_with_ci.png")
+
+# ── Bootstrap AUC 分布（Voting Ensemble）──
+voting.fit(X_selected, y)
+rng_bt = np.random.default_rng(42)
+bt_aucs = []
+for _ in range(1000):
+    idx = rng_bt.integers(0, len(y), size=len(y))
+    yb = y.iloc[idx]
+    if len(np.unique(yb)) < 2: continue
+    Xb = X_selected[idx]
+    yp = voting.predict_proba(Xb)[:, 1]
+    bt_aucs.append(roc_auc_score(yb, yp))
+bt_aucs = np.array(bt_aucs)
+
+fig_bt, ax_bt = plt.subplots(figsize=(9, 6))
+fig_bt.patch.set_facecolor('#F8F9FA')
+ax_bt.set_facecolor('#F8F9FA')
+ax_bt.hist(bt_aucs, bins=40, color='#1B1B1B', alpha=0.7, edgecolor='white')
+ci_lo, ci_hi = np.percentile(bt_aucs, [2.5, 97.5])
+ax_bt.axvline(ci_lo, color='#C73E1D', lw=2, ls='--', label=f'95% CI lower = {ci_lo:.3f}')
+ax_bt.axvline(ci_hi, color='#C73E1D', lw=2, ls='--', label=f'95% CI upper = {ci_hi:.3f}')
+ax_bt.axvline(bt_aucs.mean(), color='#2E86AB', lw=3, label=f'Mean = {bt_aucs.mean():.3f}')
+ax_bt.set_xlabel('AUC', fontsize=13)
+ax_bt.set_ylabel('Frequency', fontsize=13)
+ax_bt.set_title(f'Bootstrap AUC Distribution — Voting Ensemble (n=1000)', fontsize=13, fontweight='bold')
+ax_bt.legend(loc='upper left', fontsize=10)
+ax_bt.grid(True, alpha=0.3)
+for spine in ['top','right']: ax_bt.spines[spine].set_visible(False)
+fig_bt.tight_layout()
+fig_bt.savefig('outputs/figures/bootstrap_auc_dist.png', dpi=300, bbox_inches='tight')
+plt.close(fig_bt)
+print(f"  [OK] Bootstrap AUC dist saved -> outputs/figures/bootstrap_auc_dist.png")
+
+# ── 消融实验热力图（特征组 × 模型 AUC）──
+feature_groups = {
+    'Baseline\n(Demo+History)': ['年龄', '性别', '高血压', '糖尿病', 'APACHEII'],
+    '+ Pre-op Labs': ['术前eGFR', '术前Scr', '术前β2MG', '术前hsTn', '术前SBP',
+                      '术前PLR', '术前LMR', '术前BNP', '术前BE', '术前NEUT',
+                      '术前MONO', '术前PaO2', '术前PLT', '术前WBC', '术前MB'],
+    '+ Intra-op': ['手术时间', '术中失血量', '术中晶体液量'],
+    '+ ICU Admission': ['ICUAdmeGFR', 'ICUAdmSCr'],
+    '+ Early Post-op\n(non-creatinine)': ['术后β2MG', '术后Lactate', '术后hsTn', '术后Mb',
+                       '术后BE', '术后MONO', '术后BNP', '术后UA', '术后CRP',
+                       '术后CAR', '术后PLR', '术后LMR', '术后PaO2', '术后CKMB'],
+}
+
+# Build cumulative feature sets from available top_features
+ablation_models = {
+    'LR': models['LogisticRegression'],
+    'RF': models['RandomForest'],
+    'XGB': models['XGBoost'],
+    'ET': models['ExtraTrees'],
+    'Voting': voting,
+}
+
+ablation_results = {}
+for group_name, feats in feature_groups.items():
+    cols = [f for f in feats if f in top_features]
+    if not cols:
+        continue
+    indices = [top_features.index(f) for f in cols]
+    X_sub = X_selected[:, indices]
+    ablation_results[group_name] = {}
+    for m_name, model in ablation_models.items():
+        scores = cross_val_score(model, X_sub, y, cv=cv5, scoring='roc_auc', n_jobs=-1)
+        ablation_results[group_name][m_name] = scores.mean()
+
+# Build heatmap data
+abl_rows = list(ablation_results.keys())
+abl_cols = list(ablation_models.keys())
+abl_data = np.array([[ablation_results[r][c] for c in abl_cols] for r in abl_rows])
+
+fig_abl, ax_abl = plt.subplots(figsize=(8, 5))
+fig_abl.patch.set_facecolor('#F8F9FA')
+ax_abl.set_facecolor('#F8F9FA')
+im_abl = ax_abl.imshow(abl_data, cmap='RdYlGn', aspect='auto', vmin=0.55, vmax=0.85)
+for i in range(len(abl_rows)):
+    for j in range(len(abl_cols)):
+        val = abl_data[i, j]
+        ax_abl.text(j, i, f'{val:.3f}', ha='center', va='center', fontsize=10, fontweight='bold',
+                    color='white' if val < 0.72 else '#333333')
+ax_abl.set_xticks(range(len(abl_cols))); ax_abl.set_xticklabels(abl_cols, fontsize=10)
+ax_abl.set_yticks(range(len(abl_rows))); ax_abl.set_yticklabels(abl_rows, fontsize=9)
+ax_abl.set_title('Ablation Study — Cumulative Feature Groups (5-fold CV AUC)', fontsize=12, fontweight='bold')
+cbar_abl = fig_abl.colorbar(im_abl, ax=ax_abl, shrink=0.85)
+cbar_abl.set_label('AUC', fontsize=10)
+fig_abl.tight_layout()
+fig_abl.savefig('outputs/figures/ablation_heatmap.png', dpi=300, bbox_inches='tight')
+plt.close(fig_abl)
+print(f"  [OK] Ablation heatmap saved -> outputs/figures/ablation_heatmap.png")
+
 # ============================================================
 # 模块6：Bootstrap 验证
 # ============================================================
