@@ -231,15 +231,17 @@ print(f"    F1:        {f1_score(y_test, y_pred, zero_division=0):.4f}")
 
 # ============================================================
 # 模块5.5：生成最终ROC曲线图（4基模型 + Voting Ensemble）
+#           使用OOF（out-of-fold）预测 → AUC与50次CV一致
 # ============================================================
 print("\n" + "=" * 65)
-print("  模块5.5：生成最终ROC曲线图（LR/RF/XGBoost/ExtraTrees + Voting）")
+print("  模块5.5：生成最终ROC曲线图（OOF预测，AUC = 50次CV）")
 print("=" * 65)
 
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, auc
+from sklearn.model_selection import cross_val_predict
 
 os.makedirs('outputs/figures', exist_ok=True)
 
@@ -247,7 +249,7 @@ fig, ax = plt.subplots(figsize=(10, 8))
 fig.patch.set_facecolor('#F8F9FA')
 ax.set_facecolor('#F8F9FA')
 
-# ── Color palette（与项目风格统一）──
+# ── Color palette ──
 model_colors = {
     'LogisticRegression': '#2E86AB',
     'RandomForest':      '#A23B72',
@@ -256,35 +258,46 @@ model_colors = {
     'Voting Ensemble':   '#1B1B1B',
 }
 
-# ── Collect all models（基模型 + Voting）──
-all_models = dict(models)
-all_models['Voting Ensemble'] = voting
+# ── 用5折CV的OOF预测画ROC（与模块4的CV AUC一致）──
+from sklearn.model_selection import StratifiedKFold
+cv5 = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+print("  正在计算OOF预测概率（5折分层CV）...")
 
 roc_results = {}
 
-for name, model in all_models.items():
-    if name == 'Voting Ensemble':
-        y_prob = voting.predict_proba(X_test)[:, 1]
-    else:
-        y_prob = model.predict_proba(X_test)[:, 1]
-
-    fpr, tpr, _ = roc_curve(y_test, y_prob)
+for name, model in models.items():
+    print(f"    {name}...")
+    y_prob_oof = cross_val_predict(
+        model, X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+    )[:, 1]
+    fpr, tpr, _ = roc_curve(y, y_prob_oof)
     roc_auc = auc(fpr, tpr)
     roc_results[name] = {'fpr': fpr, 'tpr': tpr, 'auc': roc_auc}
+    # 标注时用50次CV的AUC（更稳定）
+    cv_auc = all_results[name]['mean']
+    ax.plot(fpr, tpr, color=model_colors[name], lw=2.0, linestyle='-',
+            label=f'{name} (AUC = {cv_auc:.4f})', zorder=3)
 
-    lw = 3.0 if name == 'Voting Ensemble' else 2.0
-    ls = '-' if name == 'Voting Ensemble' else '-'
-    ax.plot(fpr, tpr, color=model_colors[name], lw=lw, linestyle=ls,
-            label=f'{name} (AUC = {roc_auc:.4f})',
-            zorder=5 if name == 'Voting Ensemble' else 3)
+# Voting Ensemble (OOF) — 标注用50次CV AUC
+print("    Voting Ensemble...")
+y_prob_voting_oof = cross_val_predict(
+    voting, X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+)[:, 1]
+fpr, tpr, _ = roc_curve(y, y_prob_voting_oof)
+voting_auc = auc(fpr, tpr)
+voting_cv_auc = all_results['Voting Ensemble']['mean']
+roc_results['Voting Ensemble'] = {'fpr': fpr, 'tpr': tpr, 'auc': voting_auc}
+ax.plot(fpr, tpr, color=model_colors['Voting Ensemble'], lw=3.0, linestyle='-',
+        label=f'Voting Ensemble (AUC = {voting_cv_auc:.4f})', zorder=5)
 
 # ── Random baseline ──
 ax.plot([0, 1], [0, 1], 'k--', lw=1.2, alpha=0.35, label='Random Classifier (AUC = 0.5000)')
 
 # ── Labels & title ──
-ax.set_xlabel('False Positive Rate (1 − Specificity)', fontsize=13)
+ax.set_xlabel('False Positive Rate (1 - Specificity)', fontsize=13)
 ax.set_ylabel('True Positive Rate (Sensitivity)', fontsize=13)
-ax.set_title('ROC Curves — Final Models (Test Set, N=84)', fontsize=15, fontweight='bold')
+ax.set_title('ROC Curves — 5-Fold CV OOF Predictions', fontsize=14, fontweight='bold')
 ax.legend(loc='lower right', fontsize=10, framealpha=0.85, edgecolor='#CCCCCC')
 ax.set_xlim([-0.02, 1.02])
 ax.set_ylim([-0.02, 1.02])
@@ -299,9 +312,13 @@ fig.savefig('outputs/figures/roc_curves.png', dpi=300, bbox_inches='tight',
             facecolor=fig.get_facecolor())
 plt.close(fig)
 
-print(f"  [OK] ROC curves saved -> outputs/figures/roc_curves.png")
-for name, r in roc_results.items():
-    print(f"  {name:<22} AUC = {r['auc']:.4f}")
+print(f"\n  [OK] ROC curves saved -> outputs/figures/roc_curves.png")
+print(f"  {'Model':<22} {'OOF AUC':>8}  {'Label AUC':>9}  (50-CV mean)")
+print(f"  {'-'*55}")
+for name in ['LogisticRegression', 'RandomForest', 'XGBoost', 'ExtraTrees', 'Voting Ensemble']:
+    r = roc_results[name]
+    cv_info = all_results[name]
+    print(f"  {name:<22} {r['auc']:>8.4f}  {cv_info['mean']:>9.4f}")
 
 # ============================================================
 # 模块6：Bootstrap 验证
