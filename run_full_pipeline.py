@@ -329,21 +329,11 @@ for name, r in eval_results.items():
         'y_pred': r['y_pred']
     }
 
-# ROC curves
-print("\nGenerating ROC curves...")
-try:
-    plot_roc_curves(model_results_dict, save_path='outputs/figures/roc_curves.png')
-    print("  ROC curves saved")
-except Exception as e:
-    print(f"  ROC failed: {e}")
+# ROC curves — 已迁移至 run_clean.py（统一5模型+Voting版本）
+print("\n  [SKIP] ROC curves (已由 run_clean.py 统一生成)")
 
-# PR curves
-print("Generating PR curves...")
-try:
-    plot_pr_curves(model_results_dict, save_path='outputs/figures/pr_curves.png')
-    print("  PR curves saved")
-except Exception as e:
-    print(f"  PR failed: {e}")
+# PR curves — 已迁移至 run_clean.py
+print("  [SKIP] PR curves (已由 run_clean.py 统一生成)")
 
 # Confusion matrices
 print("Generating confusion matrices...")

@@ -112,9 +112,10 @@ for name, model in models.items():
     }
 
 # ============================================================
-# 3. ROC 曲线
+# 3. ROC 曲线 — 已迁移至 run_clean.py
 # ============================================================
-print("3/7 生成 ROC 曲线...")
+print("3/7 跳过 (ROC 曲线已由 run_clean.py 统一生成)")
+"""
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -142,32 +143,12 @@ plt.tight_layout()
 fig.savefig('outputs/figures/roc_curves.png', dpi=300, bbox_inches='tight')
 plt.close()
 print("   [OK] outputs/figures/roc_curves.png")
+"""
 
 # ============================================================
-# 4. PR 曲线
+# 4. PR 曲线 — 已迁移至 run_clean.py
 # ============================================================
-print("4/7 生成 PR 曲线...")
-from sklearn.metrics import precision_recall_curve, average_precision_score
-
-fig, ax = plt.subplots(figsize=(10, 8))
-baseline = y_test.mean()
-
-for i, (name, res) in enumerate(model_results.items()):
-    precision, recall, _ = precision_recall_curve(res['y_true'], res['y_prob'])
-    ap = average_precision_score(res['y_true'], res['y_prob'])
-    ax.plot(recall, precision, linewidth=2, color=colors[i], label=f'{name} (AP={ap:.4f})')
-
-ax.axhline(y=baseline, color='gray', linestyle='--', alpha=0.5,
-           label=f'Baseline (prevalence={baseline:.3f})')
-ax.set_xlabel('Recall (Sensitivity)', fontsize=12)
-ax.set_ylabel('Precision (PPV)', fontsize=12)
-ax.set_title('Precision-Recall Curves - AKI Prediction\n(Pre-operative Features Only)', fontsize=14, fontweight='bold')
-ax.legend(loc='best', fontsize=10)
-ax.grid(True, alpha=0.3)
-plt.tight_layout()
-fig.savefig('outputs/figures/pr_curves.png', dpi=300, bbox_inches='tight')
-plt.close()
-print("   [OK] outputs/figures/pr_curves.png")
+print("4/7 跳过 (PR 曲线已由 run_clean.py 统一生成)")
 
 # ============================================================
 # 5. 校准曲线

@@ -55,13 +55,8 @@ for name,model in models.items():
 
 # Generate plots
 print('\nGenerating plots...')
-print('  ROC...')
-try:plot_roc_curves(model_results,save_path=f'{fig_dir}/roc_curves.png');print('    OK')
-except Exception as e:print(f'    FAIL: {e}')
-
-print('  PR...')
-try:plot_pr_curves(model_results,save_path=f'{fig_dir}/pr_curves.png');print('    OK')
-except Exception as e:print(f'    FAIL: {e}')
+	# ROC & PR — 已迁移至 run_clean.py
+print('  ROC & PR: SKIP (已由 run_clean.py 统一生成5模型+Voting版本)')
 
 print('  CM...')
 try:plot_confusion_matrices(model_results,save_path=f'{fig_dir}/confusion_matrices.png');print('    OK')
