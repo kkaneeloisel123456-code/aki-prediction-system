@@ -545,6 +545,49 @@ fig5.savefig('outputs/figures/calibration_curves.png', dpi=300, bbox_inches='tig
 plt.close(fig5)
 print(f"  [OK] Calibration curves saved -> outputs/figures/calibration_curves.png")
 
+# ── 校准曲线叠加对比图 ──
+fig6, ax6 = plt.subplots(figsize=(9, 8))
+fig6.patch.set_facecolor('#F8F9FA')
+ax6.set_facecolor('#F8F9FA')
+
+for name in model_order:
+    # Reuse OOF predictions from above (re-compute for simplicity)
+    if name == 'Voting Ensemble':
+        y_prob = cross_val_predict(
+            voting, X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+        )[:, 1]
+    else:
+        y_prob = cross_val_predict(
+            models[name], X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+        )[:, 1]
+
+    prob_true, prob_pred = calibration_curve(y, y_prob, n_bins=10, strategy='uniform')
+    brier = brier_score_loss(y, y_prob)
+    cv_auc = all_results[name]['mean']
+
+    lw = 3.0 if name == 'Voting Ensemble' else 2.0
+    marker = 's' if name == 'Voting Ensemble' else 'o'
+    ms = 9 if name == 'Voting Ensemble' else 6
+    ax6.plot(prob_pred, prob_true, marker=marker, linewidth=lw, markersize=ms,
+             color=model_colors[name],
+             label=f'{name}  | Brier={brier:.4f}  AUC={cv_auc:.4f}')
+
+ax6.plot([0, 1], [0, 1], 'k--', lw=1.2, alpha=0.4, label='Perfect Calibration')
+ax6.set_xlabel('Predicted Probability', fontsize=13)
+ax6.set_ylabel('Observed Proportion', fontsize=13)
+ax6.set_title('Calibration Curves — Overlay Comparison', fontsize=14, fontweight='bold')
+ax6.legend(loc='lower right', fontsize=9, framealpha=0.85, edgecolor='#CCCCCC')
+ax6.set_xlim([-0.02, 1.02]); ax6.set_ylim([-0.02, 1.02])
+ax6.grid(True, alpha=0.3, linewidth=0.5, color='#CCCCCC')
+ax6.spines['top'].set_visible(False); ax6.spines['right'].set_visible(False)
+ax6.spines['left'].set_color('#999999'); ax6.spines['bottom'].set_color('#999999')
+ax6.tick_params(colors='#666666')
+
+fig6.savefig('outputs/figures/calibration_overlay.png', dpi=300, bbox_inches='tight',
+             facecolor=fig6.get_facecolor())
+plt.close(fig6)
+print(f"  [OK] Calibration overlay saved -> outputs/figures/calibration_overlay.png")
+
 # ============================================================
 # 模块6：Bootstrap 验证
 # ============================================================
