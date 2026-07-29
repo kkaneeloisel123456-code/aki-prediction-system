@@ -213,55 +213,8 @@ fig.savefig('outputs/figures/dca_curve.png', dpi=300, bbox_inches='tight')
 plt.close()
 print("   [OK] outputs/figures/dca_curve.png")
 
-# ============================================================
-# 7. SHAP 解释
-# ============================================================
-print("7/7 生成 SHAP 解释...")
-
-try:
-    import shap
-
-    # 用逻辑回归（最稳定）做解释
-    best_name = 'LogisticRegression'
-    best_model = models[best_name]
-
-    # 用测试集样本做解释
-    X_explain = X_test[:50]
-    feature_names = safe_features
-
-    # Linear explainer for Logistic Regression
-    explainer = shap.LinearExplainer(best_model, X_explain[:20])
-    shap_values = explainer.shap_values(X_explain)
-
-    # SHAP summary
-    fig, ax = plt.subplots(figsize=(10, 8))
-    shap.summary_plot(shap_values, X_explain, feature_names=feature_names,
-                      max_display=10, show=False)
-    plt.tight_layout()
-    fig.savefig('outputs/figures/shap_summary.png', dpi=300, bbox_inches='tight')
-    plt.close()
-    print("   [OK] outputs/figures/shap_summary.png")
-
-    # SHAP bar
-    fig, ax = plt.subplots(figsize=(10, 8))
-    shap.summary_plot(shap_values, X_explain, feature_names=feature_names,
-                      max_display=10, plot_type='bar', show=False)
-    plt.tight_layout()
-    fig.savefig('outputs/figures/shap_bar.png', dpi=300, bbox_inches='tight')
-    plt.close()
-    print("   [OK] outputs/figures/shap_bar.png")
-
-    # SHAP importance table
-    mean_abs_shap = np.abs(shap_values).mean(axis=0)
-    shap_df = pd.DataFrame({
-        'Feature': feature_names,
-        'Mean_ABS_SHAP': mean_abs_shap
-    }).sort_values('Mean_ABS_SHAP', ascending=False)
-    shap_df.to_csv('outputs/tables/shap_importance.csv', index=False, encoding='utf-8-sig')
-    print("   [OK] outputs/tables/shap_importance.csv")
-
-except Exception as e:
-    print(f"   SHAP 跳过: {e} (可能需要 pip install shap)")
+# 7. SHAP 解释 — 已迁移至 run_clean.py
+print("7/7 跳过 (SHAP 已由 run_clean.py 统一生成，基于 XGBoost)")
 
 # ============================================================
 # 汇总表

@@ -83,34 +83,8 @@ except Exception as e:print(f'    FAIL: {e}')
 create_calibration_summary(model_results,save_name='calibration_summary.csv')
 analyze_risk_groups(y_test.values,model_results[best_name]['y_prob'],save_name='risk_stratification.csv')
 
-# SHAP
-print('\n=== SHAP ===')
-try:
-    import shap
-    from src.visualization.shap_viz import plot_shap_summary,plot_shap_bar,plot_shap_dependence,create_shap_importance_table,generate_clinical_interpretation,save_clinical_interpretation
-
-    best_model=models[best_name]
-    X_explain=X_test.iloc[:min(50,len(X_test))]
-
-    if best_name in ['XGBoost','LightGBM','CatBoost','RandomForest','ExtraTrees']:
-        explainer=shap.TreeExplainer(best_model)
-        shap_values=explainer.shap_values(X_explain)
-        if isinstance(shap_values,list):shap_values=shap_values[1]
-    else:
-        explainer=shap.KernelExplainer(best_model.predict_proba,shap.kmeans(X_explain,min(20,len(X_explain))))
-        shap_values=explainer.shap_values(X_explain)
-        if isinstance(shap_values,list):shap_values=shap_values[1]
-
-    plot_shap_summary(shap_values,X_explain,max_display=15,save_name='shap_summary.png')
-    plot_shap_bar(shap_values,X_explain,max_display=15,save_name='shap_bar.png')
-    plot_shap_dependence(shap_values,X_explain,list(X_explain.columns)[:5],top_n=5,save_name='shap_dependence.png')
-    create_shap_importance_table(shap_values,X_explain,save_name='shap_importance.csv')
-    clinical_notes=generate_clinical_interpretation(shap_values,X_explain,list(X_explain.columns),top_n=10)
-    save_clinical_interpretation(clinical_notes,save_name='clinical_interpretation.md')
-    print('SHAP complete!')
-except Exception as e:
-    print(f'SHAP FAIL: {e}')
-    import traceback;traceback.print_exc()
+# SHAP — 已迁移至 run_clean.py (基于 XGBoost TreeExplainer, 全量420例)
+print('\n=== SHAP: SKIP (已由 run_clean.py 统一生成) ===')
 
 print('\n=== DONE ===')
 print(f'Figures: {fig_dir}/')

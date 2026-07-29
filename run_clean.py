@@ -644,6 +644,77 @@ fig7.savefig('outputs/figures/calibration_heatmap.png', dpi=300, bbox_inches='ti
 plt.close(fig7)
 print(f"  [OK] Calibration heatmap saved -> outputs/figures/calibration_heatmap.png")
 
+# ── SHAP 可解释性分析（基于 XGBoost，AUC=0.819 最接近Voting）──
+print("\n  生成 SHAP 可解释性图...")
+import shap
+
+# 使用全量数据训练 XGBoost 做 SHAP
+xgb_shap = models['XGBoost']
+xgb_shap.fit(X_selected, y)
+
+# TreeExplainer (快速精确)
+explainer = shap.TreeExplainer(xgb_shap)
+shap_values = explainer.shap_values(X_selected)
+
+# 特征名映射
+feature_names_short = [f[:25] for f in top_features]
+
+# SHAP Summary (bee swarm)
+fig8, ax8 = plt.subplots(figsize=(10, 8))
+fig8.patch.set_facecolor('#F8F9FA')
+shap.summary_plot(shap_values, X_selected, feature_names=feature_names_short,
+                  max_display=20, show=False)
+ax8 = plt.gca()
+ax8.set_title('SHAP Summary — Feature Impact on AKI Prediction (XGBoost)', fontsize=13, fontweight='bold')
+fig8.tight_layout()
+fig8.savefig('outputs/figures/shap_summary.png', dpi=300, bbox_inches='tight',
+             facecolor=fig8.get_facecolor())
+plt.close(fig8)
+print(f"  [OK] SHAP summary saved -> outputs/figures/shap_summary.png")
+
+# SHAP Bar (mean |SHAP|)
+fig9, ax9 = plt.subplots(figsize=(10, 8))
+fig9.patch.set_facecolor('#F8F9FA')
+shap.summary_plot(shap_values, X_selected, feature_names=feature_names_short,
+                  max_display=20, plot_type='bar', show=False)
+ax9 = plt.gca()
+ax9.set_title('SHAP Feature Importance — Mean |SHAP| (XGBoost)', fontsize=13, fontweight='bold')
+fig9.tight_layout()
+fig9.savefig('outputs/figures/shap_bar.png', dpi=300, bbox_inches='tight',
+             facecolor=fig9.get_facecolor())
+plt.close(fig9)
+print(f"  [OK] SHAP bar saved -> outputs/figures/shap_bar.png")
+
+# SHAP Dependence (Top 4 features)
+top4_idx = np.argsort(np.abs(shap_values).mean(axis=0))[::-1][:4]
+fig10, axes10 = plt.subplots(2, 2, figsize=(14, 12))
+fig10.patch.set_facecolor('#F8F9FA')
+axes10_flat = axes10.ravel()
+
+for i, feat_idx in enumerate(top4_idx):
+    ax = axes10_flat[i]
+    ax.set_facecolor('#F8F9FA')
+    shap.dependence_plot(feat_idx, shap_values, X_selected,
+                         feature_names=feature_names_short, ax=ax, show=False)
+    ax.set_title(f'SHAP Dependence — {feature_names_short[feat_idx]}', fontsize=11, fontweight='bold')
+    ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False)
+
+fig10.suptitle('SHAP Dependence — Top 4 Features (XGBoost)', fontsize=14, fontweight='bold', y=1.01)
+fig10.tight_layout()
+fig10.savefig('outputs/figures/shap_dependence.png', dpi=300, bbox_inches='tight',
+             facecolor=fig10.get_facecolor())
+plt.close(fig10)
+print(f"  [OK] SHAP dependence saved -> outputs/figures/shap_dependence.png")
+
+# SHAP 重要性表
+mean_shap = np.abs(shap_values).mean(axis=0)
+shap_df = pd.DataFrame({
+    'Feature': top_features,
+    'Mean_ABS_SHAP': mean_shap
+}).sort_values('Mean_ABS_SHAP', ascending=False)
+shap_df.to_csv('outputs/tables/shap_importance.csv', index=False, encoding='utf-8-sig')
+print(f"  [OK] SHAP importance table -> outputs/tables/shap_importance.csv")
+
 # ============================================================
 # 模块6：Bootstrap 验证
 # ============================================================
