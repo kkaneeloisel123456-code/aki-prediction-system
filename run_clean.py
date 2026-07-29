@@ -517,22 +517,23 @@ for idx, name in enumerate(model_order):
 
     prob_true, prob_pred = calibration_curve(y, y_prob, n_bins=10, strategy='uniform')
     brier = brier_score_loss(y, y_prob)
+    cv_auc = all_results[name]['mean']
 
     ax.plot(prob_pred, prob_true, marker='o', linewidth=2, markersize=8,
-            color=model_colors[name], label=f'Brier = {brier:.4f}')
+            color=model_colors[name],
+            label=f'Brier={brier:.4f}  AUC={cv_auc:.4f}')
     ax.plot([0, 1], [0, 1], 'k--', lw=1, alpha=0.4, label='Perfect')
 
     title = f'{name}'
     if name == 'Voting Ensemble':
-        title += ' (Best)'
+        title += ' (Weighted: LR=2 RF=2 XGB=1 ET=1)'
     ax.set_title(title, fontsize=12, fontweight='bold', color=model_colors[name])
     ax.set_xlabel('Predicted Probability', fontsize=10, color='#666666')
     ax.set_ylabel('Observed Proportion', fontsize=10, color='#666666')
-    ax.legend(loc='lower right', fontsize=8, framealpha=0.85)
+    ax.legend(loc='lower right', fontsize=7.5, framealpha=0.85)
     ax.set_xlim([-0.02, 1.02]); ax.set_ylim([-0.02, 1.02])
     ax.grid(True, alpha=0.3, linewidth=0.5)
     ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False)
-    ax.plot([], [], ' ', label=f'AUC={all_results[name]["mean"]:.4f}')
 
 # Hide extra subplot
 axes5_flat[5].set_visible(False)
