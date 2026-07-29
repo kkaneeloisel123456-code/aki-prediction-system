@@ -715,6 +715,109 @@ shap_df = pd.DataFrame({
 shap_df.to_csv('outputs/tables/shap_importance.csv', index=False, encoding='utf-8-sig')
 print(f"  [OK] SHAP importance table -> outputs/tables/shap_importance.csv")
 
+# ── PDP 非线性效应图（Voting Ensemble, Top4特征）──
+print("\n  生成 PDP + 亚组分析...")
+from sklearn.inspection import PartialDependenceDisplay
+
+# 用全量数据训练 Voting 做 PDP
+voting_full = VotingClassifier(
+    estimators=[(name, model) for name, model in models.items()],
+    voting='soft', weights=[2, 2, 1, 1]
+)
+voting_full.fit(X_selected, y)
+
+# Top4 SHAP特征索引
+pdp_indices = top4_idx[:4]
+pdp_names = [top_features[i][:25] for i in pdp_indices]
+
+fig_pdp, ax_pdp = plt.subplots(2, 2, figsize=(14, 12))
+fig_pdp.patch.set_facecolor('#F8F9FA')
+ax_pdp_flat = ax_pdp.ravel()
+
+# 逐个画 PDP（PartialDependenceDisplay 一次画一个）
+for i, feat_idx in enumerate(pdp_indices):
+    ax = ax_pdp_flat[i]
+    ax.set_facecolor('#F8F9FA')
+    PartialDependenceDisplay.from_estimator(
+        voting_full, X_selected, [feat_idx], ax=ax,
+        grid_resolution=50, line_kw={'color': model_colors['Voting Ensemble'], 'lw': 2}
+    )
+    ax.set_title(pdp_names[i], fontsize=12, fontweight='bold')
+    ax.set_xlabel('')
+    ax.set_ylabel('')
+    ax.grid(True, alpha=0.3)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+fig_pdp.suptitle('Partial Dependence Plots — Top 4 Features (Voting Ensemble)', fontsize=14, fontweight='bold')
+fig_pdp.supxlabel('Feature Value', fontsize=11, y=0.02)
+fig_pdp.supylabel('Predicted AKI Probability', fontsize=11, x=0.02)
+fig_pdp.tight_layout()
+fig_pdp.savefig('outputs/figures/PDP非线性效应.png', dpi=300, bbox_inches='tight',
+                facecolor=fig_pdp.get_facecolor())
+plt.close(fig_pdp)
+print(f"  [OK] PDP saved -> outputs/figures/PDP非线性效应.png")
+
+# ── 亚组分析（Voting Ensemble）──
+prob_all = voting_full.predict_proba(X_selected)[:, 1]
+risk_median = np.median(prob_all)
+
+subgroups = [
+    ('High Risk\n(prob >= median)', prob_all >= risk_median, '#F44336'),
+    ('Low Risk\n(prob < median)', prob_all < risk_median, '#4CAF50'),
+]
+# ICU入室肌酐分层
+if 'ICUAdmSCr' in top_features:
+    idx_scr = top_features.index('ICUAdmSCr')
+    scr_vals = X_selected[:, idx_scr]
+    scr_med = np.median(scr_vals)
+    subgroups += [
+        ('Worse Renal\n(ICU-SCr >= median)', scr_vals >= scr_med, '#FF9800'),
+        ('Better Renal\n(ICU-SCr < median)', scr_vals < scr_med, '#2196F3'),
+    ]
+
+sub_data = []
+for label, mask, clr in subgroups:
+    n_s = mask.sum()
+    aki_rate = y[mask].mean() * 100 if n_s > 0 else 0
+    sub_data.append({'label': label, 'n': n_s, 'rate': aki_rate, 'color': clr})
+
+fig_sub, ax_sub = plt.subplots(figsize=(12, 5))
+fig_sub.patch.set_facecolor('#F8F9FA')
+ax_sub.set_facecolor('#F8F9FA')
+
+labels = [d['label'] for d in sub_data]
+rates = [d['rate'] for d in sub_data]
+colors = [d['color'] for d in sub_data]
+ns = [d['n'] for d in sub_data]
+
+y_pos = range(len(labels))
+bars = ax_sub.barh(y_pos, rates, color=colors, alpha=0.85, height=0.6, edgecolor='white')
+for bar, n, rate in zip(bars, ns, rates):
+    ax_sub.text(bar.get_width() + 0.5, bar.get_y() + bar.get_height()/2,
+                f'n={n}  ({rate:.1f}%)', va='center', fontsize=11, fontweight='bold')
+ax_sub.set_yticks(y_pos)
+ax_sub.set_yticklabels(labels, fontsize=10)
+ax_sub.set_xlabel('AKI Incidence (%)', fontsize=12)
+ax_sub.set_title('Subgroup Analysis — AKI Risk Stratification (Voting Ensemble)', fontsize=13, fontweight='bold')
+ax_sub.set_xlim([0, max(rates) * 1.15])
+ax_sub.grid(axis='x', alpha=0.3)
+ax_sub.spines['top'].set_visible(False); ax_sub.spines['right'].set_visible(False)
+
+fig_sub.tight_layout()
+fig_sub.savefig('outputs/figures/亚组分析.png', dpi=300, bbox_inches='tight',
+                facecolor=fig_sub.get_facecolor())
+plt.close(fig_sub)
+
+# 保存亚组分析表
+sub_df = pd.DataFrame([
+    {'Subgroup': d['label'].replace('\n', ' '), 'N': d['n'], 'AKI_Rate_%': f"{d['rate']:.1f}"}
+    for d in sub_data
+])
+sub_df.to_csv('outputs/tables/亚组分析.csv', index=False, encoding='utf-8-sig')
+print(f"  [OK] Subgroup analysis saved -> outputs/figures/亚组分析.png")
+print(f"  [OK] Subgroup table -> outputs/tables/亚组分析.csv")
+
 # ============================================================
 # 模块6：Bootstrap 验证
 # ============================================================
