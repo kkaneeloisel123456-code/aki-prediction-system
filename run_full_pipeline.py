@@ -341,24 +341,8 @@ print("  [SKIP] Confusion matrices (已由 run_clean.py 统一生成)")
 # Calibration curves — 已迁移至 run_clean.py
 print("  [SKIP] Calibration curves (已由 run_clean.py 统一生成)")
 
-# DCA
-print("Generating DCA...")
-try:
-    model_probs_dict = {n: r['y_prob'] for n, r in eval_results.items()}
-    plot_decision_curve(y_test.values, model_probs_dict, save_name='decision_curve.png')
-    print("  DCA saved")
-except Exception as e:
-    print(f"  DCA failed: {e}")
-
-# Best model clinical impact
-best_model_name = eval_df.iloc[0]['Model']
-print(f"\nBest model: {best_model_name} (AUC={eval_df.iloc[0]['AUC']:.4f})")
-try:
-    plot_clinical_impact_curve(y_test.values, eval_results[best_model_name]['y_prob'],
-                                save_name='clinical_impact_curve.png')
-    print("  Clinical impact curve saved")
-except Exception as e:
-    print(f"  Clinical impact failed: {e}")
+# DCA + Clinical Impact — 已迁移至 run_clean.py
+print("  [SKIP] DCA + Clinical Impact (已由 run_clean.py 统一生成)")
 
 # Calibration summary & risk stratification
 try:

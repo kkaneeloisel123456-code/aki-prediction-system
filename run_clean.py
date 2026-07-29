@@ -818,6 +818,81 @@ sub_df.to_csv('outputs/tables/亚组分析.csv', index=False, encoding='utf-8-si
 print(f"  [OK] Subgroup analysis saved -> outputs/figures/亚组分析.png")
 print(f"  [OK] Subgroup table -> outputs/tables/亚组分析.csv")
 
+# ── DCA with 95% CI（Voting Ensemble, Bootstrap）──
+print("\n  生成 DCA with 95% CI...")
+
+def _net_benefit(y_true, y_prob, threshold):
+    """Net benefit = (TP/N) - (FP/N) * (threshold/(1-threshold))"""
+    y_pred = (y_prob >= threshold).astype(int)
+    tp = ((y_pred == 1) & (y_true == 1)).sum()
+    fp = ((y_pred == 1) & (y_true == 0)).sum()
+    n = len(y_true)
+    nb = tp / n - fp / n * (threshold / (1 - threshold))
+    return nb
+
+def _treat_all_nb(y_true, threshold):
+    """Net benefit of treating everyone."""
+    tp = y_true.sum()
+    fp = (1 - y_true).sum()
+    n = len(y_true)
+    return tp / n - fp / n * (threshold / (1 - threshold))
+
+# OOF predictions for Voting
+y_prob_dca = y_prob_voting_oof
+thresholds = np.linspace(0.01, 0.99, 99)
+
+# Bootstrap CI
+n_boot = 500
+rng_dca = np.random.RandomState(42)
+nb_bootstrap = np.zeros((n_boot, len(thresholds)))
+
+for b in range(n_boot):
+    idx = rng_dca.choice(len(y), len(y), replace=True)
+    y_b = y.iloc[idx].values
+    p_b = y_prob_dca[idx]
+    for j, t in enumerate(thresholds):
+        nb_bootstrap[b, j] = _net_benefit(y_b, p_b, t)
+
+nb_lower = np.percentile(nb_bootstrap, 2.5, axis=0)
+nb_upper = np.percentile(nb_bootstrap, 97.5, axis=0)
+nb_mean = np.array([_net_benefit(y.values, y_prob_dca, t) for t in thresholds])
+nb_treat_all = np.array([_treat_all_nb(y.values, t) for t in thresholds])
+
+fig_dca, ax_dca = plt.subplots(figsize=(10, 8))
+fig_dca.patch.set_facecolor('#F8F9FA')
+ax_dca.set_facecolor('#F8F9FA')
+
+ax_dca.fill_between(thresholds, nb_lower, nb_upper, alpha=0.2, color='#1B1B1B',
+                    label=f'95% CI (Bootstrap n={n_boot})')
+ax_dca.plot(thresholds, nb_mean, '-', color='#1B1B1B', lw=3,
+            label=f'Voting Ensemble (AUC={voting_cv_auc:.4f})')
+ax_dca.plot(thresholds, nb_treat_all, '--', color='#999999', lw=2, label='Treat All')
+ax_dca.plot(thresholds, np.zeros_like(thresholds), '-', color='#CCCCCC', lw=2, label='Treat None')
+
+ax_dca.set_xlabel('Threshold Probability', fontsize=13)
+ax_dca.set_ylabel('Net Benefit', fontsize=13)
+ax_dca.set_title('Decision Curve Analysis — Voting Ensemble with 95% CI', fontsize=14, fontweight='bold')
+ax_dca.legend(loc='upper right', fontsize=10, framealpha=0.85, edgecolor='#CCCCCC')
+ax_dca.set_xlim([0, 1])
+ax_dca.set_ylim([-0.05, None])
+ax_dca.grid(True, alpha=0.3, linewidth=0.5, color='#CCCCCC')
+ax_dca.spines['top'].set_visible(False); ax_dca.spines['right'].set_visible(False)
+ax_dca.spines['left'].set_color('#999999'); ax_dca.spines['bottom'].set_color('#999999')
+ax_dca.tick_params(colors='#666666')
+
+# Annotation
+ax_dca.annotate(
+    'Curve above Treat All = clinical net benefit',
+    xy=(0.15, 0.12), fontsize=9, ha='left', color='#333333',
+    bbox=dict(boxstyle='round,pad=0.3', facecolor='#fffde7', edgecolor='#F18F01', alpha=0.9)
+)
+
+fig_dca.tight_layout()
+fig_dca.savefig('outputs/figures/dca_with_ci.png', dpi=300, bbox_inches='tight',
+                facecolor=fig_dca.get_facecolor())
+plt.close(fig_dca)
+print(f"  [OK] DCA with CI saved -> outputs/figures/dca_with_ci.png")
+
 # ============================================================
 # 模块6：Bootstrap 验证
 # ============================================================

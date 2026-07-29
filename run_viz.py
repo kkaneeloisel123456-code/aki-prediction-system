@@ -14,7 +14,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score
 from src.data.features import select_features_combined,encode_categorical_features
 from src.models.evaluate import plot_roc_curves,plot_pr_curves,plot_confusion_matrices
-from src.models.calibration import plot_calibration_curves_all,plot_decision_curve,plot_clinical_impact_curve,create_calibration_summary,analyze_risk_groups
+from src.models.calibration import plot_calibration_curves_all,create_calibration_summary,analyze_risk_groups
 
 fig_dir='outputs/figures';tab_dir='outputs/tables'
 os.makedirs(fig_dir,exist_ok=True);os.makedirs(tab_dir,exist_ok=True)
@@ -67,11 +67,8 @@ print('  Calibration...')
 # Calibration — 已迁移至 run_clean.py
 print('  Calibration: SKIP (已由 run_clean.py 统一生成)')
 
-print('  DCA...')
-try:
-    probs_dict={n:r['y_prob'] for n,r in model_results.items()}
-    plot_decision_curve(y_test.values,probs_dict,save_name='decision_curve.png');print('    OK')
-except Exception as e:print(f'    FAIL: {e}')
+# DCA — 已迁移至 run_clean.py
+print('  DCA: SKIP (已由 run_clean.py 统一生成)')
 
 best_name=sorted(model_results.keys(),key=lambda n:roc_auc_score(model_results[n]['y_true'],model_results[n]['y_prob']),reverse=True)[0]
 print(f'Best model: {best_name}')
