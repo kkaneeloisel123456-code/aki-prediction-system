@@ -59,8 +59,8 @@ print('\nGenerating plots...')
 print('  ROC & PR: SKIP (已由 run_clean.py 统一生成5模型+Voting版本)')
 
 print('  CM...')
-try:plot_confusion_matrices(model_results,save_path=f'{fig_dir}/confusion_matrices.png');print('    OK')
-except Exception as e:print(f'    FAIL: {e}')
+# Confusion matrices — 已迁移至 run_clean.py
+print('  Confusion Matrices: SKIP (已由 run_clean.py 统一生成)')
 
 # Note: calibration functions internally prepend FIGURES_DIR/TABLES_DIR, pass filename only
 print('  Calibration...')

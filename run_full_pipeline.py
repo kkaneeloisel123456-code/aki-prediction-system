@@ -335,13 +335,8 @@ print("\n  [SKIP] ROC curves (已由 run_clean.py 统一生成)")
 # PR curves — 已迁移至 run_clean.py
 print("  [SKIP] PR curves (已由 run_clean.py 统一生成)")
 
-# Confusion matrices
-print("Generating confusion matrices...")
-try:
-    plot_confusion_matrices(model_results_dict, save_path='outputs/figures/confusion_matrices.png')
-    print("  Confusion matrices saved")
-except Exception as e:
-    print(f"  CM failed: {e}")
+# Confusion matrices — 已迁移至 run_clean.py
+print("  [SKIP] Confusion matrices (已由 run_clean.py 统一生成)")
 
 # Calibration curves
 print("Generating calibration curves...")

@@ -430,6 +430,69 @@ fig3.savefig('outputs/figures/pr_curves.png', dpi=300, bbox_inches='tight',
 plt.close(fig3)
 print(f"  [OK] PR curves saved -> outputs/figures/pr_curves.png")
 
+# ── 混淆矩阵（OOF预测，5模型）──
+from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
+
+n_models = 5
+fig4, axes = plt.subplots(2, 3, figsize=(15, 10))
+fig4.patch.set_facecolor('#F8F9FA')
+axes_flat = axes.ravel()
+
+model_order = ['LogisticRegression', 'RandomForest', 'XGBoost', 'ExtraTrees', 'Voting Ensemble']
+
+for idx, name in enumerate(model_order):
+    ax = axes_flat[idx]
+    ax.set_facecolor('#F8F9FA')
+
+    # Get OOF predictions
+    if name == 'Voting Ensemble':
+        y_prob = cross_val_predict(
+            voting, X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+        )[:, 1]
+    else:
+        y_prob = cross_val_predict(
+            models[name], X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+        )[:, 1]
+    y_pred = (y_prob >= 0.5).astype(int)
+    cm = confusion_matrix(y, y_pred)
+    cm_norm = cm.astype('float') / cm.sum(axis=1, keepdims=True).clip(min=1)
+
+    # Display
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm_norm, display_labels=['Non-AKI', 'AKI'])
+    disp.plot(ax=ax, cmap=plt.cm.Blues, colorbar=False, values_format='.2f')
+
+    # Overlay raw counts
+    for i in range(2):
+        for j in range(2):
+            ax.text(j, i, f'{cm_norm[i,j]:.1%}\n(n={cm[i,j]})',
+                    ha='center', va='center', fontsize=9,
+                    color='white' if cm_norm[i,j] > 0.5 else '#333333',
+                    fontweight='bold')
+
+    # Label with model name + metrics
+    tn, fp, fn, tp = cm.ravel()
+    acc = (tp + tn) / (tp + tn + fp + fn)
+    sens = tp / (tp + fn) if (tp + fn) > 0 else 0
+    spec = tn / (tn + fp) if (tn + fp) > 0 else 0
+    cv_auc = all_results[name]['mean']
+    label = f'{name}'
+    if name == 'Voting Ensemble':
+        label += ' (Best)'
+    ax.set_title(label, fontsize=12, fontweight='bold',
+                 color=model_colors[name])
+    ax.set_xlabel(f'AUC={cv_auc:.3f} | Acc={acc:.2f} | Sens={sens:.2f} | Spec={spec:.2f}',
+                  fontsize=9, color='#666666')
+
+# Hide extra subplot
+axes_flat[5].set_visible(False)
+
+fig4.suptitle('Confusion Matrices — 5-Fold CV OOF Predictions', fontsize=15, fontweight='bold', y=1.01)
+fig4.tight_layout()
+fig4.savefig('outputs/figures/confusion_matrices.png', dpi=300, bbox_inches='tight',
+             facecolor=fig4.get_facecolor())
+plt.close(fig4)
+print(f"  [OK] Confusion matrices saved -> outputs/figures/confusion_matrices.png")
+
 # ============================================================
 # 模块6：Bootstrap 验证
 # ============================================================
