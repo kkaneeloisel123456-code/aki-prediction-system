@@ -493,6 +493,57 @@ fig4.savefig('outputs/figures/confusion_matrices.png', dpi=300, bbox_inches='tig
 plt.close(fig4)
 print(f"  [OK] Confusion matrices saved -> outputs/figures/confusion_matrices.png")
 
+# ── 校准曲线（OOF预测，5模型）──
+from sklearn.calibration import calibration_curve
+from sklearn.metrics import brier_score_loss
+
+fig5, axes5 = plt.subplots(2, 3, figsize=(15, 10))
+fig5.patch.set_facecolor('#F8F9FA')
+axes5_flat = axes5.ravel()
+
+for idx, name in enumerate(model_order):
+    ax = axes5_flat[idx]
+    ax.set_facecolor('#F8F9FA')
+
+    # OOF predictions
+    if name == 'Voting Ensemble':
+        y_prob = cross_val_predict(
+            voting, X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+        )[:, 1]
+    else:
+        y_prob = cross_val_predict(
+            models[name], X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+        )[:, 1]
+
+    prob_true, prob_pred = calibration_curve(y, y_prob, n_bins=10, strategy='uniform')
+    brier = brier_score_loss(y, y_prob)
+
+    ax.plot(prob_pred, prob_true, marker='o', linewidth=2, markersize=8,
+            color=model_colors[name], label=f'Brier = {brier:.4f}')
+    ax.plot([0, 1], [0, 1], 'k--', lw=1, alpha=0.4, label='Perfect')
+
+    title = f'{name}'
+    if name == 'Voting Ensemble':
+        title += ' (Best)'
+    ax.set_title(title, fontsize=12, fontweight='bold', color=model_colors[name])
+    ax.set_xlabel('Predicted Probability', fontsize=10, color='#666666')
+    ax.set_ylabel('Observed Proportion', fontsize=10, color='#666666')
+    ax.legend(loc='lower right', fontsize=8, framealpha=0.85)
+    ax.set_xlim([-0.02, 1.02]); ax.set_ylim([-0.02, 1.02])
+    ax.grid(True, alpha=0.3, linewidth=0.5)
+    ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False)
+    ax.plot([], [], ' ', label=f'AUC={all_results[name]["mean"]:.4f}')
+
+# Hide extra subplot
+axes5_flat[5].set_visible(False)
+
+fig5.suptitle('Calibration Curves — 5-Fold CV OOF Predictions', fontsize=15, fontweight='bold', y=1.01)
+fig5.tight_layout()
+fig5.savefig('outputs/figures/calibration_curves.png', dpi=300, bbox_inches='tight',
+             facecolor=fig5.get_facecolor())
+plt.close(fig5)
+print(f"  [OK] Calibration curves saved -> outputs/figures/calibration_curves.png")
+
 # ============================================================
 # 模块6：Bootstrap 验证
 # ============================================================

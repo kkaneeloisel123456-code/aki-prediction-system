@@ -64,8 +64,8 @@ print('  Confusion Matrices: SKIP (已由 run_clean.py 统一生成)')
 
 # Note: calibration functions internally prepend FIGURES_DIR/TABLES_DIR, pass filename only
 print('  Calibration...')
-try:plot_calibration_curves_all(model_results,save_name='calibration_curves.png');print('    OK')
-except Exception as e:print(f'    FAIL: {e}')
+# Calibration — 已迁移至 run_clean.py
+print('  Calibration: SKIP (已由 run_clean.py 统一生成)')
 
 print('  DCA...')
 try:

@@ -338,13 +338,8 @@ print("  [SKIP] PR curves (已由 run_clean.py 统一生成)")
 # Confusion matrices — 已迁移至 run_clean.py
 print("  [SKIP] Confusion matrices (已由 run_clean.py 统一生成)")
 
-# Calibration curves
-print("Generating calibration curves...")
-try:
-    plot_cal_all(model_results_dict, save_name='calibration_curves.png')
-    print("  Calibration curves saved")
-except Exception as e:
-    print(f"  Calibration failed: {e}")
+# Calibration curves — 已迁移至 run_clean.py
+print("  [SKIP] Calibration curves (已由 run_clean.py 统一生成)")
 
 # DCA
 print("Generating DCA...")
