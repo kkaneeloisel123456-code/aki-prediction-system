@@ -74,21 +74,26 @@ aki-project/
 │   └── tables/                   # 数据字典、质量报告
 ├── models/                       # 训练好的模型
 │   ├── final_voting_model.pkl    # 最终Voting模型
+│   ├── LogisticRegression.pkl    # 子模型
+│   ├── RandomForest.pkl
+│   ├── XGBoost.pkl
+│   ├── ExtraTrees.pkl
 │   ├── scaler.pkl                # 标准化器
 │   └── selected_features.txt     # 选中的35个特征
 ├── outputs/                      # 输出
 │   ├── figures/                  # ROC/PR/DCA/校准/SHAP图
-│   └── tables/                   # 模型对比、特征排名
+│   └── tables/                   # SHAP重要性、CV结果
 ├── src/                          # 源代码
 │   ├── data/                     # 数据处理模块
 │   ├── models/                   # 模型训练/评估/校准
 │   └── visualization/            # 可视化模块
-├── web/                          # Streamlit Web应用
-│   ├── app.py                    # 主入口
+├── web/                          # Streamlit Web组件
 │   └── components/               # 预测/SHAP/报告组件
+├── app_data/                     # Streamlit Cloud部署文件
+├── streamlit_app.py              # ★ Web应用主入口
 ├── run_clean.py                  # ★ 一键运行（最终版）
 ├── run_evaluation.py             # 综合评估图表
-├── run_bonus.py                   # 加分项（VIF+PDP+亚组+HL）
+├── run_bonus.py                  # 加分项（VIF+PDP+亚组+HL）
 ├── requirements.txt
 └── README.md
 ```
@@ -122,7 +127,7 @@ python run_clean.py
 python run_evaluation.py
 
 # 4. 启动 Web 应用
-streamlit run web/app.py
+streamlit run streamlit_app.py
 # → http://localhost:8501
 ```
 

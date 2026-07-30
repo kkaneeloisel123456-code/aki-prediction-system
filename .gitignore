@@ -19,7 +19,6 @@ data/tables/
 # Large outputs
 outputs.zip
 outputs/reports/
-outputs/review_materials/
 *.pdf
 
 # Temp / IDE
@@ -28,17 +27,6 @@ catboost_info/
 .idea/
 *.swp
 *.swo
-
-# Temp scripts (development only)
-run_optimize*.py
-run_final*.py
-run_review_upgrade.py
-export_review_materials.py
-write_review.py
-pack_review.ps1
-
-# Streamlit (config is needed for deployment)
-# .streamlit/ — intentionally tracked
 
 # OS
 .DS_Store

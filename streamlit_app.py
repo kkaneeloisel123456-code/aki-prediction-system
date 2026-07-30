@@ -12,6 +12,10 @@ import sys, os, warnings, base64, json
 from datetime import datetime
 warnings.filterwarnings('ignore')
 
+# Force white background for matplotlib figures (避免黑底)
+plt.rcParams['figure.facecolor'] = 'white'
+plt.rcParams['axes.facecolor'] = 'white'
+
 # Page config
 st.set_page_config(
     page_title="AKI 智能预测系统", page_icon="🏥",
@@ -512,7 +516,7 @@ def page_performance(assets):
             abl_df = pd.read_csv(abl_table_path)
             st.dataframe(abl_df, width='stretch', hide_index=True)
             # Highlight key insight
-            st.success("💡 **消融实验核心发现**: 移除特定特征组后AUC下降越大，说明该组特征贡献越高。可用于答辩中解释特征工程的价值。")
+            st.success("💡 **消融实验核心发现**: 移除特定特征组后AUC下降越大，说明该组特征贡献越高。可用于解释特征工程的价值。")
 
     with tab6:
         st.markdown("### 🤝 集成方法对比 (Phase 2)")
@@ -1058,7 +1062,7 @@ def page_report(assets):
 def page_data_governance(assets):
     st.markdown("## 📋 数据治理")
 
-    st.info("📊 数据治理可视化 — 展示从原始数据到建模数据集的完整处理管线。答辩核心材料。")
+    st.info("📊 数据治理可视化 — 展示从原始数据到建模数据集的完整处理管线。")
 
     tab1, tab2, tab3 = st.tabs(["🔄 治理流程", "📉 缺失值分析", "📊 质量仪表盘"])
 

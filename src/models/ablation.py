@@ -61,6 +61,8 @@ plt.rcParams["axes.unicode_minus"] = False
 plt.rcParams["figure.dpi"] = 150
 plt.rcParams["savefig.dpi"] = 300
 plt.rcParams["savefig.bbox"] = "tight"
+plt.rcParams["figure.facecolor"] = "white"
+plt.rcParams["axes.facecolor"] = "white"
 
 
 # ============================================================================
@@ -587,7 +589,7 @@ def run_full_ablation_report(
             print(f"\n  {model_name}: Full Model AUC = {full_auc:.4f}")
 
     print(f"\n  💡 关键洞察: 消融实验证明了各组特征的独立贡献，")
-    print(f"     回答了'为什么你的方法好？'这个一等奖答辩必问问题。")
+    print(f"     回答了'为什么你的方法好？'这个模型可解释性关键问题。")
     print(f"\n  📁 输出文件:")
     print(f"     {output_dir}figures/ablation_*.png")
     print(f"     {heatmap_path}")
