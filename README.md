@@ -170,7 +170,7 @@ streamlit run web/app.py
 | 数据清洗/特征工程 | 李婷、蓝可 | 数据预处理、EDA |
 | 建模/SHAP | 梁日娇、蓝可 | 模型训练、评估、可解释性 |
 | Web开发 | 王若兮 | Streamlit系统开发 |
-
+|报告pdf|叶宇晨|报告pdf|
 ---
 
 ## 免责声明
