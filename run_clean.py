@@ -128,6 +128,80 @@ for i, (feat, imp) in enumerate(zip(top_features, top_importances)):
 X_selected = X_scaled[:, top_indices]
 
 # ============================================================
+# 模块3.5：相关性分析（基于35特征）
+# ============================================================
+print("\n" + "=" * 65)
+print("  模块3.5：相关性分析 + VIF共线性（基于35特征）")
+print("=" * 65)
+
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+import seaborn as sns
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+# 中文显示
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False
+sns.set_style("whitegrid")
+sns.set_context("notebook", font_scale=1.1)
+
+# 用35特征的原始值（标准化前）计算相关性，保持临床可解释性
+X_corr = pd.DataFrame(X.iloc[:, top_indices].values, columns=top_features)
+y_series = pd.Series(y, name='AKI')
+
+# ── 相关性热力图 ──
+corr_matrix = X_corr.corr()
+fig_corr, ax_corr = plt.subplots(figsize=(18, 15))
+fig_corr.patch.set_facecolor('#F8F9FA')
+ax_corr.set_facecolor('#F8F9FA')
+mask = np.triu(np.ones_like(corr_matrix, dtype=bool), k=1)
+cmap = sns.diverging_palette(250, 15, s=75, l=40, n=256, center='light')
+sns.heatmap(corr_matrix, mask=mask, cmap=cmap, center=0,
+            annot=True, fmt='.2f', linewidths=0.3,
+            annot_kws={'size': 6.5},
+            cbar_kws={'shrink': 0.6, 'label': 'Pearson r'},
+            ax=ax_corr, square=True,
+            xticklabels=True, yticklabels=True)
+ax_corr.set_title('Top 35 Selected Features — Correlation Heatmap', fontsize=16, fontweight='bold', pad=15)
+ax_corr.tick_params(axis='x', labelsize=7, rotation=90)
+ax_corr.tick_params(axis='y', labelsize=7, rotation=0)
+fig_corr.tight_layout()
+fig_corr.savefig('outputs/figures/correlation_heatmap.png', dpi=300, bbox_inches='tight',
+                 facecolor=fig_corr.get_facecolor())
+plt.close(fig_corr)
+print("  [OK] correlation_heatmap.png")
+
+# ── 高相关性特征对 ──
+pairs = []
+for i in range(len(corr_matrix.columns)):
+    for j in range(i+1, len(corr_matrix.columns)):
+        r = corr_matrix.iloc[i, j]
+        pairs.append({'Var1': corr_matrix.columns[i], 'Var2': corr_matrix.columns[j],
+                      'Correlation': r, 'AbsCorr': abs(r)})
+pairs_df = pd.DataFrame(pairs).sort_values('AbsCorr', ascending=False).head(15)
+pairs_df.to_csv('outputs/figures/high_correlation_pairs.csv', index=False)
+print(f"  [OK] high_correlation_pairs.csv (Top: {pairs_df.iloc[0]['Var1']} vs {pairs_df.iloc[0]['Var2']}, r={pairs_df.iloc[0]['AbsCorr']:.3f})")
+
+# ── 与AKI的Pearson相关 ──
+target_corr = []
+for feat in top_features:
+    r = X_corr[feat].corr(y_series)
+    target_corr.append({'Feature': feat, 'Correlation_with_AKI': r, 'AbsCorr': abs(r)})
+target_df = pd.DataFrame(target_corr).sort_values('AbsCorr', ascending=False)
+target_df.to_csv('outputs/figures/pairwise_correlation_with_target.csv', index=False)
+print(f"  [OK] pairwise_correlation_with_target.csv (Top: {target_df.iloc[0]['Feature']}, r={target_df.iloc[0]['Correlation_with_AKI']:.4f})")
+
+# ── VIF共线性诊断 ──
+vif_data = pd.DataFrame({'Feature': top_features})
+vif_data['VIF'] = [variance_inflation_factor(X_selected, i) for i in range(len(top_features))]
+vif_data = vif_data.sort_values('VIF', ascending=False)
+vif_data.to_csv('outputs/figures/vif_values.csv', index=False)
+high_vif = len(vif_data[vif_data['VIF'] > 10])
+print(f"  [OK] vif_values.csv (VIF>10: {high_vif}个, Max: {vif_data.iloc[0]['Feature']} = {vif_data.iloc[0]['VIF']:.1f})")
+
+# ============================================================
 # 模块4：50次重复CV评估
 # ============================================================
 print("\n" + "=" * 65)
