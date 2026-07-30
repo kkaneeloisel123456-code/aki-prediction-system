@@ -86,8 +86,6 @@ aki-project/
 ├── web/                          # Streamlit Web应用
 │   ├── app.py                    # 主入口
 │   └── components/               # 预测/SHAP/报告组件
-├── paper/                        # 论文
-├── ppt/                          # 答辩素材
 ├── run_clean.py                  # ★ 一键运行（最终版）
 ├── run_evaluation.py             # 综合评估图表
 ├── run_bonus.py                   # 加分项（VIF+PDP+亚组+HL）
@@ -168,11 +166,10 @@ streamlit run web/app.py
 
 | 角色 | 负责人 | 主要职责 |
 |------|--------|---------|
-| 队长/技术路线/论文框架 | 蓝可 | 统筹、建模、优化 |
+| 队长/技术路线 | 蓝可 | 统筹、建模、优化 |
 | 数据清洗/特征工程 | 李婷、蓝可 | 数据预处理、EDA |
 | 建模/SHAP | 梁日娇、蓝可 | 模型训练、评估、可解释性 |
 | Web开发 | 王若兮 | Streamlit系统开发 |
-| 论文撰写 | 叶宇晨、蓝可 | 论文撰写 |
 
 ---
 
