@@ -184,14 +184,21 @@ pairs_df = pd.DataFrame(pairs).sort_values('AbsCorr', ascending=False).head(15)
 pairs_df.to_csv('outputs/figures/high_correlation_pairs.csv', index=False)
 print(f"  [OK] high_correlation_pairs.csv (Top: {pairs_df.iloc[0]['Var1']} vs {pairs_df.iloc[0]['Var2']}, r={pairs_df.iloc[0]['AbsCorr']:.3f})")
 
-# ── 与AKI的Pearson相关 ──
+# ── 与AKI的Pearson相关（含P值） ──
+from scipy import stats
 target_corr = []
 for feat in top_features:
-    r = X_corr[feat].corr(y_series)
-    target_corr.append({'Feature': feat, 'Correlation_with_AKI': r, 'AbsCorr': abs(r)})
-target_df = pd.DataFrame(target_corr).sort_values('AbsCorr', ascending=False)
+    r, p = stats.pearsonr(X_corr[feat], y_series)
+    sig = '***' if p < 0.001 else ('**' if p < 0.01 else ('*' if p < 0.05 else 'ns'))
+    direction = '+' if r > 0 else '-'
+    target_corr.append({'Feature': feat, 'Pearson_r': round(r, 4), 'P_value': round(p, 4),
+                        'Direction': direction, 'Significance': sig, 'Abs_r': abs(r)})
+target_df = pd.DataFrame(target_corr).sort_values('Abs_r', ascending=False).reset_index(drop=True)
+target_df.insert(0, 'Rank', range(1, len(target_df)+1))
+target_df = target_df[['Rank', 'Feature', 'Pearson_r', 'P_value', 'Direction', 'Significance']]
 target_df.to_csv('outputs/figures/pairwise_correlation_with_target.csv', index=False)
-print(f"  [OK] pairwise_correlation_with_target.csv (Top: {target_df.iloc[0]['Feature']}, r={target_df.iloc[0]['Correlation_with_AKI']:.4f})")
+sig_n = len(target_df[target_df['P_value'] < 0.05])
+print(f"  [OK] pairwise_correlation_with_target.csv (P<0.05: {sig_n}/35, Top: {target_df.iloc[0]['Feature']}, r={target_df.iloc[0]['Pearson_r']:.4f}, P{target_df.iloc[0]['Significance']})")
 
 # ── VIF共线性诊断 ──
 vif_data = pd.DataFrame({'Feature': top_features})
