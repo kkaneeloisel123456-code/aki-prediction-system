@@ -51,6 +51,12 @@ logger = setup_logging()
 # ============================================
 def setup_chinese_font():
     """Configure matplotlib to support Chinese characters."""
+    for font_path in [r"C:\Windows\Fonts\simhei.ttf", r"C:\Windows\Fonts\msyh.ttc"]:
+        try:
+            if os.path.exists(font_path):
+                matplotlib.font_manager.fontManager.addfont(font_path)
+        except Exception:
+            pass
     chinese_fonts = ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS',
                      'WenQuanYi Micro Hei', 'Noto Sans CJK SC', 'PingFang SC']
 
@@ -92,6 +98,7 @@ def set_plot_style():
         'axes.labelsize': 12,
         'legend.fontsize': 10,
     })
+    setup_chinese_font()
 
 
 set_plot_style()

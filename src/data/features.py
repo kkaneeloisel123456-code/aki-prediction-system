@@ -13,6 +13,13 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # Ensure Chinese font rendering
+import os as _os
+for _font_path in [r"C:\Windows\Fonts\simhei.ttf", r"C:\Windows\Fonts\msyh.ttc"]:
+    try:
+        if _os.path.exists(_font_path):
+            fm.fontManager.addfont(_font_path)
+    except Exception:
+        pass
 _fonts = [f.name for f in fm.fontManager.ttflist]
 if 'SimHei' in _fonts:
     plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']

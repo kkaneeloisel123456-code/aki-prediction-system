@@ -141,11 +141,18 @@ import matplotlib.font_manager as fm
 import seaborn as sns
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
-# 中文显示
-plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
-plt.rcParams['axes.unicode_minus'] = False
 sns.set_style("whitegrid")
 sns.set_context("notebook", font_scale=1.1)
+
+# 中文显示：必须在 seaborn 样式之后设置，否则 sns.set_style 会重置字体
+for _font_path in [r"C:\Windows\Fonts\simhei.ttf", r"C:\Windows\Fonts\msyh.ttc"]:
+    try:
+        if os.path.exists(_font_path):
+            fm.fontManager.addfont(_font_path)
+    except Exception:
+        pass
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False
 
 # 用35特征的原始值（标准化前）计算相关性，保持临床可解释性
 X_corr = pd.DataFrame(X.iloc[:, top_indices].values, columns=top_features)

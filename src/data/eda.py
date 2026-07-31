@@ -39,24 +39,26 @@ warnings.filterwarnings("ignore", category=UserWarning)
 # Global matplotlib / Chinese font setup
 # ---------------------------------------------------------------------------
 
-# Try to register SimHei (common on Windows) or fall back to a system sans-serif
-_chinese_font_candidates = ["SimHei", "Microsoft YaHei", "WenQuanYi Micro Hei", "Noto Sans CJK SC"]
+# Default seaborn style
+sns.set_style("whitegrid")
+sns.set_context("paper", font_scale=1.1)
 
+# Try to register SimHei (common on Windows) or fall back to a system sans-serif
+import matplotlib.font_manager as _fm
+for _font_path in [r"C:\Windows\Fonts\simhei.ttf", r"C:\Windows\Fonts\msyh.ttc"]:
+    try:
+        if os.path.exists(_font_path):
+            _fm.fontManager.addfont(_font_path)
+    except Exception:
+        pass
+_chinese_font_candidates = ["SimHei", "Microsoft YaHei", "WenQuanYi Micro Hei", "Noto Sans CJK SC"]
 for _f in _chinese_font_candidates:
     try:
         plt.rcParams["font.sans-serif"] = [_f, "DejaVu Sans"]
         plt.rcParams["axes.unicode_minus"] = False
-        # Quick probe
-        fig, ax = plt.subplots()
-        ax.set_title("测")  # test Chinese char
-        plt.close(fig)
         break
     except Exception:
         continue
-
-# Default seaborn style
-sns.set_style("whitegrid")
-sns.set_context("paper", font_scale=1.1)
 
 # ---------------------------------------------------------------------------
 # Column groupings for downstream use
