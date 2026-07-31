@@ -4,10 +4,23 @@ LASSO selection, feature encoding, class imbalance handling, feature importance.
 """
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
 import seaborn as sns
 import warnings
 warnings.filterwarnings('ignore')
+
+# Ensure Chinese font rendering
+_fonts = [f.name for f in fm.fontManager.ttflist]
+if 'SimHei' in _fonts:
+    plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
+elif 'Microsoft YaHei' in _fonts:
+    plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'DejaVu Sans']
+else:
+    plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False
 
 from sklearn.linear_model import LassoCV, LogisticRegression
 from sklearn.preprocessing import StandardScaler, LabelEncoder, OneHotEncoder

@@ -85,6 +85,8 @@ def set_plot_style():
         'savefig.dpi': 300,
         'savefig.bbox': 'tight',
         'figure.figsize': (10, 6),
+        'figure.facecolor': 'white',
+        'axes.facecolor': 'white',
         'font.size': 11,
         'axes.titlesize': 14,
         'axes.labelsize': 12,

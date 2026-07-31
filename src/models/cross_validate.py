@@ -81,6 +81,8 @@ plt.rcParams.update({
     "figure.dpi": 150,
     "savefig.dpi": 300,
     "savefig.bbox": "tight",
+    "figure.facecolor": "white",
+    "axes.facecolor": "white",
 })
 
 

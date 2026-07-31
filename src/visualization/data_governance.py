@@ -60,6 +60,8 @@ plt.rcParams["axes.unicode_minus"] = False
 plt.rcParams["figure.dpi"] = 150
 plt.rcParams["savefig.dpi"] = 300
 plt.rcParams["savefig.bbox"] = "tight"
+plt.rcParams["figure.facecolor"] = "white"
+plt.rcParams["axes.facecolor"] = "white"
 
 
 # ============================================================================

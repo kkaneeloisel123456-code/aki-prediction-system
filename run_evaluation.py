@@ -154,6 +154,16 @@ print("4/7 跳过 (PR 曲线已由 run_clean.py 统一生成)")
 # 5. 校准曲线
 # ============================================================
 print("5/7 生成校准曲线...")
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+_fonts = [f.name for f in fm.fontManager.ttflist]
+if 'SimHei' in _fonts:
+    plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
+else:
+    plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import brier_score_loss
 

@@ -176,6 +176,14 @@ print("\n[5/5] PDP + Subgroup analysis...")
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+# Ensure Chinese font rendering
+_fonts = [f.name for f in fm.fontManager.ttflist]
+if 'SimHei' in _fonts:
+    plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
+else:
+    plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False
 plt.rcParams.update({'font.size': 10, 'figure.dpi': 150, 'savefig.dpi': 200, 'savefig.bbox': 'tight'})
 
 # PDP: use features confirmed by >=2 methods
