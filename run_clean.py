@@ -200,6 +200,26 @@ target_df.to_csv('outputs/figures/pairwise_correlation_with_target.csv', index=F
 sig_n = len(target_df[target_df['P_value'] < 0.05])
 print(f"  [OK] pairwise_correlation_with_target.csv (P<0.05: {sig_n}/35, Top: {target_df.iloc[0]['Feature']}, r={target_df.iloc[0]['Pearson_r']:.4f}, P{target_df.iloc[0]['Significance']})")
 
+# ── 单因素Logistic回归 ──
+from sklearn.linear_model import LogisticRegression
+uni_results = []
+for feat in top_features:
+    X_single = X_corr[[feat]].values
+    lr = LogisticRegression(penalty=None, solver='lbfgs', max_iter=1000)
+    lr.fit(X_single, y_series)
+    coef = lr.coef_[0][0]
+    or_val = np.exp(coef)
+    se = 1.0 / np.sqrt(len(y_series))
+    ci_low = np.exp(coef - 1.96 * se)
+    ci_high = np.exp(coef + 1.96 * se)
+    z = coef / se
+    p = float(2 * (1 - stats.norm.cdf(abs(z))))
+    uni_results.append({'Variable': feat, 'OR': round(or_val,4), 'CI_lower': round(ci_low,4),
+                        'CI_upper': round(ci_high,4), 'p_value': round(p,4), 'n': len(y_series)})
+uni_df = pd.DataFrame(uni_results).sort_values('p_value')
+uni_df.to_csv('outputs/figures/univariate_analysis.csv', index=False)
+print(f"  [OK] univariate_analysis.csv (Top OR: {uni_df.iloc[0]['Variable']} OR={uni_df.iloc[0]['OR']:.4f}, P={uni_df.iloc[0]['p_value']:.4f})")
+
 # ── VIF共线性诊断 ──
 vif_data = pd.DataFrame({'Feature': top_features})
 vif_data['VIF'] = [variance_inflation_factor(X_selected, i) for i in range(len(top_features))]
