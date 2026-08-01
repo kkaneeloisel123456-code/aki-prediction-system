@@ -28,10 +28,10 @@ MODEL_DIR = BASE_DIR / 'models'
 OUTPUT_DIR = BASE_DIR / 'outputs'
 FIG_DIR = OUTPUT_DIR / 'figures'
 TAB_DIR = OUTPUT_DIR / 'tables'
-PHASE1_FIG_DIR = OUTPUT_DIR / 'phase1' / 'figures'
-PHASE1_TAB_DIR = OUTPUT_DIR / 'phase1' / 'tables'
-PHASE2_FIG_DIR = OUTPUT_DIR / 'phase2' / 'figures'
-PHASE2_TAB_DIR = OUTPUT_DIR / 'phase2' / 'tables'
+PHASE1_FIG_DIR = FIG_DIR
+PHASE1_TAB_DIR = TAB_DIR
+PHASE2_FIG_DIR = FIG_DIR
+PHASE2_TAB_DIR = TAB_DIR
 
 # ============================================
 # CSS

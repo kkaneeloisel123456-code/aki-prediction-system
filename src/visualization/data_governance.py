@@ -153,8 +153,8 @@ def plot_data_governance_flowchart(
 
     Pipeline stages:
     1. 原始数据采集 — 420例, 97个变量, Excel格式
-    2. 缺失值分析 — 描述性统计, Little's MCAR检验
-    3. 异常值检测与处理 — IQR/Z-score, Winsorize缩尾
+    2. 缺失值分析 — 总缺失5个(0.01%)，中位数填补
+    3. 异常值检测与处理 — 临床参考范围识别 + 人工审查
     4. 数据标准化 — StandardScaler, 中位数填补
     5. 数据泄露审查 — 排除KDIGO/结局变量/未来信息
     6. 特征工程与筛选 — RF重要性 → Top35
@@ -198,13 +198,12 @@ def plot_data_governance_flowchart(
 
         ("② 缺失值分析", [
             "缺失率 < 1% (仅4列有缺失)",
-            "多重插补 (MICE)",
-            "Little's MCAR检验",
+            "中位数填补 (Median Imputation)",
         ], _PALETTE["aqua"], 0.66),
 
         ("③ 异常值检测与处理", [
-            "IQR法 + Z-score法联合检测",
-            "Winsorize缩尾处理 (1st/99th)",
+            "基于临床参考范围识别异常值",
+            "人工审查确认",
             "保留临床合理性判断",
         ], _PALETTE["yellow"], 0.52),
 
@@ -245,7 +244,7 @@ def plot_data_governance_flowchart(
             "Python 3.10",
             "pandas / numpy",
             "scikit-learn",
-            "imbalanced-learn",
+            "xgboost",
         ]),
     ]
 
