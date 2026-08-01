@@ -155,7 +155,7 @@ def plot_data_governance_flowchart(
     1. 原始数据采集 — 420例, 97个变量, Excel格式
     2. 缺失值分析 — 总缺失5个(0.01%)，中位数填补
     3. 异常值检测与处理 — 临床参考范围识别 + 人工审查
-    4. 数据标准化 — StandardScaler, 中位数填补
+    4. 数据标准化 — StandardScaler, One-Hot编码
     5. 数据泄露审查 — 排除KDIGO/结局变量/未来信息
     6. 特征工程与筛选 — RF重要性 → Top35
     7. 建模数据集 — 最终35个特征

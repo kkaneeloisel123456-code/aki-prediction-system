@@ -70,7 +70,7 @@ vif_df.columns = ['特征', 'VIF']
 vif_df.to_csv(f'{OUT}/tables/VIF共线性诊断.csv', index=False, encoding='utf-8-sig')
 print(f"  VIF>10: {high_vif}个")
 print(f"  Note: ICUAdmeGFR/eGFR, ICUAdmSCr/Scr naturally highly correlated")
-print(f"  Solution: LASSO+RF handles colinearity automatically")
+print(f"  Solution: RF筛选 + 正则化处理共线性")
 
 # ============================================================
 # 2. Three-method cross-validation
