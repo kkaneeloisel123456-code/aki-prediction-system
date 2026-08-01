@@ -325,8 +325,8 @@ def page_home(assets):
         st.markdown("""
         ### 📖 研究概述
         - **临床问题**: 心脏手术后 AKI 发生率 5-30%，显著增加死亡率和医疗费用
-        - **数据来源**: 420 例心脏手术患者，95+ 临床特征
-        - **技术方案**: 5 种 ML 模型系统比较 + 94 特征 + SMOTE 类别平衡
+        - **数据来源**: 420 例心脏手术患者，97 个临床特征
+        - **技术方案**: 4 种基模型 + Voting集成 + 84候选特征精筛至35特征 + 类别平衡
         - **核心创新**: SHAP 可解释 AI — 不仅预测风险，更解释"为什么"
         - **系统功能**: 在线预测 → 风险分层 → 危险因素 → 干预建议 → PDF 报告
         """)
@@ -1068,7 +1068,7 @@ def page_data_governance(assets):
 
     with tab1:
         st.markdown("### 🔄 数据治理流程")
-        st.caption("七阶段数据治理管线：原始采集 → 缺失分析 → 异常检测 → 标准化 → 特征筛选 → SMOTE平衡 → 建模数据集")
+        st.caption("七阶段数据治理管线：原始采集 → 缺失分析 → 异常检测 → 标准化编码 → 数据泄露审查 → 特征筛选 → 建模数据集")
 
         # Data governance flowchart
         dg_flow_path = PHASE1_FIG_DIR / 'data_governance_flow.png'

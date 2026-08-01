@@ -5,7 +5,7 @@
   广西科技大学 蓝可 | 白菜卷队 | 暑期数创2026
 
   【配置】
-  - 特征: 术前44 + 术中4 + ICU入室2 + 术后早期非肌酐33 → RF筛选Top35
+  - 特征: 术前特征+人口学45 + 术中4 + ICU入室2 + 术后早期非肌酐33 → RF筛选Top35
   - 模型: Voting Ensemble (LR:2, RF:2, XGB:1, ET:1 加权)
   - 验证: RepeatedStratifiedKFold (5折×10次=50次评估)
   - AUC: 0.816 ± 0.044 (50次CV) / 0.821 ± 0.043 (Level4激进)
@@ -1240,7 +1240,7 @@ print(f"""
   完成！最终模型配置:
 {'='*65}
 
-  特征方案: 术前44 + 术中4 + ICU入室2 + 术后早期非肌酐33 → 精筛Top35
+  特征方案: 术前特征+人口学45 + 术中4 + ICU入室2 + 术后早期非肌酐33 → 精筛Top35
   最佳模型: Voting Ensemble (LR:2, RF:2, XGB:1, ET:1)
   CV AUC:   {voting_scores.mean():.4f} ± {voting_scores.std():.4f} (50次重复)
   测试AUC:  {test_auc:.4f}
