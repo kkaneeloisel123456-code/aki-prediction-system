@@ -387,13 +387,13 @@ def page_performance(assets):
 
     eval_df = assets['eval_df']
     if eval_df is None:
-        st.warning("⚠️ 未找到模型评估结果。请先运行 run_models.py 训练模型。")
+        st.warning("⚠️ 未找到模型评估结果。请先运行 run_clean.py 训练模型。")
         return
 
     tab1,tab2,tab3,tab4,tab5,tab6 = st.tabs(["📊 性能对比", "📈 ROC/PR曲线", "🎯 校准与DCA", "📉 CV可信度", "🔬 消融实验", "🤝 集成对比"])
 
     with tab1:
-        st.markdown("### 模型性能总览（50次重复CV）")
+        st.markdown("### 模型性能总览（5折×10次=50次CV）")
         # Support both new (模型/50次CV AUC均值) and old (Model/AUC) formats
         model_col = '模型' if '模型' in eval_df.columns else 'Model'
         auc_col = '50次CV AUC均值' if '50次CV AUC均值' in eval_df.columns else 'AUC'
@@ -458,7 +458,7 @@ def page_performance(assets):
         if cv_roc_path.exists():
             st.image(str(cv_roc_path), width='stretch')
         else:
-            st.info("📌 五折CV ROC曲线未生成。请运行: python run_models.py --skip-ablation --skip-dca --skip-shap --skip-datagov")
+            st.info("📌 五折CV ROC曲线未生成。请运行: python run_clean.py 生成CV图")
 
         st.markdown("---")
         st.markdown("### 🎲 Bootstrap AUC分布")
@@ -493,7 +493,7 @@ def page_performance(assets):
         if abl_heat_path.exists():
             st.image(str(abl_heat_path), width='stretch')
         else:
-            st.info("📌 消融热力图未生成。请运行: python run_models.py --skip-cv --skip-dca --skip-shap --skip-datagov")
+            st.info("📌 消融热力图未生成。请运行: python run_clean.py 生成消融图")
 
         # Individual model ablation charts
         st.markdown("---")
@@ -566,7 +566,7 @@ def page_prediction(assets):
     st.markdown("输入患者临床信息，使用真实训练模型进行实时预测。")
 
     if assets['model'] is None:
-        st.error("❌ 未找到训练好的模型。请先运行 run_models.py")
+        st.error("❌ 未找到训练好的模型。请先运行 run_clean.py")
         return
 
     st.info(f"✅ 当前使用模型: **{assets['best_name']}** | 特征数: {len(assets.get('features',[]))}")
@@ -1079,7 +1079,7 @@ def page_data_governance(assets):
         if dg_flow_path.exists():
             st.image(str(dg_flow_path), width='stretch')
         else:
-            st.info("📌 数据治理流程图未生成。请运行: python run_models.py --skip-cv --skip-ablation --skip-dca --skip-shap")
+            st.info("📌 数据治理流程图未生成。请运行: python src/visualization/data_governance.py 生成数据治理图")
 
         st.markdown("---")
         st.markdown("### 🔽 特征筛选漏斗")

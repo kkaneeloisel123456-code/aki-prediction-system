@@ -366,30 +366,31 @@ def plot_cv_auc_distribution(
     for ax, (model_name, model) in zip(axes, models_dict.items()):
         ax.set_facecolor(_SURFACE)
 
-        # Bootstrap
+        # Bootstrap (OOB: 在bootstrap训练集上重新拟合，评估未被抽中的样本)
         bootstrap_aucs = []
-        model_clone = clone(model)
-
-        # Fit on full data first
-        try:
-            model_clone.fit(X, y)
-        except Exception:
-            continue
 
         for _ in range(n_bootstrap):
             indices = rng.integers(0, n_samples, size=n_samples)
-            X_boot, y_boot = X[indices], y[indices]
+            oob_mask = np.ones(n_samples, dtype=bool)
+            oob_mask[indices] = False
+            if oob_mask.sum() < 20:
+                continue
 
-            if len(np.unique(y_boot)) < 2:
+            X_boot, y_boot = X[indices], y[indices]
+            X_oob, y_oob = X[oob_mask], y[oob_mask]
+
+            if len(np.unique(y_oob)) < 2:
                 continue
 
             try:
-                if hasattr(model_clone, "predict_proba"):
-                    y_prob = model_clone.predict_proba(X_boot)[:, 1]
+                boot_model = clone(model)
+                boot_model.fit(X_boot, y_boot)
+                if hasattr(boot_model, "predict_proba"):
+                    y_prob = boot_model.predict_proba(X_oob)[:, 1]
                 else:
-                    y_prob = model_clone.decision_function(X_boot)
+                    y_prob = boot_model.decision_function(X_oob)
                     y_prob = (y_prob - y_prob.min()) / max(y_prob.max() - y_prob.min(), 1e-10)
-                bootstrap_aucs.append(roc_auc_score(y_boot, y_prob))
+                bootstrap_aucs.append(roc_auc_score(y_oob, y_prob))
             except Exception:
                 continue
 

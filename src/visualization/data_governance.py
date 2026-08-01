@@ -156,8 +156,8 @@ def plot_data_governance_flowchart(
     2. 缺失值分析 — 描述性统计, Little's MCAR检验
     3. 异常值检测与处理 — IQR/Z-score, Winsorize缩尾
     4. 数据标准化 — StandardScaler, 中位数填补
-    5. 特征工程与筛选 — LASSO回归, SHAP重要性
-    6. 类别不平衡处理 — SMOTE过采样
+    5. 数据泄露审查 — 排除KDIGO/结局变量/未来信息
+    6. 特征工程与筛选 — RF重要性 → Top35
     7. 建模数据集 — 最终35个特征
 
     Parameters
@@ -214,17 +214,16 @@ def plot_data_governance_flowchart(
             "分类变量 → One-Hot编码",
         ], _PALETTE["orange"], 0.38),
 
-        ("⑤ 特征工程与筛选", [
-            "LASSO回归降维 (L1正则化)",
-            "SHAP重要性排序",
-            "临床知识筛选",
-            "最终35个特征",
+        ("⑤ 数据泄露审查", [
+            "排除KDIGO诊断标准",
+            "排除结局/未来信息变量",
+            "97 → 84候选特征",
         ], _PALETTE["red"], 0.24),
 
-        ("⑥ 类别不平衡处理", [
-            "SMOTE过采样 (AKI ~30%)",
-            "合成少数类样本",
-            "平衡后训练集",
+        ("⑥ 特征工程与筛选", [
+            "RandomForest重要性排序",
+            "精筛Top35关键特征",
+            "class_weight=balanced",
         ], _PALETTE["violet"], 0.10),
 
         ("⑦ 建模数据集", [
@@ -371,9 +370,8 @@ def plot_missing_values_summary(
 
 def plot_feature_selection_process(
     n_original: int = 97,
-    n_after_cleaning: int = 85,
-    n_after_lasso: int = 50,
-    n_after_shap: int = 35,
+    n_after_cleaning: int = 84,
+    n_after_rf: int = 35,
     n_final: int = 35,
     save_path: str = "",
     figsize: Tuple[int, int] = (10, 6),
@@ -389,11 +387,11 @@ def plot_feature_selection_process(
 
     stages = [
         (f"原始特征\nOriginal Features", n_original, _PALETTE["blue"]),
-        (f"清洗后\nAfter Cleaning", n_after_cleaning, _PALETTE["aqua"]),
-        (f"LASSO筛选后\nAfter LASSO", n_after_lasso, _PALETTE["yellow"]),
-        (f"SHAP筛选后\nAfter SHAP", n_after_shap, _PALETTE["orange"]),
-        (f"最终建模特征\nFinal Features", n_final, _PALETTE["red"]),
+        (f"清洗+泄露审查后\nAfter Cleaning & Leakage Review", n_after_cleaning, _PALETTE["aqua"]),
+        (f"RF筛选后\nAfter RF Selection", n_after_rf, _PALETTE["yellow"]),
     ]
+    if n_final != n_after_rf:
+        stages.append((f"最终建模特征\nFinal Features", n_final, _PALETTE["red"]))
 
     n_stages = len(stages)
     max_n = max(s[1] for s in stages)
@@ -704,5 +702,4 @@ def run_full_data_gov_report(
 
 # ============================================================================
 if __name__ == "__main__":
-    print("Data governance visualization module loaded successfully.")
-    print("Usage: from src.visualization.data_governance import run_full_data_gov_report")
+    run_full_data_gov_report()

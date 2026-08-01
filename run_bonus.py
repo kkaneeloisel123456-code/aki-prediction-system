@@ -4,7 +4,7 @@ warnings.filterwarnings('ignore')
 import pandas as pd, numpy as np, os
 from datetime import datetime
 
-OUT = 'C:/Users/1/Desktop/AKI_加分项'
+OUT = 'outputs'
 os.makedirs(f'{OUT}/figures', exist_ok=True)
 os.makedirs(f'{OUT}/tables', exist_ok=True)
 

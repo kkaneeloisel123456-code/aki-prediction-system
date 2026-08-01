@@ -933,17 +933,25 @@ def bootstrap_evaluate(
         n_samples = len(y)
         auc_scores = np.empty(n_iterations)
 
+        from sklearn.base import clone
+
         for i in range(n_iterations):
             indices = rng.integers(0, n_samples, size=n_samples)
-            if len(np.unique(y[indices])) < 2:
+            oob_mask = np.ones(n_samples, dtype=bool)
+            oob_mask[indices] = False
+            if oob_mask.sum() < 20:
                 auc_scores[i] = np.nan
                 continue
 
-            X_boot = X[indices]
-            y_boot = y[indices]
+            X_boot, y_boot = X[indices], y[indices]
+            X_oob, y_oob = X[oob_mask], y[oob_mask]
+            if len(np.unique(y_oob)) < 2:
+                auc_scores[i] = np.nan
+                continue
 
-            y_prob = model.predict_proba(X_boot)[:, 1]
-            auc_scores[i] = roc_auc_score(y_boot, y_prob)
+            boot_model = clone(model)
+            boot_model.fit(X_boot, y_boot)
+            auc_scores[i] = roc_auc_score(y_oob, boot_model.predict_proba(X_oob)[:, 1])
 
         valid_scores = auc_scores[~np.isnan(auc_scores)]
         if len(valid_scores) < 100:

@@ -484,20 +484,30 @@ def run_full_ensemble_pipeline(X, y, models_dict, feature_names=None, cv=5,
 
 
 def _bootstrap_auc_ci(model, X, y, n_bootstrap=500, random_state=42):
-    """Bootstrap AUC confidence interval for a fitted model."""
+    """Bootstrap AUC CI via out-of-bag refit (not in-sample scoring)."""
+    from sklearn.base import clone
     rng = np.random.RandomState(random_state)
     aucs = []
     n = len(y)
     for _ in range(n_bootstrap):
         idx = rng.randint(0, n, n)
+        oob_mask = np.ones(n, dtype=bool)
+        oob_mask[idx] = False
+        if oob_mask.sum() < 20:
+            continue
         X_boot, y_boot = X[idx], y[idx]
+        X_oob, y_oob = X[oob_mask], y[oob_mask]
+        if len(np.unique(y_oob)) < 2:
+            continue
         try:
-            if hasattr(model, 'predict_proba'):
-                prob = model.predict_proba(X_boot)[:, 1]
+            boot_model = clone(model)
+            boot_model.fit(X_boot, y_boot)
+            if hasattr(boot_model, 'predict_proba'):
+                prob = boot_model.predict_proba(X_oob)[:, 1]
             else:
-                prob = model.decision_function(X_boot)
+                prob = boot_model.decision_function(X_oob)
                 prob = (prob - prob.min()) / max(prob.max() - prob.min(), 1e-10)
-            aucs.append(roc_auc_score(y_boot, prob))
+            aucs.append(roc_auc_score(y_oob, prob))
         except:
             continue
 
