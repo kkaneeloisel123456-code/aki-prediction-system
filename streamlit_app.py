@@ -33,6 +33,29 @@ PHASE1_TAB_DIR = TAB_DIR
 PHASE2_FIG_DIR = FIG_DIR
 PHASE2_TAB_DIR = TAB_DIR
 
+# Runtime matplotlib charts need a CJK font (e.g. dashboard charts on Cloud).
+def _setup_chinese_font():
+    """Register a bundled or system CJK font for matplotlib."""
+    candidates = [
+        BASE_DIR / 'web' / 'assets' / 'fonts' / 'NotoSansSC-Regular.otf',
+        Path(r'C:/Windows/Fonts/simhei.ttf'),
+        Path(r'C:/Windows/Fonts/msyh.ttc'),
+    ]
+    for font_path in candidates:
+        try:
+            if font_path.exists():
+                import matplotlib.font_manager as _fm
+                _fm.fontManager.addfont(str(font_path))
+                font_name = _fm.FontProperties(fname=str(font_path)).get_name()
+                plt.rcParams['font.sans-serif'] = [font_name, 'DejaVu Sans']
+                plt.rcParams['axes.unicode_minus'] = False
+                return font_name
+        except Exception:
+            continue
+    return None
+
+_setup_chinese_font()
+
 # ============================================
 # CSS
 # ============================================
@@ -90,7 +113,7 @@ def load_all():
     if voting_path.exists():
         try:
             result['model'] = joblib.load(voting_path)
-            result['best_name'] = 'Voting Ensemble (LR+RF+XGB+ET, AUC 0.821)'
+            result['best_name'] = 'Voting Ensemble (LR+RF+XGB+ET, AUC 0.8214)'
         except:
             pass
 
@@ -308,7 +331,8 @@ def page_home(assets):
     if assets['eval_df'] is not None:
         eval_df = assets['eval_df']
         auc_col = '50次CV AUC均值' if '50次CV AUC均值' in eval_df.columns else 'AUC'
-        best_auc = f"{eval_df.iloc[0][auc_col]:.4f}"
+        if auc_col in eval_df.columns:
+            best_auc = f"{eval_df.loc[eval_df[auc_col].idxmax(), auc_col]:.4f}"
     with col4: st.metric("🎯 最佳AUC", best_auc, assets.get('best_name',''))
 
     # Show data quality validation status
@@ -1314,7 +1338,7 @@ def page_dashboard(assets):
         c1, c2, c3, c4 = st.columns(4)
         with c1: st.metric("📊 总病例", "420", "真实临床数据")
         with c2: st.metric("🏥 AKI发生率", "29.8%", "125/420")
-        with c3: st.metric("🤖 模型AUC", "0.821", "+/- 0.043")
+        with c3: st.metric("🤖 模型AUC", "0.8214", "+/- 0.043")
         with c4: st.metric("✅ 在线服务", "Active", "Streamlit Cloud")
 
         # Trend chart
