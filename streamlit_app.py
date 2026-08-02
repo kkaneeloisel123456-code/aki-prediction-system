@@ -1261,7 +1261,7 @@ def page_doctor_workstation(assets):
             elif '🟢' in str(val):
                 return 'background-color: #e8f5e9'
             return ''
-        styled = demo_df.style.applymap(highlight_risk, subset=['风险等级'])
+        styled = demo_df.style.map(highlight_risk, subset=['风险等级'])
         st.dataframe(styled, width='stretch', hide_index=True)
 
         # Risk distribution
