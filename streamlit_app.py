@@ -310,7 +310,7 @@ def generate_pdf_report(patient_info, result, shap_info=None):
         pdf.set_text_color(128,128,128)
         pdf.multi_cell(0, 4, 'Disclaimer: This report is generated for academic research purposes only. Not for clinical use without physician review.')
 
-        return pdf.output()
+        return bytes(pdf.output())
     except Exception as e:
         return None
 
