@@ -770,18 +770,18 @@ def _heuristic_risk_rules(patient_data):
     """Generate risk factors from patient data using heuristic rules."""
     rules = []
     checks = [
-        ('age', 60, 'Age > 60 years', 'risk_increasing'),
+        ('age', 60, '年龄 > 60 岁', 'risk_increasing'),
         ('eGFR', 60, 'eGFR < 60 ml/min', 'risk_increasing'),
         ('APACHE II', 20, 'APACHE II > 20', 'risk_increasing'),
-        ('Scr', 100, 'Elevated Scr', 'risk_increasing'),
-        ('diabetes', '是', 'Diabetes mellitus', 'risk_increasing'),
-        ('hypertension', '是', 'Hypertension', 'risk_increasing'),
-        ('surgery_time', 360, 'Surgery > 6 hours', 'risk_increasing'),
-        ('lactate', 2, 'Elevated Lactate', 'risk_increasing'),
-        ('CRP', 10, 'Elevated CRP', 'risk_increasing'),
-        ('Alb', 35, 'Low Albumin', 'risk_increasing'),
-        ('Hb', 120, 'Low Hemoglobin', 'risk_increasing'),
-        ('WBC', 10, 'Elevated WBC', 'risk_increasing'),
+        ('Scr', 100, '血肌酐升高', 'risk_increasing'),
+        ('diabetes', '是', '糖尿病', 'risk_increasing'),
+        ('hypertension', '是', '高血压', 'risk_increasing'),
+        ('surgery_time', 360, '手术时间 > 6 小时', 'risk_increasing'),
+        ('lactate', 2, '乳酸升高', 'risk_increasing'),
+        ('CRP', 10, 'CRP 升高', 'risk_increasing'),
+        ('Alb', 35, '白蛋白降低', 'risk_increasing'),
+        ('Hb', 120, '血红蛋白降低', 'risk_increasing'),
+        ('WBC', 10, '白细胞升高', 'risk_increasing'),
     ]
 
     for key, threshold, label, direction in checks:

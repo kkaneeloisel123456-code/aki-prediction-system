@@ -241,8 +241,11 @@ def predict_real(assets, input_dict):
     expected_val = 0
     try:
         import shap
-        if assets['best_name'] in ['XGBoost','LightGBM','CatBoost','RandomForest','ExtraTrees','LogisticRegression']:
-            explainer = shap.TreeExplainer(model)
+        shap_model = model
+        if assets['best_name'] == 'Voting Ensemble':
+            shap_model = assets.get('models', {}).get('XGBoost', model)
+        if assets['best_name'] in ['XGBoost','LightGBM','CatBoost','RandomForest','ExtraTrees','LogisticRegression'] or shap_model is not model:
+            explainer = shap.TreeExplainer(shap_model)
             sv = explainer.shap_values(X)
             if isinstance(sv, list): sv = sv[1]
             shap_vals = sv[0]
@@ -1038,6 +1041,12 @@ def page_prediction(assets):
                 risk_report_data = gen_report(
                     prob, shap_values=result.get('shap_values'),
                     feature_names=assets['features'],
+                    patient_data={
+                        'age': age, 'eGFR': egfr, 'APACHE II': apache,
+                        'Scr': scr, 'diabetes': dm, 'hypertension': ht,
+                        'surgery_time': surgery_time, 'lactate': lactate,
+                        'CRP': crp, 'Alb': alb, 'Hb': hb, 'WBC': wbc,
+                    },
                 )
                 # Build counterfactual summary for PDF
                 cf_for_pdf = None
