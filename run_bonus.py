@@ -85,22 +85,32 @@ n12 = [X.columns[i] for i in top12_idx]
 
 lr_imp = set()
 lr_df = pd.DataFrame()
+X_sm = sm.add_constant(X12)
+logit_res = None
 try:
-    X_sm = sm.add_constant(X12)
-    logit_res = sm.Logit(y, X_sm).fit(disp=0)
+    logit_res = sm.Logit(y, X_sm).fit(method='newton', maxiter=1000, disp=0)
+except Exception as e1:
+    print(f"  Method1 standard fit failed ({e1}), using ridge-regularized fallback")
+    try:
+        logit_res = sm.Logit(y, X_sm).fit_regularized(
+            alpha=0.01, L1_wt=0, disp=False, maxiter=1000)
+    except Exception as e2:
+        print(f"  Method1 fallback also failed: {e2}")
+        logit_res = None
+
+if logit_res is not None:
     lr_rows = []
     for i, name in enumerate(n12):
-        p = logit_res.pvalues[i+1]
-        lr_rows.append({'特征': name, 'OR': round(np.exp(logit_res.params[i+1]), 2), 'P值': round(p, 4)})
-        if p < 0.05: lr_imp.add(name)
+        p = logit_res.pvalues.iloc[i+1]
+        coef = float(logit_res.params.iloc[i+1])
+        or_val = np.exp(float(np.clip(coef, -20.0, 20.0)))
+        lr_rows.append({'特征': name, 'OR': round(or_val, 2), 'P值': round(float(p), 4)})
+        if p < 0.05:
+            lr_imp.add(name)
     lr_df = pd.DataFrame(lr_rows).sort_values('P值')
     print(f"  Method1-Logistic(Top12): {len(lr_imp)} significant")
     for _, r in lr_df.head(5).iterrows():
         print(f"    {r['特征']}: OR={r['OR']}, P={r['P值']}")
-except Exception as e:
-    print(f"  Method1 failed: {e}")
-    lr_imp = set()
-    lr_df = pd.DataFrame()
 
 # Method 2: XGBoost importance
 xgb_imp_df = pd.DataFrame({
