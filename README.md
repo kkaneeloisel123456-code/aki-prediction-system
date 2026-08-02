@@ -93,7 +93,7 @@ aki-project/
 ├── streamlit_app.py              # ★ Web应用主入口
 ├── run_clean.py                  # ★ 一键运行（最终版）
 ├── run_evaluation.py             # 综合评估图表
-├── run_bonus.py                  # 加分项（VIF+PDP+亚组+HL）
+├── run_bonus.py                  # （VIF+PDP+亚组+HL）
 ├── requirements.txt
 └── README.md
 ```
