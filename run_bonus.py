@@ -134,8 +134,8 @@ except:
 inter_all = lr_imp & xgb_imp_set & shap_imp_set
 inter_any2 = (lr_imp & xgb_imp_set) | (lr_imp & shap_imp_set) | (xgb_imp_set & shap_imp_set)
 
-print(f"  Three-method intersection: {len(inter_all)} -> {inter_all}")
-print(f"  At-least-two methods: {len(inter_any2)} -> {inter_any2}")
+print(f"  Three-method intersection: {len(inter_all)} -> {sorted(inter_all)}")
+print(f"  At-least-two methods: {len(inter_any2)} -> {sorted(inter_any2)}")
 
 cross_df = pd.DataFrame({
     '特征': n35,
@@ -197,7 +197,9 @@ plt.rcParams['axes.unicode_minus'] = False
 plt.rcParams.update({'font.size': 10, 'figure.dpi': 150, 'savefig.dpi': 200, 'savefig.bbox': 'tight'})
 
 # PDP: use features confirmed by >=2 methods
-pdp_feats = list(inter_any2)[:4] if len(inter_any2) >= 4 else xgb_imp_df.head(4)['特征'].tolist()
+pdp_feats = [f for f in xgb_imp_df['特征'].tolist() if f in inter_any2][:4]
+if len(pdp_feats) < 4:
+    pdp_feats = xgb_imp_df.head(4)['特征'].tolist()
 print(f"  PDP features: {pdp_feats}")
 
 fig, axes = plt.subplots(2, 2, figsize=(14, 12))
@@ -285,7 +287,7 @@ print(f"""
   tables/   VIF.csv + 3method_crossval.csv + HL_test.csv + Subgroups.csv
 
   Key findings for paper:
-  - Core features confirmed by >=2 methods: {inter_any2}
+  - Core features confirmed by >=2 methods: {sorted(inter_any2)}
   - HL P={p_hl:.3f} -> {verdict_hl}
   - High-risk subgroup has >10x AKI rate vs low-risk
 """)
