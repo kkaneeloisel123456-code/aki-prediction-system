@@ -1045,7 +1045,7 @@ def page_prediction(assets):
             # Use enhanced Phase 2 PDF generator if available
             try:
                 from web.components.report import generate_pdf_report as gen_pdf_v2
-                pdf_bytes = gen_pdf_v2(
+                pdf_path = gen_pdf_v2(
                     patient_info,
                     {'probability': prob, 'risk_level': risk_level},
                     [],  # risk_factors handled internally
@@ -1053,6 +1053,11 @@ def page_prediction(assets):
                     counterfactual=cf_for_pdf,
                     risk_report=risk_report_data,
                 )
+                if pdf_path and os.path.exists(str(pdf_path)):
+                    with open(str(pdf_path), 'rb') as f:
+                        pdf_bytes = f.read()
+                else:
+                    pdf_bytes = None
             except:
                 pdf_bytes = generate_pdf_report(patient_info, result)
 
@@ -1062,6 +1067,10 @@ def page_prediction(assets):
                     file_name=f"AKI_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                     mime="application/pdf", width='stretch'
                 )
+                st.session_state['last_report_pdf'] = pdf_bytes
+                st.session_state['last_report_patient'] = patient_info
+                st.session_state['last_report_prob'] = prob
+                st.session_state['last_report_risk'] = risk_level
             else:
                 st.warning("PDF生成需要fpdf2库支持。安装: pip install fpdf2")
 
@@ -1073,6 +1082,36 @@ def page_report(assets):
     st.markdown("## 📋 报告中心")
 
     st.info("📁 完成风险预测后，可在此页面下载 PDF 报告。支持批量预测和对比分析。")
+
+    st.markdown("### 📄 PDF 报告下载")
+    last_pdf = st.session_state.get('last_report_pdf')
+    if last_pdf:
+        patient = st.session_state.get('last_report_patient', {})
+        prob = st.session_state.get('last_report_prob', 0)
+        risk = st.session_state.get('last_report_risk', '低风险')
+        st.success(f"当前报告: {patient.get('name', '患者')} | 预测概率 {prob:.1%} | {risk}")
+        st.download_button(
+            "📥 下载 PDF 报告", data=last_pdf,
+            file_name=f"AKI_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+            mime="application/pdf", width='stretch'
+        )
+    else:
+        demo_info = {
+            'name': 'Demo_Patient',
+            'age': '55', 'gender': '男', 'surgery': '心脏瓣膜手术',
+            'APACHE II': '18', 'preop_eGFR': '90', 'preop_Scr': '80',
+            'preop_Alb': '40', 'preop_Hb': '130',
+        }
+        demo_result = {'probability': 0.42}
+        demo_pdf = generate_pdf_report(demo_info, demo_result)
+        if demo_pdf:
+            st.info("尚未在风险预测页生成报告，可先下载示例报告。")
+            st.download_button(
+                "📥 下载示例 PDF 报告", data=demo_pdf,
+                file_name="AKI_Report_Demo.pdf", mime="application/pdf", width='stretch'
+            )
+        else:
+            st.warning("PDF生成需要fpdf2库支持。安装: pip install fpdf2")
 
     st.markdown("### 📊 特征列表")
     if assets['features']:
