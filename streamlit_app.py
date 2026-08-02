@@ -276,12 +276,12 @@ def generate_pdf_report(patient_info, result, shap_info=None):
             pdf.add_font('CJK', '', 'Helvetica')
 
         pdf.set_font('CJK', 'B', 20)
-        pdf.cell(0, 12, 'AKI Risk Assessment Report', align='C', new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 12, '急性肾损伤（AKI）风险预测评估报告', align='C', new_x="LMARGIN", new_y="NEXT")
         pdf.ln(5)
 
         pdf.set_font('CJK', '', 10)
-        pdf.cell(0, 8, f'Date: {datetime.now().strftime("%Y-%m-%d %H:%M")}', align='C', new_x="LMARGIN", new_y="NEXT")
-        pdf.cell(0, 8, f'Patient: {patient_info.get("name","N/A")}', align='C', new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 8, f'报告生成时间：{datetime.now().strftime("%Y-%m-%d %H:%M")}', align='C', new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 8, f'患者：{patient_info.get("name","N/A")}', align='C', new_x="LMARGIN", new_y="NEXT")
         pdf.ln(10)
 
         # Risk level (use sidebar slider values for consistency)
@@ -290,17 +290,17 @@ def generate_pdf_report(patient_info, result, shap_info=None):
         except NameError: _rl = 0.3
         try: _rh = risk_high
         except NameError: _rh = 0.7
-        risk = 'High' if prob > _rh else ('Medium' if prob > _rl else 'Low')
-        risk_colors = {'Low': (39,174,96), 'Medium': (243,156,18), 'High': (231,76,60)}
+        risk = '高风险' if prob > _rh else ('中风险' if prob > _rl else '低风险')
+        risk_colors = {'低风险': (39,174,96), '中风险': (243,156,18), '高风险': (231,76,60)}
         pdf.set_fill_color(*risk_colors[risk])
         pdf.set_text_color(255,255,255)
         pdf.set_font('CJK', 'B', 22)
-        pdf.cell(0, 15, f'Risk: {risk} ({prob:.1%})', align='C', fill=True, new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 15, f'风险等级：{risk}（{prob:.1%}）', align='C', fill=True, new_x="LMARGIN", new_y="NEXT")
         pdf.ln(10)
 
         pdf.set_text_color(0,0,0)
         pdf.set_font('CJK', 'B', 12)
-        pdf.cell(0, 8, 'Patient Information', new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 8, '患者信息', new_x="LMARGIN", new_y="NEXT")
         pdf.set_font('CJK', '', 9)
         for k, v in patient_info.items():
             pdf.cell(95, 6, f'{k}: {v}')
@@ -308,7 +308,7 @@ def generate_pdf_report(patient_info, result, shap_info=None):
         pdf.ln(8)
         pdf.set_font('CJK', '', 7)
         pdf.set_text_color(128,128,128)
-        pdf.multi_cell(0, 4, 'Disclaimer: This report is generated for academic research purposes only. Not for clinical use without physician review.')
+        pdf.multi_cell(0, 4, '免责声明：本报告由 AI 预测系统生成，仅供学术研究与临床参考，不能作为临床决策的唯一依据，请以主治医生判断为准。')
 
         return bytes(pdf.output())
     except Exception as e:
@@ -1016,11 +1016,21 @@ def page_prediction(assets):
         c1,c2,c3 = st.columns([1,1,1])
         with c2:
             patient_info = {
-                'name': f'Patient_{datetime.now().strftime("%Y%m%d_%H%M%S")}',
+                'id': f'P{datetime.now().strftime("%Y%m%d%H%M%S")}',
+                'name': f'患者_{datetime.now().strftime("%Y%m%d_%H%M%S")}',
                 'age': str(age), 'gender': gender,
-                'surgery': surgery, 'APACHE II': str(apache),
-                'preop_eGFR': str(egfr), 'preop_Scr': str(scr),
-                'preop_Alb': str(alb), 'preop_Hb': str(hb),
+                'surgery': surgery, 'surgery_type': surgery,
+                'APACHE II': str(apache), 'apache_ii': str(apache),
+                'hypertension': '是' if ht == '是' else '否',
+                'diabetes': '是' if dm == '是' else '否',
+                'chd': '是' if chd == '是' else '否',
+                'surgery_time': str(surgery_time),
+                'blood_loss': str(blood_loss),
+                'preop_scr': str(scr), 'preop_egfr': str(egfr),
+                'preop_alb': str(alb), 'preop_hb': str(hb),
+                'preop_wbc': str(wbc), 'preop_crp': str(crp),
+                'preop_lactate': str(lactate), 'preop_nlr': str(nlr),
+                'preop_bnp': str(bnp), 'preop_sbp': str(pre_sbp),
             }
             # Phase 2: Generate risk report for enhanced PDF
             try:
@@ -1042,14 +1052,23 @@ def page_prediction(assets):
                 risk_report_data = None
                 cf_for_pdf = None
 
+            risk_factors_pdf = []
+            recommendations_pdf = {}
+            if risk_report_data:
+                risk_factors_pdf = [
+                    (rf.get('feature', ''), rf.get('importance', 0), rf.get('direction', ''))
+                    for rf in risk_report_data.get('risk_factors', [])
+                ]
+                recommendations_pdf = risk_report_data.get('recommendations', {})
+
             # Use enhanced Phase 2 PDF generator if available
             try:
                 from web.components.report import generate_pdf_report as gen_pdf_v2
                 pdf_path = gen_pdf_v2(
                     patient_info,
                     {'probability': prob, 'risk_level': risk_level},
-                    [],  # risk_factors handled internally
-                    {},  # recommendations handled internally
+                    risk_factors_pdf,
+                    recommendations_pdf,
                     counterfactual=cf_for_pdf,
                     risk_report=risk_report_data,
                 )
