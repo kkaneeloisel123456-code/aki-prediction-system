@@ -158,7 +158,7 @@ y_prob_oof = {}
 for name in model_order:
     print(f'    {name} ...')
     y_prob_oof[name] = cross_val_predict(
-        models[name], X_selected, y, cv=cv5, method='predict_proba', n_jobs=1
+        models[name], X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
     )[:, 1]
 
 # ---------------------------------------------------------------
