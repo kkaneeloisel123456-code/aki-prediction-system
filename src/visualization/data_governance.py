@@ -203,8 +203,8 @@ def plot_data_governance_flowchart(
 
         ("③ 异常值检测与处理", [
             "基于临床参考范围识别异常值",
-            "人工审查确认",
-            "保留临床合理性判断",
+            "44个不可能值置为缺失",
+            "缺失值按中位数填补",
         ], _PALETTE["yellow"], 0.52),
 
         ("④ 数据标准化", [
@@ -215,8 +215,8 @@ def plot_data_governance_flowchart(
 
         ("⑤ 数据泄露审查", [
             "排除KDIGO诊断标准",
-            "排除结局/未来信息变量",
-            "97 → 84候选特征",
+            "排除结局/身份/未来信息变量",
+            "97 → 83保留特征 / 87候选",
         ], _PALETTE["red"], 0.24),
 
         ("⑥ 特征工程与筛选", [
@@ -369,7 +369,7 @@ def plot_missing_values_summary(
 
 def plot_feature_selection_process(
     n_original: int = 97,
-    n_after_cleaning: int = 84,
+    n_after_cleaning: int = 87,
     n_after_rf: int = 35,
     n_final: int = 35,
     save_path: str = "",
