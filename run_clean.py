@@ -395,6 +395,49 @@ print("    Voting Ensemble...")
 y_prob_voting_oof = cross_val_predict(
     build_honest_pipeline(voting), X, y, cv=cv5, method='predict_proba', n_jobs=-1
 )[:, 1]
+
+# ============================================================
+# 模块5.6：概率校准（基于5折OOF概率，交叉验证式估计校准增益）
+# ============================================================
+print("\n" + "=" * 65)
+print("  模块5.6：概率校准（Isotonic，OOF拟合）")
+print("=" * 65)
+from sklearn.isotonic import IsotonicRegression
+from sklearn.metrics import brier_score_loss
+
+y_arr_cal = np.asarray(y)
+oof_arr_cal = np.asarray(y_prob_voting_oof)
+
+# 每个折的校准器只在其余折上训练，得到诚实的“校准后OOF概率”
+calibrated_oof = np.zeros_like(oof_arr_cal)
+for tr_idx_cal, te_idx_cal in cv5.split(X, y_arr_cal):
+    iso_fold = IsotonicRegression(out_of_bounds='clip')
+    iso_fold.fit(oof_arr_cal[tr_idx_cal], y_arr_cal[tr_idx_cal])
+    calibrated_oof[te_idx_cal] = iso_fold.predict(oof_arr_cal[te_idx_cal])
+
+brier_raw = brier_score_loss(y_arr_cal, oof_arr_cal)
+brier_cal = brier_score_loss(y_arr_cal, calibrated_oof)
+
+# 部署用最终校准器（全量OOF上拟合）
+final_calibrator = IsotonicRegression(out_of_bounds='clip')
+final_calibrator.fit(oof_arr_cal, y_arr_cal)
+joblib.dump(final_calibrator, 'models/calibrator.pkl')
+joblib.dump(final_calibrator, 'app_data/calibrator.joblib')
+
+calibration_metrics = {
+    'metric': ['Brier_raw', 'Brier_calibrated_OOF', 'Expected_positive_raw', 'Observed_positive'],
+    'value': [
+        round(float(brier_raw), 4),
+        round(float(brier_cal), 4),
+        round(float(oof_arr_cal.sum()), 1),
+        int(y_arr_cal.sum()),
+    ],
+}
+pd.DataFrame(calibration_metrics).to_csv(
+    'outputs/tables/calibration_metrics.csv', index=False, encoding='utf-8-sig')
+print(f"  Brier: 校准前 {brier_raw:.4f} -> 校准后(OOF) {brier_cal:.4f}")
+print(f"  期望阳性: 校准前 {oof_arr_cal.sum():.1f} vs 实际 {y_arr_cal.sum()}")
+
 fpr, tpr, _ = roc_curve(y, y_prob_voting_oof)
 voting_auc = auc(fpr, tpr)
 voting_cv_auc = all_results['Voting Ensemble']['mean']

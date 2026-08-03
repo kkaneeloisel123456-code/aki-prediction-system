@@ -76,7 +76,7 @@ if not exist "models\final_voting_model.pkl" (
 ) else (
     if not exist "app_data\final_model.joblib" (
         echo [3/4] Deployment files missing, syncing from models...
-        "%PY%" -c "import joblib, pathlib, pickle; joblib.dump(pickle.load(open('models/final_voting_model.pkl','rb')), 'app_data/final_model.joblib'); joblib.dump(pickle.load(open('models/scaler.pkl','rb')), 'app_data/scaler.joblib'); pathlib.Path('app_data/features.txt').write_text(pathlib.Path('models/selected_features.txt').read_text(encoding='utf-8'), encoding='utf-8')"
+        "%PY%" -c "import joblib, pathlib, pickle, os; joblib.dump(pickle.load(open('models/final_voting_model.pkl','rb')), 'app_data/final_model.joblib'); joblib.dump(pickle.load(open('models/scaler.pkl','rb')), 'app_data/scaler.joblib'); pathlib.Path('app_data/features.txt').write_text(pathlib.Path('models/selected_features.txt').read_text(encoding='utf-8'), encoding='utf-8'); (joblib.dump(pickle.load(open('models/calibrator.pkl','rb')), 'app_data/calibrator.joblib') if os.path.exists('models/calibrator.pkl') else None)"
         if errorlevel 1 (
             echo [ERROR] Failed to sync deployment files.
             pause

@@ -26,6 +26,7 @@
 | **5折×10次=50次嵌套CV AUC** | **0.807 ± 0.045** |
 | 测试集 AUC | 0.799 |
 | Bootstrap AUC (OOF，1000次) | 0.797 [0.751, 0.840] |
+| OOF校准后 Brier | 0.169（原始 0.180） |
 | 过拟合差距 | 0.127（可接受范围，<0.15） |
 | 最佳模型 | Voting Ensemble (LR:2, RF:2, XGB:1, ET:1) |
 | 使用特征 | 35 个 (RF重要性Top35) |
@@ -123,7 +124,7 @@ aki-project/
 | **VIF共线性诊断** | 方差膨胀因子检验 | 肾功能相关指标天然相关（VIF>10共22项），RF筛选+L2正则化缓解，解释时需注意 |
 | **Hosmer-Lemeshow** | 拟合优度检验 | P=0.149（未见显著失准；但整体预测概率水平偏高，详见校准限制） |
 
-> **校准限制**：测试集上期望阳性合计约37.9，而观测阳性合计为25，说明模型预测概率整体偏高（均值约45% vs 实际29.8%）。区分度较好不代表概率刻度准确，正式部署前建议对输出概率做 Platt/Isotonic 校准，并报告校准前后 Brier。
+> **校准说明**：原始模型在 OOF 上期望阳性合计约181.6，而实际阳性为125，说明未校准概率整体偏高。系统已内置 Isotonic 校准（基于5折OOF概率拟合），校准后 Brier 由 0.180 降至 0.169；Web 端展示的即为校准后概率，SHAP 解释仍基于原始模型。
 
 运行：`python run_bonus.py`
 
@@ -156,7 +157,7 @@ python -m unittest discover -s tests -v
 | 维度 | 方法 |
 |------|------|
 | **区分度** | AUC-ROC, Precision-Recall AUC, 5折×10次=50次嵌套CV, Bootstrap 95%CI |
-| **校准度** | Brier Score, Calibration Curve |
+| **校准度** | Brier Score, Calibration Curve, OOF Isotonic 校准 |
 | **临床效用** | Decision Curve Analysis (DCA) |
 | **可解释性** | SHAP Summary/Bar/Force/Dependence Plot |
 | **过拟合控制** | 训练-测试AUC差距, 加强正则化 |

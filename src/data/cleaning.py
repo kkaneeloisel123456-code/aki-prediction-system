@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# [LEGACY] 该模块未被 run_clean/run_bonus/run_evaluation/streamlit_app 引用。
+# 正式建模、清洗与评估统一走 src/data/prepare.py 与 run_clean.py；本模块仅作历史参考。
 """
 AKI (Acute Kidney Injury) Prediction — Data Cleaning Module
 =============================================================

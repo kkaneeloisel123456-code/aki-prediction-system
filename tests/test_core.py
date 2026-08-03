@@ -134,6 +134,23 @@ class RepoConsistencyTest(unittest.TestCase):
     def test_legacy_prediction_component_removed(self):
         self.assertFalse((self.ROOT / 'web' / 'components' / 'prediction.py').exists())
 
+    def test_calibrator_saved_and_bounded(self):
+        path = self.ROOT / 'app_data' / 'calibrator.joblib'
+        if not path.exists():
+            self.skipTest('calibrator not generated yet')
+        import joblib
+        cal = joblib.load(path)
+        p = cal.predict(np.array([[0.2], [0.8]]))
+        self.assertTrue(np.all((p >= 0) & (p <= 1)))
+
+    def test_calibration_metrics_csv(self):
+        path = self.ROOT / 'outputs' / 'tables' / 'calibration_metrics.csv'
+        if not path.exists():
+            self.skipTest('calibration metrics not generated yet')
+        df = pd.read_csv(path, encoding='utf-8-sig')
+        self.assertIn('metric', df.columns)
+        self.assertIn('Brier_calibrated_OOF', df['metric'].values)
+
 
 if __name__ == '__main__':
     unittest.main()

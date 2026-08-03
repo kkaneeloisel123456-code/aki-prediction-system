@@ -1,0 +1,5 @@
+﻿metric,value
+Brier_raw,0.1802
+Brier_calibrated_OOF,0.1693
+Expected_positive_raw,181.6
+Observed_positive,125.0

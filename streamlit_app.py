@@ -170,6 +170,17 @@ def load_all():
             logger.exception('impute_values.json 解析失败: %s', exc)
             result['impute_values'] = {}
 
+    # OOF Isotonic 校准器（app_data 优先）
+    calibrator_path = BASE_DIR / 'app_data' / 'calibrator.joblib'
+    if not calibrator_path.exists():
+        calibrator_path = MODEL_DIR / 'calibrator.pkl'
+    result['calibrator'] = None
+    if calibrator_path.exists():
+        try:
+            result['calibrator'] = joblib.load(calibrator_path)
+        except Exception as exc:
+            logger.exception('校准器加载失败: %s', exc)
+
     # Load AKI logic validation report
     result['validation_report'] = None
     result['validation_flags'] = None
@@ -268,6 +279,17 @@ def predict_real(assets, input_dict):
     else:
         prob = float(model.predict(X)[0])
 
+    # 应用OOF Isotonic校准（概率刻度更接近真实发生率）
+    calibrated = False
+    calibrator = assets.get('calibrator')
+    if calibrator is not None:
+        try:
+            prob = float(calibrator.predict(np.array([[prob]]))[0])
+            prob = float(np.clip(prob, 0.0, 1.0))
+            calibrated = True
+        except Exception as exc:
+            logger.exception('概率校准失败: %s', exc)
+
     # SHAP values (Voting itself is not a tree; explain with XGBoost sub-model)
     shap_vals = None
     expected_val = 0
@@ -295,6 +317,7 @@ def predict_real(assets, input_dict):
         'expected_value': expected_val,
         'raw_vector': X_raw,
         'missing_filled': missing_filled,
+        'calibrated': calibrated,
     }
 
 
@@ -786,6 +809,8 @@ def page_prediction(assets):
                     + "、".join(result['missing_filled'][:8])
                     + (" 等" if len(result['missing_filled']) > 8 else "")
                 )
+            if result.get('calibrated'):
+                st.caption("预测概率已通过 OOF Isotonic 校准；SHAP 解释仍基于原始模型。")
 
             prob = result['probability']
             # Star rating: 0-20%=1★, 20-40%=2★, 40-60%=3★, 60-80%=4★, 80-100%=5★
