@@ -21,6 +21,9 @@ outputs.zip
 outputs/reports/
 *.pdf
 
+# Patient-level detail (keep repo public-safe)
+outputs/tables/aki_logic_validation_flags.csv
+
 # Temp / IDE
 catboost_info/
 .vscode/

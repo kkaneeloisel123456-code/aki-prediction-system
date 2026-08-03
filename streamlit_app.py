@@ -9,11 +9,14 @@ import joblib
 import matplotlib.pyplot as plt
 from pathlib import Path
 import sys, os, warnings, base64, json
+import logging
 from datetime import datetime
 warnings.filterwarnings('ignore')
 
 from src.config import RISK_HIGH, RISK_LOW
 from src.web_inputs import MODEL_FEATURE_INPUT_KEYS
+
+logger = logging.getLogger('aki_app')
 
 # Force white background for matplotlib figures (避免黑底)
 plt.rcParams['figure.facecolor'] = 'white'
@@ -126,8 +129,8 @@ def load_all():
             result['model'] = joblib.load(voting_path)
             auc_str = f'{result["model_auc"]:.4f}' if result['model_auc'] is not None else 'nested-CV'
             result['best_name'] = f'Voting Ensemble (LR+RF+XGB+ET, AUC {auc_str})'
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.exception('Voting模型加载失败: %s', exc)
 
     # Also load individual models for comparison display
     if MODEL_DIR.exists():
@@ -136,8 +139,8 @@ def load_all():
                 continue  # already loaded
             try:
                 result['models'][f.stem] = joblib.load(f)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.exception('子模型加载失败 %s: %s', f.name, exc)
 
     # Load scaler — from app_data/ (non-LFS) first
     scaler_path = BASE_DIR / 'app_data' / 'scaler.joblib'
@@ -163,7 +166,8 @@ def load_all():
     if impute_path.exists():
         try:
             result['impute_values'] = json.loads(impute_path.read_text(encoding='utf-8'))
-        except Exception:
+        except Exception as exc:
+            logger.exception('impute_values.json 解析失败: %s', exc)
             result['impute_values'] = {}
 
     # Load AKI logic validation report
@@ -281,8 +285,8 @@ def predict_real(assets, input_dict):
         expected_val = ev[1] if isinstance(ev, (list, np.ndarray)) and len(ev) > 1 else (
             ev if not isinstance(ev, (list, np.ndarray)) else ev[0]
         )
-    except Exception as e:
-        pass
+    except Exception as exc:
+        logger.exception('SHAP计算失败: %s', exc)
 
     return {
         'probability': float(prob),
@@ -1116,7 +1120,8 @@ def page_prediction(assets):
                         'target_risk': cf_best_prob if 'cf_best_prob' in dir() else prob,
                         'risk_change': cf_delta if 'cf_delta' in dir() else 0,
                     }
-            except:
+            except Exception as exc:
+                logger.exception('风险报告生成失败: %s', exc)
                 risk_report_data = None
                 cf_for_pdf = None
 
@@ -1146,7 +1151,8 @@ def page_prediction(assets):
                         pdf_bytes = f.read()
                 else:
                     pdf_bytes = None
-            except:
+            except Exception as exc:
+                logger.exception('增强PDF生成失败，回退基础PDF: %s', exc)
                 pdf_bytes = generate_pdf_report(patient_info, result)
 
             if pdf_bytes:

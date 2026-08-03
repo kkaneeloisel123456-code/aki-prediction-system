@@ -111,5 +111,29 @@ class RiskThresholdConsistencyTest(unittest.TestCase):
         self.assertLess(RISK_LOW, RISK_HIGH)
 
 
+class RepoConsistencyTest(unittest.TestCase):
+    ROOT = Path(__file__).resolve().parent.parent
+
+    def test_app_data_features_match_models(self):
+        app = self.ROOT / 'app_data' / 'features.txt'
+        models = self.ROOT / 'models' / 'selected_features.txt'
+        if not app.exists() or not models.exists():
+            self.skipTest('feature files not generated yet')
+        app_feats = [l.strip() for l in app.read_text(encoding='utf-8').splitlines() if l.strip()]
+        model_feats = [l.strip() for l in models.read_text(encoding='utf-8').splitlines() if l.strip()]
+        self.assertEqual(app_feats, model_feats)
+
+    def test_official_pairwise_csv_schema(self):
+        path = self.ROOT / 'outputs' / 'figures' / 'pairwise_correlation_with_target.csv'
+        if not path.exists():
+            self.skipTest('pairwise CSV not generated yet')
+        df = pd.read_csv(path, encoding='utf-8-sig')
+        for col in ['Rank', 'Feature', 'Pearson_r', 'P_value', 'Direction', 'Significance']:
+            self.assertIn(col, df.columns)
+
+    def test_legacy_prediction_component_removed(self):
+        self.assertFalse((self.ROOT / 'web' / 'components' / 'prediction.py').exists())
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -982,7 +982,8 @@ def pairwise_feature_analysis(
     # Also save
     save_dir = "outputs/figures/"
     os.makedirs(save_dir, exist_ok=True)
-    csv_path = os.path.join(save_dir, "pairwise_correlation_with_target.csv")
+    # 官方特征-目标相关表由 run_clean.py 生成，这里避免覆盖其统一schema
+    csv_path = os.path.join(save_dir, "pairwise_correlation_with_target_eda.csv")
     corr_df.to_csv(csv_path, index=False, encoding="utf-8-sig")
     print(f"[Pairwise] Correlation table saved to {csv_path}")
 

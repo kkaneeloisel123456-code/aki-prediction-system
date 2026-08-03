@@ -22,16 +22,17 @@ prep = prepare_training_data(df)
 X = prep['X']
 y = prep['y']
 
-from sklearn.preprocessing import StandardScaler
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
+import joblib
+
+# 统一使用 run_clean.py 的最终特征与 scaler，避免重复筛选导致口径漂移
+with open('models/selected_features.txt', 'r', encoding='utf-8') as f:
+    n35 = [line.strip() for line in f if line.strip()]
+scaler = joblib.load('models/scaler.pkl')
+X35 = scaler.transform(X[n35])
 
 from sklearn.ensemble import RandomForestClassifier
 rf = RandomForestClassifier(n_estimators=200, class_weight='balanced', random_state=42, n_jobs=-1)
-rf.fit(X_scaled, y)
-top35 = np.argsort(rf.feature_importances_)[::-1][:35]
-X35 = X_scaled[:, top35]
-n35 = [X.columns[i] for i in top35]
+rf.fit(X35, y)
 
 from xgboost import XGBClassifier
 xgb_model = XGBClassifier(n_estimators=200, max_depth=3, learning_rate=0.02,
@@ -72,8 +73,8 @@ import statsmodels.api as sm
 
 # Method 1: Logistic with Top12 (125 events / 10 = ~12 features)
 top12_idx = np.argsort(rf.feature_importances_)[::-1][:12]
-X12 = X_scaled[:, top12_idx]
-n12 = [X.columns[i] for i in top12_idx]
+X12 = X35[:, top12_idx]
+n12 = [n35[i] for i in top12_idx]
 
 lr_imp = set()
 lr_df = pd.DataFrame()
@@ -236,55 +237,62 @@ else:
     ], voting='soft', weights=[2,2,1,1])
     voting.fit(X_tr, y_tr)
 
-prob_all = voting.predict_proba(X35)[:, 1]
-risk_median = np.median(prob_all)
+subgroup_path = f'{OUT}/tables/亚组分析.csv'
+if os.path.exists(subgroup_path):
+    # 官方亚组表由 run_clean.py 用5折OOF概率生成，避免训练集内自评
+    sub_df = pd.read_csv(subgroup_path, encoding='utf-8-sig')
+    print(f"  [SKIP] 亚组分析已由 run_clean.py 以 OOF 口径生成: {subgroup_path}")
+    print(sub_df.to_string(index=False))
+else:
+    prob_all = voting.predict_proba(X35)[:, 1]
+    risk_median = np.median(prob_all)
 
-subgroups = []
-for label, mask in [
-    ('High Risk (prob>=median)', prob_all >= risk_median),
-    ('Low Risk (prob<median)', prob_all < risk_median),
-]:
-    n_s = mask.sum()
-    subgroups.append({'亚组': label, '样本数': int(n_s), 'AKI发生率': f"{y[mask].sum()/n_s*100:.1f}%" if n_s > 0 else 'N/A'})
-
-if 'ICUAdmSCr' in n35:
-    idx = n35.index('ICUAdmSCr')
-    scr_vals = X35[:, idx]
+    subgroups = []
     for label, mask in [
-        ('Better Renal (ICU-SCr<median)', scr_vals < np.median(scr_vals)),
-        ('Worse Renal (ICU-SCr>=median)', scr_vals >= np.median(scr_vals)),
+        ('High Risk (prob>=median)', prob_all >= risk_median),
+        ('Low Risk (prob<median)', prob_all < risk_median),
     ]:
         n_s = mask.sum()
         subgroups.append({'亚组': label, '样本数': int(n_s), 'AKI发生率': f"{y[mask].sum()/n_s*100:.1f}%" if n_s > 0 else 'N/A'})
 
-sub_df = pd.DataFrame(subgroups)
-sub_df.to_csv(f'{OUT}/tables/亚组分析.csv', index=False, encoding='utf-8-sig')
-for _, r in sub_df.iterrows():
-    print(f"  {r['亚组']:<35} n={r['样本数']:<5} AKI={r['AKI发生率']}")
+    if 'ICUAdmSCr' in n35:
+        idx = n35.index('ICUAdmSCr')
+        scr_vals = X35[:, idx]
+        for label, mask in [
+            ('Better Renal (ICU-SCr<median)', scr_vals < np.median(scr_vals)),
+            ('Worse Renal (ICU-SCr>=median)', scr_vals >= np.median(scr_vals)),
+        ]:
+            n_s = mask.sum()
+            subgroups.append({'亚组': label, '样本数': int(n_s), 'AKI发生率': f"{y[mask].sum()/n_s*100:.1f}%" if n_s > 0 else 'N/A'})
 
-fig, ax = plt.subplots(figsize=(10, 5))
-rates = [float(r.replace('%','')) for r in sub_df['AKI发生率'] if r != 'N/A']
-labels = sub_df['亚组'].tolist()
-colors = ['#F44336' if 'High' in l or 'Worse' in l else '#4CAF50' for l in labels]
-bars = ax.barh(range(len(labels)), rates, color=colors, alpha=0.8)
-for bar, n in zip(bars, sub_df['样本数']):
-    ax.text(bar.get_width()+0.5, bar.get_y()+bar.get_height()/2, f'n={n}', va='center', fontsize=9)
-ax.set_yticks(range(len(labels)))
-ax.set_yticklabels(labels)
-ax.set_xlabel('AKI Incidence (%)')
-ax.set_title('Subgroup Analysis')
-fig.savefig(f'{OUT}/figures/亚组分析.png')
-plt.close()
-print("  [OK] Subgroup")
+    sub_df = pd.DataFrame(subgroups)
+    sub_df.to_csv(f'{OUT}/tables/亚组分析_bonus.csv', index=False, encoding='utf-8-sig')
+    for _, r in sub_df.iterrows():
+        print(f"  {r['亚组']:<35} n={r['样本数']:<5} AKI={r['AKI发生率']}")
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    rates = [float(r.replace('%','')) for r in sub_df['AKI发生率'] if r != 'N/A']
+    labels = sub_df['亚组'].tolist()
+    colors = ['#F44336' if 'High' in l or 'Worse' in l else '#4CAF50' for l in labels]
+    bars = ax.barh(range(len(labels)), rates, color=colors, alpha=0.8)
+    for bar, n in zip(bars, sub_df['样本数']):
+        ax.text(bar.get_width()+0.5, bar.get_y()+bar.get_height()/2, f'n={n}', va='center', fontsize=9)
+    ax.set_yticks(range(len(labels)))
+    ax.set_yticklabels(labels)
+    ax.set_xlabel('AKI Incidence (%)')
+    ax.set_title('Subgroup Analysis (fallback)')
+    fig.savefig(f'{OUT}/figures/亚组分析_bonus.png')
+    plt.close()
+    print("  [OK] Subgroup (fallback -> 亚组分析_bonus.*)")
 
 print(f"""
 {'='*60}
   Done! Output: {OUT}
-  figures/  PDP_nonlinear.png + Subgroup_analysis.png
-  tables/   VIF.csv + 3method_crossval.csv + HL_test.csv + Subgroups.csv
+  figures/  PDP_nonlinear.png + 亚组分析.png(run_clean OOF)
+  tables/   VIF.csv + 3method_crossval.csv + HL_test.csv
 
   Key findings for paper:
   - Core features confirmed by >=2 methods: {sorted(inter_any2)}
   - HL P={p_hl:.3f} -> {verdict_hl}
-  - High-risk subgroup has >10x AKI rate vs low-risk
+  - Subgroup table: outputs/tables/亚组分析.csv (run_clean.py OOF口径)
 """)

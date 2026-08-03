@@ -342,7 +342,7 @@ print(f"    F1:        {f1_score(y_test, y_pred, zero_division=0):.4f}")
 
 # ============================================================
 # 模块5.5：生成最终ROC曲线图（4基模型 + Voting Ensemble）
-#           使用OOF（out-of-fold）预测 → AUC与50次CV一致
+#           OOF预测用于绘制曲线；报告值采用50次嵌套CV
 # ============================================================
 print("\n" + "=" * 65)
 print("  模块5.5：生成最终ROC曲线图（OOF预测，AUC = 50次嵌套CV）")
@@ -869,8 +869,8 @@ fig_pdp.savefig('outputs/figures/PDP非线性效应.png', dpi=300, bbox_inches='
 plt.close(fig_pdp)
 print(f"  [OK] PDP saved -> outputs/figures/PDP非线性效应.png")
 
-# ── 亚组分析（Voting Ensemble）──
-prob_all = voting_full.predict_proba(X_selected)[:, 1]
+# ── 亚组分析（Voting Ensemble，使用5折OOF概率，避免训练集内自评）──
+prob_all = y_prob_voting_oof
 risk_median = np.median(prob_all)
 
 subgroups = [
@@ -910,7 +910,7 @@ for bar, n, rate in zip(bars, ns, rates):
 ax_sub.set_yticks(y_pos)
 ax_sub.set_yticklabels(labels, fontsize=10)
 ax_sub.set_xlabel('AKI Incidence (%)', fontsize=12)
-ax_sub.set_title('Subgroup Analysis — AKI Risk Stratification (Voting Ensemble)', fontsize=13, fontweight='bold')
+ax_sub.set_title('Subgroup Analysis — AKI Risk Stratification (Voting Ensemble, OOF)', fontsize=13, fontweight='bold')
 ax_sub.set_xlim([0, max(rates) * 1.15])
 ax_sub.grid(axis='x', alpha=0.3)
 ax_sub.spines['top'].set_visible(False); ax_sub.spines['right'].set_visible(False)
