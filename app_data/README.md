@@ -8,7 +8,7 @@
 
 | 文件名 | 大小 | 作用 |
 |--------|------|------|
-| `final_model.joblib` | ~几MB | 训练好的**最终模型**（Voting Ensemble，AUC 0.821） |
+| `final_model.joblib` | ~几MB | 训练好的**最终模型**（Voting Ensemble，嵌套CV AUC 0.807） |
 | `scaler.joblib` | 小 | **数据标准化器**，把新数据缩放到和训练时一样的尺度 |
 | `features.txt` | 小 | 模型用的 **35 个特征名**列表 |
 

@@ -48,6 +48,8 @@ import pandas as pd
 import seaborn as sns
 from scipy import stats
 
+from src.config import ID_COLUMNS
+
 # ---------------------------------------------------------------------------
 # Logging configuration
 # ---------------------------------------------------------------------------
@@ -191,7 +193,7 @@ def drop_identifier_columns(
         DataFrame with the specified columns removed.
     """
     if cols is None:
-        cols = ["姓名"]
+        cols = list(ID_COLUMNS)
 
     existing = [c for c in cols if c in df.columns]
     missing = [c for c in cols if c not in df.columns]
@@ -957,7 +959,9 @@ def encode_categorical(
         logger.info("Label encoding applied to: %s", cols)
 
     else:  # onehot
-        df_out = pd.get_dummies(df_out, columns=cols, drop_first=drop_first, prefix=cols)
+        df_out = pd.get_dummies(
+            df_out, columns=cols, drop_first=drop_first, prefix=cols, dtype=np.uint8
+        )
         logger.info(
             "OneHot encoding applied to: %s (drop_first=%s)", cols, drop_first,
         )
@@ -1195,8 +1199,12 @@ def generate_data_dictionary(
                     row["Q1"] = row["Q3"] = None
         else:
             # Show top categories
-            top_vals = df[col].value_counts(dropna=True).head(5).to_dict()
-            row["常见值"] = str(top_vals) if top_vals else ""
+            if str(col).strip() in ID_COLUMNS:
+                # Never publish identifier values (patient names / record ids).
+                row["常见值"] = "已脱敏 (隐私保护)"
+            else:
+                top_vals = df[col].value_counts(dropna=True).head(5).to_dict()
+                row["常见值"] = str(top_vals) if top_vals else ""
 
         row["描述"] = desc
         rows.append(row)

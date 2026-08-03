@@ -1,5 +1,5 @@
-﻿Subgroup,N,AKI_Rate_%
-High Risk (prob >= median),210,56.2
-Low Risk (prob < median),210,3.3
-Worse Renal (ICU-SCr >= median),212,46.7
-Better Renal (ICU-SCr < median),208,12.5
+﻿亚组,样本数,AKI发生率
+High Risk (prob>=median),210,56.7%
+Low Risk (prob<median),210,2.9%
+Better Renal (ICU-SCr<median),208,12.5%
+Worse Renal (ICU-SCr>=median),212,46.7%

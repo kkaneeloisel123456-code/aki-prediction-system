@@ -12,6 +12,9 @@ import sys, os, warnings, base64, json
 from datetime import datetime
 warnings.filterwarnings('ignore')
 
+from src.config import RISK_HIGH, RISK_LOW
+from src.web_inputs import MODEL_FEATURE_INPUT_KEYS
+
 # Force white background for matplotlib figures (避免黑底)
 plt.rcParams['figure.facecolor'] = 'white'
 plt.rcParams['axes.facecolor'] = 'white'
@@ -83,8 +86,8 @@ with st.sidebar:
                      label_visibility="collapsed")
     st.markdown("---")
     st.markdown("### ⚙️ 设置")
-    risk_low = st.slider("低风险阈值", 0.0, 1.0, 0.3, 0.05)
-    risk_high = st.slider("高风险阈值", 0.0, 1.0, 0.7, 0.05)
+    risk_low = st.slider("低风险阈值", 0.0, 1.0, RISK_LOW, 0.05)
+    risk_high = st.slider("高风险阈值", 0.0, 1.0, RISK_HIGH, 0.05)
     st.markdown("---")
     st.info("**白菜卷队** · 广西科技大学\n暑期数创 2026")
 
@@ -97,7 +100,8 @@ def load_all():
     result = {'model': None, 'scaler': None, 'features': None, 'eval_df': None,
               'best_name': None, 'models': {},
               'validation_report': None, 'validation_flags': None,
-              'n_staging_issues': 0, 'n_group_stage_issues': 0}
+              'n_staging_issues': 0, 'n_group_stage_issues': 0,
+              'impute_values': {}, 'model_auc': None}
 
     # Load evaluation results (final optimized version)
     eval_path = TAB_DIR / 'final_cv_results.csv'
@@ -105,26 +109,34 @@ def load_all():
         eval_path = TAB_DIR / 'model_comparison.csv'  # fallback
     if eval_path.exists():
         result['eval_df'] = pd.read_csv(eval_path)
+        auc_col = '50次CV AUC均值' if '50次CV AUC均值' in result['eval_df'].columns else 'AUC'
+        if auc_col in result['eval_df'].columns:
+            try:
+                # final_cv_results.csv 行序不保证；取最高AUC（Voting Ensemble）
+                result['model_auc'] = float(result['eval_df'][auc_col].max())
+            except Exception:
+                result['model_auc'] = None
 
-    # Load final Voting model (AUC 0.821) — from app_data/ (non-LFS for Streamlit Cloud)
+    # Load final Voting model — from app_data/ (non-LFS for Streamlit Cloud)
     voting_path = BASE_DIR / 'app_data' / 'final_model.joblib'
     if not voting_path.exists():
         voting_path = MODEL_DIR / 'final_voting_model.pkl'  # fallback
     if voting_path.exists():
         try:
             result['model'] = joblib.load(voting_path)
-            result['best_name'] = 'Voting Ensemble (LR+RF+XGB+ET, AUC 0.8214)'
-        except:
+            auc_str = f'{result["model_auc"]:.4f}' if result['model_auc'] is not None else 'nested-CV'
+            result['best_name'] = f'Voting Ensemble (LR+RF+XGB+ET, AUC {auc_str})'
+        except Exception:
             pass
 
     # Also load individual models for comparison display
     if MODEL_DIR.exists():
         for f in MODEL_DIR.glob('*.pkl'):
-            if f.stem == 'final_voting_model':
+            if f.stem in ('final_voting_model', 'scaler'):
                 continue  # already loaded
             try:
                 result['models'][f.stem] = joblib.load(f)
-            except:
+            except Exception:
                 pass
 
     # Load scaler — from app_data/ (non-LFS) first
@@ -145,6 +157,14 @@ def load_all():
     if feat_path.exists():
         with open(feat_path, encoding='utf-8') as f:
             result['features'] = [l.strip() for l in f if l.strip()]
+
+    # Per-feature training medians used to fill missing web inputs
+    impute_path = BASE_DIR / 'app_data' / 'impute_values.json'
+    if impute_path.exists():
+        try:
+            result['impute_values'] = json.loads(impute_path.read_text(encoding='utf-8'))
+        except Exception:
+            result['impute_values'] = {}
 
     # Load AKI logic validation report
     result['validation_report'] = None
@@ -214,20 +234,28 @@ def predict_real(assets, input_dict):
     if model is None or features is None:
         return None
 
-    # Build feature vector
+    # Build feature vector; missing inputs use training medians, never 0.
+    impute_values = assets.get('impute_values') or {}
     X = np.zeros(len(features))
+    missing_filled = []
     for i, feat in enumerate(features):
-        if feat in input_dict:
-            X[i] = input_dict[feat]
-        # else: keep as 0 (will be standardized)
+        if feat in input_dict and input_dict[feat] is not None:
+            try:
+                X[i] = float(input_dict[feat])
+                continue
+            except (TypeError, ValueError):
+                pass
+        X[i] = float(impute_values.get(feat, 0.0))
+        missing_filled.append(feat)
 
+    X_raw = X.copy()
     X = X.reshape(1, -1)
 
     # Scale
     if scaler is not None:
         try:
             X = scaler.transform(X)
-        except:
+        except Exception:
             pass
 
     # Predict
@@ -236,21 +264,23 @@ def predict_real(assets, input_dict):
     else:
         prob = float(model.predict(X)[0])
 
-    # SHAP values
+    # SHAP values (Voting itself is not a tree; explain with XGBoost sub-model)
     shap_vals = None
     expected_val = 0
     try:
         import shap
-        shap_model = model
-        if assets['best_name'] == 'Voting Ensemble':
-            shap_model = assets.get('models', {}).get('XGBoost', model)
-        if assets['best_name'] in ['XGBoost','LightGBM','CatBoost','RandomForest','ExtraTrees','LogisticRegression'] or shap_model is not model:
-            explainer = shap.TreeExplainer(shap_model)
-            sv = explainer.shap_values(X)
-            if isinstance(sv, list): sv = sv[1]
-            shap_vals = sv[0]
-            ev = explainer.expected_value
-            expected_val = ev[1] if isinstance(ev, (list,np.ndarray)) and len(ev)>1 else (ev if not isinstance(ev,(list,np.ndarray)) else ev[0])
+        shap_model = assets.get('models', {}).get('XGBoost', model)
+        if shap_model is None or shap_model.__class__.__name__ == 'StandardScaler':
+            shap_model = model
+        explainer = shap.TreeExplainer(shap_model)
+        sv = explainer.shap_values(X)
+        if isinstance(sv, list):
+            sv = sv[1]
+        shap_vals = sv[0]
+        ev = explainer.expected_value
+        expected_val = ev[1] if isinstance(ev, (list, np.ndarray)) and len(ev) > 1 else (
+            ev if not isinstance(ev, (list, np.ndarray)) else ev[0]
+        )
     except Exception as e:
         pass
 
@@ -259,6 +289,8 @@ def predict_real(assets, input_dict):
         'prediction': int(prob >= 0.5),
         'shap_values': shap_vals,
         'expected_value': expected_val,
+        'raw_vector': X_raw,
+        'missing_filled': missing_filled,
     }
 
 
@@ -289,10 +321,14 @@ def generate_pdf_report(patient_info, result, shap_info=None):
 
         # Risk level (use sidebar slider values for consistency)
         prob = result['probability']
-        try: _rl = risk_low
-        except NameError: _rl = 0.3
-        try: _rh = risk_high
-        except NameError: _rh = 0.7
+        try:
+            _rl = risk_low
+        except NameError:
+            _rl = RISK_LOW
+        try:
+            _rh = risk_high
+        except NameError:
+            _rh = RISK_HIGH
         risk = '高风险' if prob > _rh else ('中风险' if prob > _rl else '低风险')
         risk_colors = {'低风险': (39,174,96), '中风险': (243,156,18), '高风险': (231,76,60)}
         pdf.set_fill_color(*risk_colors[risk])
@@ -306,7 +342,7 @@ def generate_pdf_report(patient_info, result, shap_info=None):
         pdf.cell(0, 8, '患者信息', new_x="LMARGIN", new_y="NEXT")
         pdf.set_font('CJK', '', 9)
         for k, v in patient_info.items():
-            pdf.cell(95, 6, f'{k}: {v}')
+            pdf.multi_cell(0, 6, f'{k}: {v}', new_x="LMARGIN", new_y="NEXT")
 
         pdf.ln(8)
         pdf.set_font('CJK', '', 7)
@@ -326,8 +362,9 @@ def page_home(assets):
     st.markdown('<p class="sub-header">Machine Learning · SHAP Explainability · Clinical Decision Support</p>', unsafe_allow_html=True)
 
     col1,col2,col3,col4,col5 = st.columns(5)
-    with col1: st.metric("📊 样本量", "420", "真实临床数据")
-    with col2: st.metric("🧬 特征数", "35", "RF Top35")
+    n_feats = len(assets.get('features') or [])
+    with col1: st.metric("📊 样本量", "420", "训练样本")
+    with col2: st.metric("🧬 特征数", str(n_feats or 35), "RF Top35")
     with col3: st.metric("🤖 模型数", "4+Voting", "集成系统")
 
     best_auc = "N/A"
@@ -353,7 +390,7 @@ def page_home(assets):
         ### 📖 研究概述
         - **临床问题**: 心脏手术后 AKI 发生率 5-30%，显著增加死亡率和医疗费用
         - **数据来源**: 420 例心脏手术患者，97 个临床特征
-        - **技术方案**: 4 种基模型 + Voting集成 + 84候选特征精筛至35特征 + 类别平衡
+        - **技术方案**: 4 种基模型 + Voting集成 + 候选特征精筛至35特征 + 类别平衡
         - **核心创新**: SHAP 可解释 AI — 不仅预测风险，更解释"为什么"
         - **系统功能**: 在线预测 → 风险分层 → 危险因素 → 干预建议 → PDF 报告
         """)
@@ -420,7 +457,7 @@ def page_performance(assets):
     tab1,tab2,tab3,tab4,tab5,tab6 = st.tabs(["📊 性能对比", "📈 ROC/PR曲线", "🎯 校准与DCA", "📉 CV可信度", "🔬 消融实验", "🤝 集成对比"])
 
     with tab1:
-        st.markdown("### 模型性能总览（5折×10次=50次CV）")
+        st.markdown("### 模型性能总览（5折×10次=50次嵌套CV）")
         # Support both new (模型/50次CV AUC均值) and old (Model/AUC) formats
         model_col = '模型' if '模型' in eval_df.columns else 'Model'
         auc_col = '50次CV AUC均值' if '50次CV AUC均值' in eval_df.columns else 'AUC'
@@ -598,6 +635,19 @@ def page_prediction(assets):
 
     st.info(f"✅ 当前使用模型: **{assets['best_name']}** | 特征数: {len(assets.get('features',[]))}")
 
+    missing_ui = [f for f in assets.get('features', []) if f not in MODEL_FEATURE_INPUT_KEYS]
+    if missing_ui:
+        st.warning(f"以下模型特征暂无输入框，将使用训练集中位数填充: {missing_ui}")
+
+    impute = assets.get('impute_values') or {}
+
+    def _dflt(key, fallback):
+        """Form default = training median when available."""
+        try:
+            return float(impute.get(key, fallback))
+        except (TypeError, ValueError):
+            return float(fallback)
+
     with st.form("pred_form"):
         st.markdown("### 📝 患者基本信息")
         c1,c2,c3 = st.columns(3)
@@ -612,11 +662,17 @@ def page_prediction(assets):
             surgery_time = st.number_input("手术时间 (min)", 30, 1440, 300)
             apache = st.number_input("APACHE II 评分", 0, 60, 18)
             blood_loss = st.number_input("术中失血量 (ml)", 0, 5000, 400)
-            vent_time = st.number_input("术后通气时间 (min)", 0, 50000, 360)
         with c3:
-            total_days = st.number_input("总住院天数", 1, 200, 22)
-            icu_days = st.number_input("ICU 住院天数", 0.0, 50.0, 2.0, 0.5)
-            cost = st.number_input("总住院费用 (元)", 10000.0, 500000.0, 90000.0, 1000.0)
+            st.caption("以下为模型使用的术前补充特征（可选，默认值为训练集中位数）")
+            pre_hstn = st.number_input("术前 hsTn (pg/mL)", 0.0, 10000.0, _dflt('术前hsTn', 13.0), 1.0)
+            pre_b2mg = st.number_input("术前 β2MG (mg/L)", 0.0, 20.0, _dflt('术前β2MG', 2.4), 0.1)
+            pre_mono = st.number_input("术前 MONO (x10e9/L)", 0.0, 10.0, _dflt('术前MONO', 0.6), 0.1)
+            pre_neut = st.number_input("术前 NEUT (x10e9/L)", 0.0, 30.0, _dflt('术前NEUT', 4.1), 0.1)
+            pre_plr = st.number_input("术前 PLR", 20.0, 1000.0, _dflt('术前PLR', 147.0), 1.0)
+            pre_lmr = st.number_input("术前 LMR", 0.0, 20.0, _dflt('术前LMR', 2.8), 0.1)
+            pre_be = st.number_input("术前 BE (mmol/L)", -20.0, 20.0, _dflt('术前BE', 1.5), 0.1)
+            pre_pao2 = st.number_input("术前 PaO2 (mmHg)", 30.0, 600.0, _dflt('术前PaO2', 287.0), 1.0)
+            pre_rbp = st.number_input("术前 RBP (mg/L)", 0.0, 100.0, _dflt('术前RBP', 38.0), 0.1)
 
         st.markdown("### 🔬 术前实验室指标")
         c1,c2,c3 = st.columns(3)
@@ -626,6 +682,7 @@ def page_prediction(assets):
             alb = st.number_input("术前 Alb (g/L)", 15.0, 60.0, 40.0, 0.1)
             hb = st.number_input("术前 Hb (g/L)", 50.0, 200.0, 130.0, 1.0)
             wbc = st.number_input("术前 WBC (x10e9/L)", 1.0, 30.0, 7.0, 0.1)
+            ckmb_ck = st.number_input("术前 CKMB/CK 比值", 0.0, 3.0, _dflt('术前CKMBCK', 0.2), 0.01)
         with c2:
             crp = st.number_input("术前 CRP (mg/L)", 0.0, 200.0, 5.0, 0.1)
             lactate = st.number_input("术前 Lactate (mmol/L)", 0.1, 15.0, 1.0, 0.1)
@@ -651,6 +708,30 @@ def page_prediction(assets):
             icu_scr = st.number_input("ICU入院 Scr (μmol/L)", 20.0, 500.0, 80.0, 1.0)
             icu_egfr = st.number_input("ICU入院 eGFR", 10.0, 150.0, 90.0, 1.0)
 
+        st.markdown("### 🩸 术后早期指标（模型特征，可选）")
+        st.caption("默认值为训练集中位数；如暂无术后结果，请保留默认值。")
+        c1,c2,c3 = st.columns(3)
+        with c1:
+            post_b2mg = st.number_input("术后 β2MG (mg/L)", 0.0, 20.0, _dflt('术后β2MG', 2.1), 0.1)
+            post_mb = st.number_input("术后 Mb (ng/mL)", 0.0, 5000.0, _dflt('术后Mb', 308.0), 1.0)
+            post_hstn = st.number_input("术后 hsTn (pg/mL)", 0.0, 10000.0, _dflt('术后hsTn', 572.0), 1.0)
+            post_lactate = st.number_input("术后 Lactate (mmol/L)", 0.0, 20.0, _dflt('术后Lactate', 4.7), 0.1)
+            post_urea = st.number_input("术后 Urea (mmol/L)", 1.0, 40.0, _dflt('术后Urea', 6.1), 0.1)
+        with c2:
+            post_be = st.number_input("术后 BE (mmol/L)", -20.0, 20.0, _dflt('术后BE', -2.8), 0.1)
+            post_mono = st.number_input("术后 MONO (x10e9/L)", 0.0, 10.0, _dflt('术后MONO', 0.6), 0.1)
+            post_plr = st.number_input("术后 PLR", 20.0, 1000.0, _dflt('术后PLR', 200.0), 1.0)
+            post_bnp = st.number_input("术后 BNP (pg/mL)", 0.0, 50000.0, _dflt('术后BNP', 1000.0), 10.0)
+            post_ua = st.number_input("术后 UA (μmol/L)", 50.0, 1000.0, _dflt('术后UA', 323.0), 1.0)
+        with c3:
+            post_car = st.number_input("术后 CAR", 0.0, 10.0, _dflt('术后CAR', 0.7), 0.01)
+            post_crp = st.number_input("术后 CRP (mg/L)", 0.0, 300.0, _dflt('术后CRP', 60.0), 0.1)
+            post_lmr = st.number_input("术后 LMR", 0.0, 20.0, _dflt('术后LMR', 2.6), 0.1)
+            post_pao2 = st.number_input("术后 PaO2 (mmHg)", 30.0, 600.0, _dflt('术后PaO2', 169.0), 1.0)
+            post_ckmb = st.number_input("术后 CKMB (U/L)", 0.0, 500.0, _dflt('术后CKMB', 68.0), 1.0)
+            post_plt = st.number_input("术后 PLT (x10e9/L)", 20.0, 800.0, _dflt('术后PLT', 144.0), 1.0)
+            post_alb = st.number_input("术后 Alb (g/L)", 15.0, 60.0, _dflt('术后Alb', 30.0), 0.1)
+
         submitted = st.form_submit_button("🔍 开始预测", type="primary", width='stretch')
 
     if submitted:
@@ -666,14 +747,26 @@ def page_prediction(assets):
                 '术中晶体液量': intra_cryst, '术中胶体液量': intra_colloid,
                 '术前Scr': scr, '术前eGFR': egfr, '术前Alb': alb,
                 '术前Hb': hb, '术前WBC': wbc, '术前CRP': crp,
+                '术前CKMBCK': ckmb_ck,
                 '术前Lactate': lactate, '术前NLR': nlr, '术前BNP': bnp,
                 '术前pH': ph, '术前K': k_val, '术前Urea': urea,
                 '术前UA': ua, '术前PLT': plt,
                 '术前SBP': pre_sbp, '术前DBP': pre_dbp,
                 'ICUAdmSCr': icu_scr, 'ICUAdmeGFR': icu_egfr,
-                '总住院天数': total_days, '总住院费用': cost,
-                '术后通气时间': vent_time, 'ICU住院天数': icu_days,
-                '手术类型': surgery,  # will be label-encoded
+                '术前hsTn': pre_hstn, '术前β2MG': pre_b2mg,
+                '术前MONO': pre_mono, '术前NEUT': pre_neut,
+                '术前PLR': pre_plr, '术前LMR': pre_lmr,
+                '术前BE': pre_be, '术前PaO2': pre_pao2,
+                '术前RBP': pre_rbp,
+                '术后β2MG': post_b2mg, '术后Mb': post_mb,
+                '术后hsTn': post_hstn, '术后Lactate': post_lactate,
+                '术后Urea': post_urea, '术后BE': post_be,
+                '术后MONO': post_mono, '术后PLR': post_plr,
+                '术后BNP': post_bnp, '术后UA': post_ua,
+                '术后CAR': post_car, '术后CRP': post_crp,
+                '术后LMR': post_lmr, '术后PaO2': post_pao2,
+                '术后CKMB': post_ckmb, '术后PLT': post_plt,
+                '术后Alb': post_alb,
             }
 
             # Make real prediction
@@ -682,6 +775,13 @@ def page_prediction(assets):
             if result is None:
                 st.error("预测失败。请确保模型和特征文件已正确加载。")
                 return
+
+            if result.get('missing_filled'):
+                st.caption(
+                    "以下特征未提供，已按训练集中位数填充："
+                    + "、".join(result['missing_filled'][:8])
+                    + (" 等" if len(result['missing_filled']) > 8 else "")
+                )
 
             prob = result['probability']
             # Star rating: 0-20%=1★, 20-40%=2★, 40-60%=3★, 60-80%=4★, 80-100%=5★
@@ -726,10 +826,10 @@ def page_prediction(assets):
             try:
                 from src.models.calibration import map_kdigo_stage
                 kdigo = map_kdigo_stage(prob)
-                st.metric("预估KDIGO", kdigo['label'])
+                st.metric("风险分级", kdigo['label'])
             except:
-                kdigo_stage = "Stage 0" if prob < 0.3 else ("Stage 1" if prob < 0.5 else ("Stage 2" if prob < 0.7 else "Stage 3"))
-                st.metric("预估KDIGO", kdigo_stage)
+                risk_grade = "低风险" if prob < RISK_LOW else ("中风险" if prob < RISK_HIGH else "高风险")
+                st.metric("风险分级", risk_grade)
 
         st.markdown("---")
         c1,c2 = st.columns([1,1])
@@ -899,60 +999,19 @@ def page_prediction(assets):
             else:
                 cf_lo, cf_hi, cf_default = cf_default_range
 
-            # Build a simple feature vector for counterfactual
+                # Counterfactual uses the actual prediction context (median-filled
+                # raw values), so only the selected feature is varied.
             try:
                 model = assets['model']
+                base_raw = result['raw_vector'].copy()
                 # Generate counterfactual curve
                 cf_values = np.linspace(cf_lo, cf_hi, 20)
                 cf_probs = []
-                cf_base_input = np.zeros(len(cf_features))
-
-                # We need reference values for other features - use the prediction context
-                # Create a reference input from the form values
-                for i, feat in enumerate(cf_features):
-                    if feat == cf_selected:
-                        continue  # will vary this one
-                    # Use form values as reference
-                    val_str = None
-                    if 'Scr' in feat or 'scr' in feat.lower() or '肌酐' in feat:
-                        val_str = str(scr)
-                    elif 'eGFR' in feat or 'egfr' in feat.lower():
-                        val_str = str(egfr)
-                    elif 'APACHE' in feat or 'apache' in feat.lower():
-                        val_str = str(apache)
-                    elif 'Alb' in feat or 'alb' in feat.lower() or '白蛋白' in feat:
-                        val_str = str(alb)
-                    elif 'Hb' in feat or 'hb' in feat.lower() or '血红蛋白' in feat:
-                        val_str = str(hb)
-                    elif 'lactate' in feat.lower() or '乳酸' in feat:
-                        val_str = str(lactate)
-                    elif '手术时间' in feat:
-                        val_str = str(surgery_time)
-                    elif '通气时间' in feat:
-                        val_str = str(vent_time)
-                    elif '失血' in feat or 'blood_loss' in feat.lower():
-                        val_str = str(blood_loss)
-                    elif '住院天数' in feat:
-                        val_str = str(total_days)
-                    elif 'ICU' in feat:
-                        val_str = str(icu_days)
-                    elif '费用' in feat or 'cost' in feat.lower():
-                        val_str = str(cost)
-                    elif 'CRP' in feat or 'crp' in feat.lower():
-                        val_str = str(crp)
-                    elif '年龄' in feat or 'age' in feat.lower():
-                        val_str = str(age)
-                    else:
-                        val_str = '0'
-                    try:
-                        cf_base_input[i] = float(val_str)
-                    except:
-                        cf_base_input[i] = 0.0
 
                 # Scale the input
                 scaler = assets['scaler']
                 for cf_val in cf_values:
-                    cf_input = cf_base_input.copy()
+                    cf_input = base_raw.copy()
                     cf_input[cf_real_idx] = cf_val
                     cf_input_2d = cf_input.reshape(1, -1)
                     if scaler is not None:
@@ -1075,7 +1134,8 @@ def page_prediction(assets):
                 from web.components.report import generate_pdf_report as gen_pdf_v2
                 pdf_path = gen_pdf_v2(
                     patient_info,
-                    {'probability': prob, 'risk_level': risk_level},
+                    {'probability': prob, 'risk_level': risk_level,
+                     'model_auc': assets.get('model_auc')},
                     risk_factors_pdf,
                     recommendations_pdf,
                     counterfactual=cf_for_pdf,
@@ -1248,7 +1308,7 @@ def page_data_governance(assets):
 def page_doctor_workstation(assets):
     st.markdown("## 🏥 医生工作台")
 
-    st.info("📋 患者列表 + 批量风险评估 — 模拟临床工作流，支持快速筛查高危患者。")
+    st.info("📋 患者列表 + 批量风险评估 — 演示数据仅用于展示工作流，预测使用同一真实模型。")
 
     if assets['model'] is None:
         st.warning("⚠️ 模型未加载。请确保模型文件存在。")
@@ -1282,39 +1342,22 @@ def page_doctor_workstation(assets):
             })
 
         # Run predictions for demo patients
-        model = assets['model']
-        scaler = assets['scaler']
-        features_list = assets['features']
-
-        if features_list:
+        if assets['features']:
             for p in demo_patients:
                 try:
-                    input_vec = np.zeros(len(features_list))
-                    for j, feat in enumerate(features_list):
-                        if 'Scr' in feat or '肌酐' in feat:
-                            input_vec[j] = p['术前Scr']
-                        elif 'eGFR' in feat:
-                            input_vec[j] = p['术前eGFR'] if p['术前eGFR'] > 0 else 90
-                        elif 'APACHE' in feat or 'apache' in feat:
-                            input_vec[j] = p['APACHE II']
-                        elif '年龄' in feat or 'age' in feat:
-                            input_vec[j] = p['年龄']
-                        elif '手术' in feat:
-                            input_vec[j] = 1 if p['手术类型'] == '联合手术' else 0
-                        else:
-                            input_vec[j] = 0
-
-                    X_input = input_vec.reshape(1, -1)
-                    if scaler is not None:
-                        try: X_input = scaler.transform(X_input)
-                        except: pass
-                    if hasattr(model, 'predict_proba'):
-                        prob = model.predict_proba(X_input)[0, 1]
-                    else:
-                        prob = float(model.predict(X_input)[0])
+                    input_dict = {
+                        '年龄': p['年龄'],
+                        '性别': 1 if p['性别'] == '男' else 2,
+                        '手术类型': p['手术类型'],
+                        '术前Scr': p['术前Scr'],
+                        '术前eGFR': p['术前eGFR'],
+                        'APACHEII': p['APACHE II'],
+                    }
+                    pred = predict_real(assets, input_dict)
+                    prob = pred['probability']
                     p['预测风险'] = f'{prob:.1%}'
-                    p['风险等级'] = '🔴 高' if prob > 0.7 else ('🟡 中' if prob > 0.3 else '🟢 低')
-                except:
+                    p['风险等级'] = '🔴 高' if prob >= RISK_HIGH else ('🟡 中' if prob >= RISK_LOW else '🟢 低')
+                except Exception:
                     p['预测风险'] = 'N/A'
                     p['风险等级'] = '-'
 
@@ -1359,16 +1402,23 @@ def page_doctor_workstation(assets):
                         results = []
                         for idx, row in batch_df.iterrows():
                             try:
-                                input_vec = np.zeros(len(features_list))
-                                for j, feat in enumerate(features_list):
-                                    if feat in batch_df.columns:
-                                        input_vec[j] = float(row[feat])
-                                X_input = input_vec.reshape(1, -1)
-                                if scaler is not None:
-                                    try: X_input = scaler.transform(X_input)
-                                    except: pass
-                                prob = model.predict_proba(X_input)[0, 1] if hasattr(model, 'predict_proba') else float(model.predict(X_input)[0])
-                                results.append({'row': idx, 'probability': prob, 'risk': 'High' if prob > 0.7 else ('Medium' if prob > 0.3 else 'Low')})
+                                input_dict = {}
+                                for col in batch_df.columns:
+                                    val = row[col]
+                                    if pd.isna(val):
+                                        continue
+                                    try:
+                                        input_dict[col] = float(val)
+                                    except (TypeError, ValueError):
+                                        input_dict[col] = val
+                                pred = predict_real(assets, input_dict)
+                                prob = pred['probability']
+                                results.append({
+                                    'row': idx,
+                                    'probability': prob,
+                                    'risk': 'High' if prob >= RISK_HIGH else ('Medium' if prob >= RISK_LOW else 'Low'),
+                                    'missing_filled': len(pred.get('missing_filled', [])),
+                                })
                             except Exception as e:
                                 results.append({'row': idx, 'probability': None, 'risk': 'Error', 'error': str(e)[:50]})
 
@@ -1390,7 +1440,7 @@ def page_doctor_workstation(assets):
 def page_dashboard(assets):
     st.markdown("## 📊 管理仪表盘")
 
-    st.info("📈 AKI发生率趋势 + 科室分布 + 高危患者统计 — 医院管理视角。")
+    st.info("📈 AKI发生率趋势 + 科室分布 + 高危患者统计 — 医院管理视角（图表为演示数据）。")
 
     tab1, tab2, tab3 = st.tabs(["📈 趋势概览", "🏥 科室分布", "🔍 高危监控"])
 
@@ -1403,10 +1453,11 @@ def page_dashboard(assets):
         total_cases = [38, 42, 35, 40, 45, 41, 48, 39, 43, 46]
 
         c1, c2, c3, c4 = st.columns(4)
-        with c1: st.metric("📊 总病例", "420", "真实临床数据")
+        auc_val = f"{assets.get('model_auc', 0):.4f}" if assets.get('model_auc') else "—"
+        with c1: st.metric("📊 数据集", "420", "训练样本")
         with c2: st.metric("🏥 AKI发生率", "29.8%", "125/420")
-        with c3: st.metric("🤖 模型AUC", "0.8214", "+/- 0.043")
-        with c4: st.metric("✅ 在线服务", "Active", "Streamlit Cloud")
+        with c3: st.metric("🤖 模型AUC", auc_val, "50次嵌套CV")
+        with c4: st.metric("✅ 在线服务", "Active", "演示页面")
 
         # Trend chart
         fig, ax = plt.subplots(figsize=(10, 4))
@@ -1429,7 +1480,7 @@ def page_dashboard(assets):
         plt.tight_layout()
         st.pyplot(fig)
 
-        st.caption("💡 趋势显示AKI发生率逐步下降，可能与预防措施改善有关。实际部署后可使用真实数据更新。")
+        st.caption("💡 本趋势图为演示数据，不代表真实科室统计；实际部署后可接入医院信息系统更新。")
 
     with tab2:
         st.markdown("### 🏥 科室/手术类型分布")

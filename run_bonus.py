@@ -4,6 +4,9 @@ warnings.filterwarnings('ignore')
 import pandas as pd, numpy as np, os
 from datetime import datetime
 
+from src.config import TARGET, is_leakage
+from src.data.prepare import prepare_training_data
+
 OUT = 'outputs'
 os.makedirs(f'{OUT}/figures', exist_ok=True)
 os.makedirs(f'{OUT}/tables', exist_ok=True)
@@ -15,24 +18,13 @@ print("=" * 60)
 # ---- 数据准备 ----
 print("\n[1/5] 数据准备...")
 df = pd.read_excel('data/raw/AKI数据.xlsx')
-TARGET = 'AKI分组'
-
-def is_leakage(col_name):
-    name = col_name.strip()
-    if name in ['住院号','AKI分组','AKI分期']: return True
-    if any(kw in name for kw in ['术后48hSCr','术后48heGFR','术后7dSCr','术后7deGFR','术后48hUrea','术后7dUrea']): return True
-    if any(kw in name for kw in ['住院费','住院天','住院日','机械通气','ICU住院','术后7d','术后通气']): return True
-    return False
-
-features = [c for c in df.columns if not is_leakage(c) and c != TARGET]
-y = df[TARGET].copy()
-X = df[features].copy()
-cat_cols = X.select_dtypes(include=['object']).columns.tolist()
-if cat_cols: X = pd.get_dummies(X, columns=cat_cols, drop_first=True)
-X = X.select_dtypes(include=[np.number]).replace([np.inf,-np.inf],np.nan).fillna(X.median())
+prep = prepare_training_data(df)
+X = prep['X']
+y = prep['y']
 
 from sklearn.preprocessing import StandardScaler
-X_scaled = StandardScaler().fit_transform(X)
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
 
 from sklearn.ensemble import RandomForestClassifier
 rf = RandomForestClassifier(n_estimators=200, class_weight='balanced', random_state=42, n_jobs=-1)
@@ -176,7 +168,7 @@ for i in range(n_groups):
 from scipy.stats import chi2
 p_hl = 1 - chi2.cdf(chi_sq, n_groups - 2)
 pd.DataFrame(hl_rows).to_csv(f'{OUT}/tables/HL检验.csv', index=False, encoding='utf-8-sig')
-verdict_hl = 'fit OK (P>0.05)' if p_hl > 0.05 else 'borderline, acceptable for small samples'
+verdict_hl = 'no significant miscalibration (P>=0.05)' if p_hl >= 0.05 else 'calibration differs (P<0.05)'
 print(f"  chi2={chi_sq:.2f}, P={p_hl:.4f} -> {verdict_hl}")
 
 # ============================================================
@@ -231,13 +223,18 @@ print("  [OK] PDP")
 # Subgroup analysis
 from sklearn.ensemble import ExtraTreesClassifier, VotingClassifier
 
-voting = VotingClassifier([
-    ('LR', LogisticRegression(C=0.02, class_weight='balanced', max_iter=5000, random_state=42, solver='saga')),
-    ('RF', RandomForestClassifier(n_estimators=300, max_depth=5, min_samples_leaf=15, class_weight='balanced', random_state=42, n_jobs=-1)),
-    ('XGB', xgb_model),
-    ('ET', ExtraTreesClassifier(n_estimators=200, max_depth=5, min_samples_leaf=15, class_weight='balanced', random_state=42, n_jobs=-1)),
-], voting='soft', weights=[2,2,1,1])
-voting.fit(X_tr, y_tr)
+import joblib
+voting_path = 'models/final_voting_model.pkl'
+if os.path.exists(voting_path):
+    voting = joblib.load(voting_path)
+else:
+    voting = VotingClassifier([
+        ('LR', LogisticRegression(C=0.02, class_weight='balanced', max_iter=5000, random_state=42, solver='saga')),
+        ('RF', RandomForestClassifier(n_estimators=300, max_depth=5, min_samples_leaf=15, class_weight='balanced', random_state=42, n_jobs=-1)),
+        ('XGB', xgb_model),
+        ('ET', ExtraTreesClassifier(n_estimators=200, max_depth=5, min_samples_leaf=15, class_weight='balanced', random_state=42, n_jobs=-1)),
+    ], voting='soft', weights=[2,2,1,1])
+    voting.fit(X_tr, y_tr)
 
 prob_all = voting.predict_proba(X35)[:, 1]
 risk_median = np.median(prob_all)

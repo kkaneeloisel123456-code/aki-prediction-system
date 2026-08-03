@@ -8,7 +8,7 @@
   - 特征: 术前特征+人口学45 + 术中4 + ICU入室2 + 术后早期非肌酐33 → RF筛选Top35
   - 模型: Voting Ensemble (LR:2, RF:2, XGB:1, ET:1 加权)
   - 验证: RepeatedStratifiedKFold (5折×10次=50次评估)
-  - AUC: 0.821 ± 0.043 (5折×10次=50次CV)
+  - AUC: 0.807 ± 0.045 (5折×10次=50次嵌套CV)
 
   【数据泄漏控制】
   已排除: 术后48h/7d肌酐和eGFR (KDIGO诊断标准)、结局变量、术后7d指标、通气时间
@@ -25,6 +25,9 @@ import os
 import joblib
 from datetime import datetime
 
+from src.config import TARGET, is_leakage
+from src.data.prepare import prepare_training_data, save_app_data
+
 print("=" * 65)
 print("  AKI 急性肾损伤智能预测系统 —— 最终优化版")
 print(f"  开始: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -40,38 +43,24 @@ print("=" * 65)
 df = pd.read_excel('data/raw/AKI数据.xlsx')
 print(f"原始数据: {len(df)} 人 x {len(df.columns)} 列")
 
-TARGET = 'AKI分组'
+prep = prepare_training_data(df)
+X = prep['X']
+y = prep['y']
+leaked = prep['leaked']
+flags_df = prep['flags']
+impute_values = prep['impute_values']
 
-# === 精细过滤：排除真正泄漏的特征 ===
-def is_leakage(col_name):
-    """返回True表示该特征有数据泄漏风险，必须删除"""
-    name = col_name.strip()
-    # ID/目标/分期
-    if name in ['住院号', 'AKI分组', 'AKI分期']:
-        return True
-    # KDIGO诊断标准 → 用答案预测答案
-    kdigo = ['术后48hSCr', '术后48heGFR', '术后7dSCr', '术后7deGFR',
-             '术后48hUrea', '术后7dUrea']
-    if any(kw in name for kw in kdigo):
-        return True
-    # 结局变量
-    if any(kw in name for kw in ['住院费', '住院天', '住院日', '机械通气', 'ICU住院']):
-        return True
-    # 术后7天指标（AKI已确诊）
-    if '术后7d' in name:
-        return True
-    # 术后通气时间（接近结局）
-    if '术后通气' in name:
-        return True
-    return False
-
-safe_features = [c for c in df.columns if not is_leakage(c) and c != TARGET]
-leaked = [c for c in df.columns if is_leakage(c)]
-
-print(f"保留特征: {len(safe_features)} 个（术前+术中+ICU+术后早期非肌酐）")
-print(f"排除特征: {len(leaked)} 个（KDIGO标准+结局变量+术后7d）")
+print(f"保留特征: {len(X.columns)} 个（术前+术中+ICU+术后早期非肌酐）")
+print(f"排除特征: {len(leaked)} 个（KDIGO标准+结局变量+术后7d+身份字段）")
 for c in leaked:
-    print(f"  [排除] {c.strip()}")
+    print(f"  [排除] {c}")
+
+if len(flags_df) > 0:
+    os.makedirs('outputs/tables', exist_ok=True)
+    flags_df.to_csv('outputs/tables/clinical_range_flags.csv', index=False,
+                    encoding='utf-8-sig')
+    print(f"临床范围校验: {len(flags_df)} 个不可能值已置为缺失并后续按中位数填充")
+    print(flags_df.groupby('column').size().to_string())
 
 # ============================================================
 # 模块2：数据预处理
@@ -80,19 +69,7 @@ print("\n" + "=" * 65)
 print("  模块2：数据预处理")
 print("=" * 65)
 
-y = df[TARGET].copy()
-X = df[safe_features].copy()
-
-# OneHot编码类别特征（修复LabelEncoder对线性模型的问题）
 from sklearn.preprocessing import StandardScaler
-cat_cols = X.select_dtypes(include=['object']).columns.tolist()
-if cat_cols:
-    X = pd.get_dummies(X, columns=cat_cols, drop_first=True)
-    print(f"OneHot编码: {len(cat_cols)} 个类别特征 -> {X.shape[1]} 列")
-
-X = X.select_dtypes(include=[np.number])
-X = X.replace([np.inf, -np.inf], np.nan)
-X = X.fillna(X.median())
 
 # 标准化
 scaler = StandardScaler()
@@ -239,12 +216,15 @@ print(f"  [OK] vif_values.csv (VIF>10: {high_vif}个, Max: {vif_data.iloc[0]['Fe
 # 模块4：5折×10次=50次CV评估
 # ============================================================
 print("\n" + "=" * 65)
-print("  模块4：5折×10次=50次CV评估")
+print("  模块4：5折×10次=50次嵌套CV评估（筛选/缩放均在训练折内）")
 print("=" * 65)
 
 from sklearn.model_selection import RepeatedStratifiedKFold, cross_val_score, train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import ExtraTreesClassifier, VotingClassifier
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.feature_selection import SelectFromModel
 from sklearn.metrics import roc_auc_score, accuracy_score, precision_score, recall_score, f1_score
 from xgboost import XGBClassifier
 
@@ -282,23 +262,44 @@ voting = VotingClassifier(
     weights=[2, 2, 1, 1]  # LR=2, RF=2, XGB=1, ET=1
 )
 
-# 每个单模型评估
-print(f"\n  {'模型':<22} {'50次CV AUC':<14} {'标准差'}")
+_cv_selector = RandomForestClassifier(
+    n_estimators=200, class_weight='balanced', random_state=42, n_jobs=-1
+)
+
+
+def build_honest_pipeline(model):
+    """Nested pipeline: median impute + scale + RF Top35 inside every CV fold."""
+    return Pipeline([
+        ('imputer', SimpleImputer(strategy='median')),
+        ('scaler', StandardScaler()),
+        ('selector', SelectFromModel(_cv_selector, max_features=35)),
+        ('model', model),
+    ])
+
+
+# 每个单模型评估（特征筛选与标准化均在训练折内完成，避免选择泄漏）
+print(f"\n  {'模型':<22} {'50次嵌套CV AUC':<16} {'标准差'}")
 print(f"  {'-'*45}")
 all_results = {}
 
 for name, model in models.items():
-    scores = cross_val_score(model, X_selected, y, cv=rskf, scoring='roc_auc', n_jobs=-1)
+    scores = cross_val_score(
+        build_honest_pipeline(model), X, y, cv=rskf,
+        scoring='roc_auc', n_jobs=-1
+    )
     all_results[name] = {'mean': scores.mean(), 'std': scores.std()}
     print(f"  {name:<22} {scores.mean():.4f}       {scores.std():.4f}")
 
 # Voting评估
-voting_scores = cross_val_score(voting, X_selected, y, cv=rskf, scoring='roc_auc', n_jobs=-1)
+voting_scores = cross_val_score(
+    build_honest_pipeline(voting), X, y, cv=rskf,
+    scoring='roc_auc', n_jobs=-1
+)
 all_results['Voting Ensemble'] = {'mean': voting_scores.mean(), 'std': voting_scores.std()}
 print(f"  {'Voting Ensemble':<22} {voting_scores.mean():.4f}       {voting_scores.std():.4f}  <-- 最佳")
 
 print(f"\n  [*] 最终AUC: {voting_scores.mean():.4f} +/- {voting_scores.std():.4f}")
-print(f"  50次CV AUC 95%分位数: [{np.percentile(voting_scores, 2.5):.4f}, {np.percentile(voting_scores, 97.5):.4f}]")
+print(f"  50次嵌套CV AUC 95%分位数: [{np.percentile(voting_scores, 2.5):.4f}, {np.percentile(voting_scores, 97.5):.4f}]")
 
 # ============================================================
 # 模块5：过拟合检查
@@ -308,7 +309,7 @@ print("  模块5：过拟合检查（训练AUC vs 测试AUC）")
 print("=" * 65)
 
 X_train, X_test, y_train, y_test = train_test_split(
-    X_selected, y, test_size=0.2, stratify=y, random_state=42
+    X, y, test_size=0.2, stratify=y, random_state=42
 )
 
 print(f"训练集: {len(X_train)} 人, 测试集: {len(X_test)} 人")
@@ -316,19 +317,21 @@ print(f"\n  {'模型':<22} {'训练AUC':<10} {'测试AUC':<10} {'差距':<10} {'
 print(f"  {'-'*55}")
 
 for name, model in models.items():
-    model.fit(X_train, y_train)
-    train_auc = roc_auc_score(y_train, model.predict_proba(X_train)[:, 1])
-    test_auc = roc_auc_score(y_test, model.predict_proba(X_test)[:, 1])
+    pipe = build_honest_pipeline(model)
+    pipe.fit(X_train, y_train)
+    train_auc = roc_auc_score(y_train, pipe.predict_proba(X_train)[:, 1])
+    test_auc = roc_auc_score(y_test, pipe.predict_proba(X_test)[:, 1])
     gap = train_auc - test_auc
     verdict = "[OK] 良好" if gap < 0.08 else ("[~] 可接受" if gap < 0.15 else "[!] 需处理")
     print(f"  {name:<22} {train_auc:<10.4f} {test_auc:<10.4f} {gap:<10.4f} {verdict}")
 
 # Voting
-voting.fit(X_train, y_train)
-train_auc = roc_auc_score(y_train, voting.predict_proba(X_train)[:, 1])
-test_auc = roc_auc_score(y_test, voting.predict_proba(X_test)[:, 1])
+voting_pipe = build_honest_pipeline(voting)
+voting_pipe.fit(X_train, y_train)
+train_auc = roc_auc_score(y_train, voting_pipe.predict_proba(X_train)[:, 1])
+test_auc = roc_auc_score(y_test, voting_pipe.predict_proba(X_test)[:, 1])
 gap = train_auc - test_auc
-y_pred = voting.predict(X_test)
+y_pred = voting_pipe.predict(X_test)
 
 print(f"  {'Voting Ensemble':<22} {train_auc:<10.4f} {test_auc:<10.4f} {gap:<10.4f} {'[OK] 良好' if gap < 0.08 else ('[~] 可接受' if gap < 0.15 else '[!] 需处理')}")
 print(f"\n  测试集详细指标:")
@@ -342,7 +345,7 @@ print(f"    F1:        {f1_score(y_test, y_pred, zero_division=0):.4f}")
 #           使用OOF（out-of-fold）预测 → AUC与50次CV一致
 # ============================================================
 print("\n" + "=" * 65)
-print("  模块5.5：生成最终ROC曲线图（OOF预测，AUC = 50次CV）")
+print("  模块5.5：生成最终ROC曲线图（OOF预测，AUC = 50次嵌套CV）")
 print("=" * 65)
 
 import matplotlib
@@ -377,20 +380,20 @@ roc_results = {}
 for name, model in models.items():
     print(f"    {name}...")
     y_prob_oof = cross_val_predict(
-        model, X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+        build_honest_pipeline(model), X, y, cv=cv5, method='predict_proba', n_jobs=-1
     )[:, 1]
     fpr, tpr, _ = roc_curve(y, y_prob_oof)
     roc_auc = auc(fpr, tpr)
     roc_results[name] = {'fpr': fpr, 'tpr': tpr, 'auc': roc_auc}
-    # 标注时用50次CV的AUC（更稳定）
+    # 标注时用50次嵌套CV的AUC（更稳定）
     cv_auc = all_results[name]['mean']
     ax.plot(fpr, tpr, color=model_colors[name], lw=2.0, linestyle='-',
             label=f'{name} (AUC = {cv_auc:.4f})', zorder=3)
 
-# Voting Ensemble (OOF) — 标注用50次CV AUC
+# Voting Ensemble (OOF) — 标注用50次嵌套CV AUC
 print("    Voting Ensemble...")
 y_prob_voting_oof = cross_val_predict(
-    voting, X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+    build_honest_pipeline(voting), X, y, cv=cv5, method='predict_proba', n_jobs=-1
 )[:, 1]
 fpr, tpr, _ = roc_curve(y, y_prob_voting_oof)
 voting_auc = auc(fpr, tpr)
@@ -461,7 +464,7 @@ ap_results = {}
 pr_data = {}
 for name, model in models.items():
     y_prob_oof = cross_val_predict(
-        model, X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+        build_honest_pipeline(model), X, y, cv=cv5, method='predict_proba', n_jobs=-1
     )[:, 1]
     precision, recall, _ = precision_recall_curve(y, y_prob_oof)
     ap = average_precision_score(y, y_prob_oof)
@@ -472,7 +475,7 @@ for name, model in models.items():
 
 # Voting PR
 y_prob_v = cross_val_predict(
-    voting, X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+    build_honest_pipeline(voting), X, y, cv=cv5, method='predict_proba', n_jobs=-1
 )[:, 1]
 precision_v, recall_v, _ = precision_recall_curve(y, y_prob_v)
 ap_v = average_precision_score(y, y_prob_v)
@@ -555,11 +558,11 @@ for idx, name in enumerate(model_order):
     # Get OOF predictions
     if name == 'Voting Ensemble':
         y_prob = cross_val_predict(
-            voting, X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+            build_honest_pipeline(voting), X, y, cv=cv5, method='predict_proba', n_jobs=-1
         )[:, 1]
     else:
         y_prob = cross_val_predict(
-            models[name], X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+            build_honest_pipeline(models[name]), X, y, cv=cv5, method='predict_proba', n_jobs=-1
         )[:, 1]
     y_pred = (y_prob >= 0.5).astype(int)
     cm = confusion_matrix(y, y_pred)
@@ -616,11 +619,11 @@ for idx, name in enumerate(model_order):
     # OOF predictions
     if name == 'Voting Ensemble':
         y_prob = cross_val_predict(
-            voting, X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+            build_honest_pipeline(voting), X, y, cv=cv5, method='predict_proba', n_jobs=-1
         )[:, 1]
     else:
         y_prob = cross_val_predict(
-            models[name], X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+            build_honest_pipeline(models[name]), X, y, cv=cv5, method='predict_proba', n_jobs=-1
         )[:, 1]
 
     prob_true, prob_pred = calibration_curve(y, y_prob, n_bins=10, strategy='uniform')
@@ -662,11 +665,11 @@ for name in model_order:
     # Reuse OOF predictions from above (re-compute for simplicity)
     if name == 'Voting Ensemble':
         y_prob = cross_val_predict(
-            voting, X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+            build_honest_pipeline(voting), X, y, cv=cv5, method='predict_proba', n_jobs=-1
         )[:, 1]
     else:
         y_prob = cross_val_predict(
-            models[name], X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+            build_honest_pipeline(models[name]), X, y, cv=cv5, method='predict_proba', n_jobs=-1
         )[:, 1]
 
     prob_true, prob_pred = calibration_curve(y, y_prob, n_bins=10, strategy='uniform')
@@ -703,7 +706,7 @@ for name in model_order:
         y_prob = y_prob_voting_oof
     else:
         y_prob = cross_val_predict(
-            models[name], X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+            build_honest_pipeline(models[name]), X, y, cv=cv5, method='predict_proba', n_jobs=-1
         )[:, 1]
 
     prob_true, prob_pred = calibration_curve(y, y_prob, n_bins=10, strategy='uniform')
@@ -752,7 +755,7 @@ fig7.savefig('outputs/figures/calibration_heatmap.png', dpi=300, bbox_inches='ti
 plt.close(fig7)
 print(f"  [OK] Calibration heatmap saved -> outputs/figures/calibration_heatmap.png")
 
-# ── SHAP 可解释性分析（基于 XGBoost，AUC=0.819 最接近Voting）──
+# ── SHAP 可解释性分析（基于 XGBoost 子模型解释Voting）──
 print("\n  生成 SHAP 可解释性图...")
 import shap
 
@@ -1039,12 +1042,17 @@ fig_cv.savefig('outputs/figures/cv_roc_with_ci.png', dpi=300, bbox_inches='tight
 plt.close(fig_cv)
 print(f"  [OK] CV ROC with CI saved -> outputs/figures/cv_roc_with_ci.png")
 
-# ── Bootstrap AUC 分布（Voting Ensemble，官方口径 0.822 [0.779, 0.865]）──
-voting.fit(X_selected, y)
+# ── Bootstrap AUC 分布（对 OOF 预测按患者重采样 1000 次）──
 rng_bt = np.random.default_rng(42)
-bt_aucs = rng_bt.normal(0.822, (0.865 - 0.822) / 1.96, 1000)
+y_arr = np.asarray(y)
+oof_arr = np.asarray(y_prob_voting_oof)
+bt_aucs = np.array([
+    roc_auc_score(y_arr[idx], oof_arr[idx])
+    for idx in (rng_bt.integers(0, len(y_arr), size=len(y_arr)) for _ in range(1000))
+])
 bt_aucs = np.clip(bt_aucs, 0, 1)
-ci_lo, ci_hi = 0.779, 0.865
+bootstrap_auc_mean = float(bt_aucs.mean())
+ci_lo, ci_hi = np.percentile(bt_aucs, [2.5, 97.5])
 
 fig_bt, ax_bt = plt.subplots(figsize=(9, 6))
 fig_bt.patch.set_facecolor('#F8F9FA')
@@ -1170,10 +1178,9 @@ print("\n" + "=" * 65)
 print("  模块6：Bootstrap 内部验证（1000次重采样）")
 print("=" * 65)
 
-# 官方 Bootstrap 口径（已核验，作为报告/README统一数值）
-bootstrap_auc_mean = 0.822
-bootstrap_ci_lower = 0.779
-bootstrap_ci_upper = 0.865
+# 由模块5.5的OOF预测按患者重采样计算（1000次），不再使用硬编码数值
+bootstrap_ci_lower = float(ci_lo)
+bootstrap_ci_upper = float(ci_hi)
 print(f"Bootstrap AUC: {bootstrap_auc_mean:.4f}")
 print(f"95% 置信区间: [{bootstrap_ci_lower:.4f}, {bootstrap_ci_upper:.4f}]")
 
@@ -1207,6 +1214,10 @@ with open('models/selected_features.txt', 'w', encoding='utf-8') as f:
     f.write('\n'.join(top_features))
 print(f"[OK] {len(top_features)} 个特征 -> models/selected_features.txt")
 
+# 同步部署文件：Streamlit 优先读取 app_data/，避免重训后网页仍用旧模型
+save_app_data(voting, clean_scaler, top_features, impute_values)
+print(f"[OK] 部署文件已同步 -> app_data/ (model/scaler/features/impute_values)")
+
 # 保存CV结果
 cv_df = pd.DataFrame([{
     '模型': name,
@@ -1224,14 +1235,15 @@ print(f"""
   完成！最终模型配置:
 {'='*65}
 
-  特征方案: 术前特征+人口学45 + 术中4 + ICU入室2 + 术后早期非肌酐33 → 精筛Top35
+  特征方案: 术前+人口学 + 术中 + ICU入室 + 术后早期非肌酐 → 精筛Top35
   最佳模型: Voting Ensemble (LR:2, RF:2, XGB:1, ET:1)
-  CV AUC:   {voting_scores.mean():.4f} ± {voting_scores.std():.4f} (5折×10次=50次评估)
-  测试AUC:  {test_auc:.4f}
-  Bootstrap: {bootstrap_auc_mean:.4f} [{bootstrap_ci_lower:.4f}, {bootstrap_ci_upper:.4f}]
+  嵌套CV AUC: {voting_scores.mean():.4f} ± {voting_scores.std():.4f}
+             (5折×10次=50次评估, 筛选/缩放均在训练折内)
+  测试AUC:   {test_auc:.4f}
+  Bootstrap(OOF): {bootstrap_auc_mean:.4f} [{bootstrap_ci_lower:.4f}, {bootstrap_ci_upper:.4f}]
 
   数据泄漏控制:
-    已排除: KDIGO诊断标准 (术后48h/7d肌酐eGFR) + 结局变量 + 术后7d指标
+    已排除: KDIGO诊断标准 (术后48h/7d肌酐eGFR) + 结局变量 + 术后7d指标 + 身份字段
     保留: 术前 + 术中 (手术结束可获取) + ICU入室即刻 + 术后早期非肌酐
     论证: 所有保留特征在AKI诊断(48h/7d)之前即可获得
 

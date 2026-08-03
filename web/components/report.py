@@ -169,14 +169,18 @@ class AKIReportPDF(FPDF):
             self.ln(3)
             self.set_font('CJK', 'B', 11)
             stars = risk_report.get('stars_display', '')
-            self.cell(0, 8, f'风险程度：{stars}  |  {risk_report.get("kdigo_stage", "")}', align='C', new_x="LMARGIN", new_y="NEXT")
+            self.cell(
+                0, 8,
+                f'风险程度：{stars}  |  {risk_report.get("risk_grade", risk_report.get("kdigo_stage", ""))}',
+                align='C', new_x="LMARGIN", new_y="NEXT",
+            )
 
         self.ln(10)
 
         # Risk level badge
         risk_colors = {
-            '低风险': (39, 174, 96), '低-中风险': (46, 204, 113),
-            '中风险': (243, 156, 18), '中-高风险': (230, 126, 34),
+            '低风险': (39, 174, 96),
+            '中风险': (243, 156, 18),
             '高风险': (231, 76, 60),
         }
         risk_text = prediction_result.get('risk_level', '低风险')
@@ -195,7 +199,12 @@ class AKIReportPDF(FPDF):
         # 模型验证信息
         self.set_font('CJK', '', 10)
         self.set_text_color(127, 140, 141)
-        self.cell(0, 6, '模型：Voting Ensemble | 50次交叉验证 AUC = 0.8214 ± 0.0434', align='C', new_x="LMARGIN", new_y="NEXT")
+        model_auc = prediction_result.get('model_auc')
+        if model_auc:
+            auc_text = f'模型：Voting Ensemble | 50次嵌套CV AUC = {model_auc}'
+        else:
+            auc_text = '模型：Voting Ensemble | 50次嵌套CV验证'
+        self.cell(0, 6, auc_text, align='C', new_x="LMARGIN", new_y="NEXT")
         self.ln(6)
 
         # ====== Patient Information ======
@@ -473,10 +482,8 @@ def plot_risk_gauge(probability, save_path=None):
 
     # Risk zone colors
     zones = [
-        (0.0, 0.2, '#27ae60', '低风险'),
-        (0.2, 0.4, '#85c943', '低-中风险'),
-        (0.4, 0.5, '#f39c12', '中风险'),
-        (0.5, 0.7, '#e67e22', '中-高风险'),
+        (0.0, 0.3, '#27ae60', '低风险'),
+        (0.3, 0.7, '#f39c12', '中风险'),
         (0.7, 1.0, '#e74c3c', '高风险'),
     ]
 
@@ -491,7 +498,7 @@ def plot_risk_gauge(probability, save_path=None):
         ax.add_patch(wedge)
 
     # Draw tick marks
-    for pct in [0, 0.2, 0.4, 0.5, 0.7, 1.0]:
+    for pct in [0, 0.3, 0.7, 1.0]:
         angle_rad = np.radians(180 - pct * 180)
         r_inner = radius - 0.4
         r_outer = radius
@@ -517,16 +524,10 @@ def plot_risk_gauge(probability, save_path=None):
 
     # Risk probability text
     risk_pct = f'{probability:.1%}'
-    if probability < 0.2:
+    if probability < 0.3:
         risk_label = '低风险'
-    elif probability < 0.4:
-        risk_label = '低-中风险'
-    elif probability < 0.5:
-        risk_label = '中风险'
-    elif probability < 0.7:
-        risk_label = '中-高风险'
     else:
-        risk_label = '高风险'
+        risk_label = '中风险' if probability < 0.7 else '高风险'
 
     ax.text(0, -0.35, risk_label, ha='center', va='center', fontsize=16, fontweight='bold', color='#2c3e50')
     ax.text(0, -0.65, f'AKI 预测概率：{risk_pct}', ha='center', va='center', fontsize=11, color='#7f8c8d')

@@ -591,69 +591,54 @@ def run_full_calibration_analysis(model_results_dict, output_dir=None):
 # ====================================================================
 # Phase 2: KDIGO Staging & Risk Report
 # ====================================================================
+RISK_LOW = 0.3
+RISK_HIGH = 0.7
+
+
 def map_kdigo_stage(probability, scr_ratio=None, urine_output=None):
-    """
-    Map predicted AKI probability to KDIGO staging.
+    """Map predicted AKI probability to a 3-band risk grade.
 
-    Args:
-        probability: Predicted AKI probability (0-1)
-        scr_ratio: Current Scr / baseline Scr ratio (optional)
-        urine_output: Urine output in ml/kg/h (optional)
-
-    Returns:
-        dict: {'stage': 0-3, 'label': str, 'description': str, 'urgency': str}
+    A model probability is a *risk estimate*, not a KDIGO stage.  KDIGO
+    staging must still be derived from Scr / urine-output criteria.
     """
-    KDIGO_STAGES = {
+    RISK_GRADES = {
         0: {
-            'label': 'KDIGO Stage 0',
-            'description': 'No AKI — Scr within normal range, adequate urine output',
-            'urgency': 'Routine monitoring',
+            'label': '低风险',
+            'description': '模型预测AKI概率较低，常规监测即可',
+            'urgency': '常规术后监测',
             'color': '#27ae60',
-            'icon': '&#9989;',  # Checkmark
+            'icon': '&#9989;',
         },
         1: {
-            'label': 'KDIGO Stage 1',
-            'description': 'Scr 1.5-1.9x baseline OR >= 0.3 mg/dL increase OR UO < 0.5 ml/kg/h for 6-12h',
-            'urgency': 'Increased monitoring, avoid nephrotoxins',
+            'label': '中风险',
+            'description': '模型预测AKI概率中等，建议加强监测与预防',
+            'urgency': '加强监测，避免肾毒性药物',
             'color': '#f39c12',
-            'icon': '&#9888;',  # Warning
+            'icon': '&#9888;',
         },
         2: {
-            'label': 'KDIGO Stage 2',
-            'description': 'Scr 2.0-2.9x baseline OR UO < 0.5 ml/kg/h for >= 12h',
-            'urgency': 'Nephrology consult, strict I/O monitoring',
-            'color': '#e67e22',
-            'icon': '&#9888;',  # Warning
-        },
-        3: {
-            'label': 'KDIGO Stage 3',
-            'description': 'Scr >= 3.0x baseline OR >= 4.0 mg/dL OR RRT initiation OR UO < 0.3 ml/kg/h for >= 24h',
-            'urgency': 'URGENT: Consider RRT, ICU admission',
+            'label': '高风险',
+            'description': '模型预测AKI概率较高，建议尽早启动KDIGO Bundle',
+            'urgency': '建议肾内科会诊并准备干预',
             'color': '#e74c3c',
-            'icon': '&#128680;',  # Alert
+            'icon': '&#128680;',
         },
     }
 
-    # Probability-to-stage mapping
-    if probability < 0.2:
-        stage = 0
-    elif probability < 0.4:
-        stage = 1
-    elif probability < 0.7:
-        stage = 2
+    if probability < RISK_LOW:
+        grade = 0
+    elif probability < RISK_HIGH:
+        grade = 1
     else:
-        stage = 3
+        grade = 2
 
-    # Refine with Scr ratio if available
-    if scr_ratio is not None:
-        if scr_ratio >= 3.0:
-            stage = max(stage, 3)
-        elif scr_ratio >= 2.0:
-            stage = max(stage, 2)
-        elif scr_ratio >= 1.5:
-            stage = max(stage, 1)
-
-    return KDIGO_STAGES[stage]
+    result = dict(RISK_GRADES[grade])
+    result['stage'] = grade
+    result['kdigo_note'] = (
+        '风险分级基于模型预测概率，不能替代KDIGO分期；'
+        'KDIGO分期需结合肌酐与尿量标准。'
+    )
+    return result
 
 
 def generate_risk_report(probability, shap_values=None, feature_names=None,
@@ -674,22 +659,14 @@ def generate_risk_report(probability, shap_values=None, feature_names=None,
     report = {}
 
     # ---- 1. Risk Level ----
-    if probability < 0.2:
+    if probability < RISK_LOW:
         risk_level = 'Low'
         risk_emoji = '✅'  # Checkmark
         n_stars = 1
-    elif probability < 0.4:
-        risk_level = 'Low-Medium'
-        risk_emoji = 'ℹ️'  # Info
-        n_stars = 2
-    elif probability < 0.5:
+    elif probability < RISK_HIGH:
         risk_level = 'Medium'
         risk_emoji = '⚠️'  # Warning
         n_stars = 3
-    elif probability < 0.7:
-        risk_level = 'Medium-High'
-        risk_emoji = '⚠️'
-        n_stars = 4
     else:
         risk_level = 'High'
         risk_emoji = '\U0001f6a8'  # Alarm
@@ -703,10 +680,12 @@ def generate_risk_report(probability, shap_values=None, feature_names=None,
     report['stars_display'] = f'{stars_filled}{stars_empty}'
     report['stars_count'] = n_stars
 
-    # ---- 2. KDIGO Staging ----
+    # ---- 2. Risk Grade (not a KDIGO stage) ----
     kdigo = map_kdigo_stage(probability)
-    report['kdigo_stage'] = kdigo['label']
-    report['kdigo_description'] = kdigo['description']
+    report['risk_grade'] = kdigo['label']
+    report['risk_grade_description'] = kdigo['description']
+    report['kdigo_stage'] = '风险分级（非KDIGO分期）'
+    report['kdigo_description'] = kdigo['kdigo_note']
     report['kdigo_urgency'] = kdigo['urgency']
 
     # ---- 3. Top Risk Factors (from SHAP) ----

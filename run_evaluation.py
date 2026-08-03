@@ -7,7 +7,7 @@
 直接加载 run_clean.py 输出的 models/*.pkl 和 models/selected_features.txt，
 重建相同的 Top35 特征矩阵并用 5 折 OOF 预测生成比赛图表，
 保证 ROC / PR / 校准 / DCA / SHAP 与最终 Voting Ensemble
-(50次CV AUC=0.8214) 一致，不再使用旧版"仅术前特征"模型。
+(50次嵌套CV AUC=0.8067) 一致，不再使用旧版"仅术前特征"模型。
 """
 
 import os
@@ -39,6 +39,13 @@ from sklearn.metrics import (
 from sklearn.calibration import calibration_curve
 from sklearn.model_selection import StratifiedKFold, cross_val_predict
 from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.feature_selection import SelectFromModel
+from sklearn.ensemble import RandomForestClassifier
+
+from src.config import TARGET, is_leakage
+from src.data.prepare import prepare_training_data
 
 os.makedirs('outputs/figures', exist_ok=True)
 os.makedirs('outputs/tables', exist_ok=True)
@@ -72,38 +79,13 @@ print('=' * 70)
 # ---------------------------------------------------------------
 print('\n1/6 重建最终特征矩阵 (Top35)...')
 df = pd.read_excel('data/raw/AKI数据.xlsx')
+prep = prepare_training_data(df)
+X = prep['X']
+y = prep['y']
 
-
-def is_leakage(col_name):
-    """返回 True 表示该特征有数据泄漏风险，必须删除。"""
-    name = col_name.strip()
-    if name in ['住院号', 'AKI分组', 'AKI分期']:
-        return True
-    kdigo = ['术后48hSCr', '术后48heGFR', '术后7dSCr', '术后7deGFR',
-             '术后48hUrea', '术后7dUrea']
-    if any(kw in name for kw in kdigo):
-        return True
-    if any(kw in name for kw in ['住院费', '住院天', '住院日', '机械通气', 'ICU住院']):
-        return True
-    if '术后7d' in name:
-        return True
-    if '术后通气' in name:
-        return True
-    return False
-
-
-TARGET = 'AKI分组'
-safe_features = [c for c in df.columns if not is_leakage(c) and c != TARGET]
-y = df[TARGET].copy()
-X = df[safe_features].copy()
-
-cat_cols = X.select_dtypes(include=['object']).columns.tolist()
-if cat_cols:
-    X = pd.get_dummies(X, columns=cat_cols, drop_first=True)
-
-X = X.select_dtypes(include=[np.number])
-X = X.replace([np.inf, -np.inf], np.nan).fillna(X.median())
-X_scaled = StandardScaler().fit_transform(X)
+# 最终模型在全量数据的缩放矩阵上完成特征筛选，图表沿用同一口径
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
 
 with open('models/selected_features.txt', 'r', encoding='utf-8') as f:
     top_features = [line.rstrip('\r\n') for line in f if line.rstrip('\r\n')]
@@ -115,6 +97,21 @@ if missing:
 top_indices = [X.columns.get_loc(f) for f in top_features]
 X_selected = X_scaled[:, top_indices]
 print(f'    样本 {len(y)} 例, 特征 {len(top_features)} 个, AKI 发生率 {y.mean():.1%}')
+
+
+_cv_selector = RandomForestClassifier(
+    n_estimators=200, class_weight='balanced', random_state=42, n_jobs=-1
+)
+
+
+def build_honest_pipeline(model):
+    """Median impute + scale + RF Top35 inside every fold."""
+    return Pipeline([
+        ('imputer', SimpleImputer(strategy='median')),
+        ('scaler', StandardScaler()),
+        ('selector', SelectFromModel(_cv_selector, max_features=35)),
+        ('model', model),
+    ])
 
 # ---------------------------------------------------------------
 # 2. 加载 run_clean.py 保存的最终模型与 50次CV结果
@@ -142,12 +139,15 @@ else:
     all_results = {}
     for name, model in models.items():
         from sklearn.model_selection import cross_val_score
-        scores = cross_val_score(model, X_selected, y, cv=cv5_temp, scoring='roc_auc', n_jobs=1)
+        scores = cross_val_score(
+            build_honest_pipeline(model), X, y, cv=cv5_temp,
+            scoring='roc_auc', n_jobs=1
+        )
         all_results[name] = {'mean': scores.mean(), 'std': scores.std()}
 
 voting_cv_auc = all_results['Voting Ensemble']['mean']
 voting_cv_std = all_results['Voting Ensemble']['std']
-print(f'    最终模型 Voting Ensemble: 50次CV AUC = {voting_cv_auc:.4f} ± {voting_cv_std:.4f}')
+print(f'    最终模型 Voting Ensemble: 50次嵌套CV AUC = {voting_cv_auc:.4f} ± {voting_cv_std:.4f}')
 
 # ---------------------------------------------------------------
 # 3. 5 折 OOF 预测（与 run_clean.py 图表同口径）
@@ -158,7 +158,8 @@ y_prob_oof = {}
 for name in model_order:
     print(f'    {name} ...')
     y_prob_oof[name] = cross_val_predict(
-        models[name], X_selected, y, cv=cv5, method='predict_proba', n_jobs=-1
+        build_honest_pipeline(models[name]), X, y,
+        cv=cv5, method='predict_proba', n_jobs=-1
     )[:, 1]
 
 # ---------------------------------------------------------------
@@ -369,7 +370,7 @@ except Exception as e:
     print(f'    [WARN] SHAP 生成失败: {e}')
 
 # ---------------------------------------------------------------
-# 汇总表：OOF 指标 + run_clean.py 官方 50次CV AUC
+# 汇总表：OOF 指标 + run_clean.py 官方 50次嵌套CV AUC
 # ---------------------------------------------------------------
 rows = []
 for name in model_order:
@@ -390,7 +391,7 @@ summary_df.to_csv('outputs/tables/model_summary_clean.csv', index=False, encodin
 
 print('\n' + '=' * 70)
 print(' 完成！比赛图表已基于最终模型生成')
-print(f' Voting Ensemble 50次CV AUC = {voting_cv_auc:.4f} ± {voting_cv_std:.4f}')
+print(f' Voting Ensemble 50次嵌套CV AUC = {voting_cv_auc:.4f} ± {voting_cv_std:.4f}')
 print('=' * 70)
 print(summary_df.to_string(index=False))
 print('\n生成文件:')
