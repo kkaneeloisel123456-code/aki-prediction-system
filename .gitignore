@@ -23,6 +23,7 @@ outputs/reports/
 
 # Patient-level detail (keep repo public-safe)
 outputs/tables/aki_logic_validation_flags.csv
+outputs/tables/wave2_uncertainty_patients.csv
 
 # Temp / IDE
 catboost_info/

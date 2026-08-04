@@ -129,7 +129,7 @@ def prepare_training_data(
 
     Returns a dict with:
       - ``df_clean``: column names normalized, impossible values as NaN
-      - ``X``: numeric matrix (median-imputed), including stable one-hot dummies
+      - ``X``: numeric matrix (global median-imputed), including one-hot dummies
       - ``y``: target Series
       - ``leaked``: excluded column names
       - ``flags``: clinical range violation report
@@ -139,8 +139,34 @@ def prepare_training_data(
     df_clean, flags = flag_impossible_values(df)
 
     leaked = [c for c in df_clean.columns if is_leakage(c) and c != target]
-    safe = [c for c in df_clean.columns if not is_leakage(c) and c != target]
     y = df_clean[target].copy()
+    X = prepare_raw_numeric(df_clean, target=target)
+    impute_values = X.median().to_dict()
+    X = X.fillna(X.median())
+
+    return {
+        'df_clean': df_clean,
+        'X': X,
+        'y': y,
+        'leaked': leaked,
+        'flags': flags,
+        'impute_values': impute_values,
+    }
+
+
+def prepare_raw_numeric(
+    df: pd.DataFrame,
+    target: str = TARGET,
+) -> pd.DataFrame:
+    """Return the candidate numeric matrix with missing values preserved.
+
+    Validation pipelines that claim fold-contained imputation should use this
+    matrix instead of ``prepare_training_data()['X']``, which is already
+    median-imputed with full-data medians.
+    """
+    df = normalize_columns(df)
+    df_clean, _ = flag_impossible_values(df)
+    safe = [c for c in df_clean.columns if not is_leakage(c) and c != target]
     X = df_clean[safe].copy()
 
     cat_cols = [
@@ -156,17 +182,7 @@ def prepare_training_data(
 
     X = X.select_dtypes(include=[np.number])
     X = X.replace([np.inf, -np.inf], np.nan)
-    impute_values = X.median().to_dict()
-    X = X.fillna(X.median())
-
-    return {
-        'df_clean': df_clean,
-        'X': X,
-        'y': y,
-        'leaked': leaked,
-        'flags': flags,
-        'impute_values': impute_values,
-    }
+    return X
 
 
 def save_app_data(

@@ -1,0 +1,6 @@
+﻿模型,固定配置_5折AUC均值,固定配置_5折AUC标准差,Optuna_5折AUC均值,Optuna_5折AUC标准差
+ExtraTrees,0.7955,0.0323,0.7943,0.0338
+LogisticRegression,0.789,0.0342,0.7862,0.0326
+RandomForest,0.8,0.037,0.7942,0.0404
+Voting,0.802,0.0314,,
+XGBoost,0.7863,0.0308,0.7642,0.0302

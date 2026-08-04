@@ -529,11 +529,11 @@ if __name__ == '__main__':
     # 真实可复现入口：读取当前数据与最终特征，生成 phase3 全部图表和表格
     import joblib
 
-    from src.data.prepare import prepare_training_data
+    from src.data.prepare import prepare_raw_numeric, prepare_training_data
 
     df = pd.read_excel(PROJECT_ROOT / 'data' / 'raw' / 'AKI数据.xlsx')
     prep = prepare_training_data(df)
-    X_all = prep['X']
+    X_all = prepare_raw_numeric(df)
     y_all = prep['y']
 
     feat_file = PROJECT_ROOT / 'models' / 'selected_features.txt'

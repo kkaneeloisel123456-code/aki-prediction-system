@@ -45,7 +45,7 @@ from sklearn.feature_selection import SelectFromModel
 from sklearn.ensemble import RandomForestClassifier
 
 from src.config import TARGET, is_leakage
-from src.data.prepare import prepare_training_data
+from src.data.prepare import prepare_raw_numeric, prepare_training_data
 
 os.makedirs('outputs/figures', exist_ok=True)
 os.makedirs('outputs/tables', exist_ok=True)
@@ -82,6 +82,7 @@ df = pd.read_excel('data/raw/AKI数据.xlsx')
 prep = prepare_training_data(df)
 X = prep['X']
 y = prep['y']
+X_raw = prepare_raw_numeric(df)
 
 # 最终模型在全量数据的缩放矩阵上完成特征筛选，图表沿用同一口径
 scaler = StandardScaler()
@@ -140,7 +141,7 @@ else:
     for name, model in models.items():
         from sklearn.model_selection import cross_val_score
         scores = cross_val_score(
-            build_honest_pipeline(model), X, y, cv=cv5_temp,
+            build_honest_pipeline(model), X_raw, y, cv=cv5_temp,
             scoring='roc_auc', n_jobs=1
         )
         all_results[name] = {'mean': scores.mean(), 'std': scores.std()}
@@ -158,7 +159,7 @@ y_prob_oof = {}
 for name in model_order:
     print(f'    {name} ...')
     y_prob_oof[name] = cross_val_predict(
-        build_honest_pipeline(models[name]), X, y,
+        build_honest_pipeline(models[name]), X_raw, y,
         cv=cv5, method='predict_proba', n_jobs=-1
     )[:, 1]
 

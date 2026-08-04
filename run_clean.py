@@ -26,7 +26,7 @@ import joblib
 from datetime import datetime
 
 from src.config import TARGET, is_leakage
-from src.data.prepare import prepare_training_data, save_app_data
+from src.data.prepare import prepare_raw_numeric, prepare_training_data, save_app_data
 
 print("=" * 65)
 print("  AKI 急性肾损伤智能预测系统 —— 最终优化版")
@@ -49,6 +49,9 @@ y = prep['y']
 leaked = prep['leaked']
 flags_df = prep['flags']
 impute_values = prep['impute_values']
+X_raw = prepare_raw_numeric(df)
+
+print(f"原始候选矩阵缺失值: {int(X_raw.isna().sum().sum())} 个（CV在训练折内填补）")
 
 print(f"保留特征: {len(X.columns)} 个（术前+术中+ICU+术后早期非肌酐）")
 print(f"排除特征: {len(leaked)} 个（KDIGO标准+结局变量+术后7d+身份字段）")
@@ -294,7 +297,7 @@ all_results = {}
 
 for name, model in models.items():
     scores = cross_val_score(
-        build_honest_pipeline(model), X, y, cv=rskf,
+        build_honest_pipeline(model), X_raw, y, cv=rskf,
         scoring='roc_auc', n_jobs=-1
     )
     all_results[name] = {'mean': scores.mean(), 'std': scores.std()}
@@ -302,7 +305,7 @@ for name, model in models.items():
 
 # Voting评估
 voting_scores = cross_val_score(
-    build_honest_pipeline(voting), X, y, cv=rskf,
+    build_honest_pipeline(voting), X_raw, y, cv=rskf,
     scoring='roc_auc', n_jobs=-1
 )
 all_results['Voting Ensemble'] = {'mean': voting_scores.mean(), 'std': voting_scores.std()}
@@ -319,7 +322,7 @@ print("  模块5：过拟合检查（训练AUC vs 测试AUC）")
 print("=" * 65)
 
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, stratify=y, random_state=42
+    X_raw, y, test_size=0.2, stratify=y, random_state=42
 )
 
 print(f"训练集: {len(X_train)} 人, 测试集: {len(X_test)} 人")
@@ -390,7 +393,7 @@ roc_results = {}
 for name, model in models.items():
     print(f"    {name}...")
     y_prob_oof = cross_val_predict(
-        build_honest_pipeline(model), X, y, cv=cv5, method='predict_proba', n_jobs=-1
+        build_honest_pipeline(model), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
     )[:, 1]
     fpr, tpr, _ = roc_curve(y, y_prob_oof)
     roc_auc = auc(fpr, tpr)
@@ -403,7 +406,7 @@ for name, model in models.items():
 # Voting Ensemble (OOF) — 标注用50次嵌套CV AUC
 print("    Voting Ensemble...")
 y_prob_voting_oof = cross_val_predict(
-    build_honest_pipeline(voting), X, y, cv=cv5, method='predict_proba', n_jobs=-1
+    build_honest_pipeline(voting), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
 )[:, 1]
 
 # ============================================================
@@ -420,7 +423,7 @@ oof_arr_cal = np.asarray(y_prob_voting_oof)
 
 # 每个折的校准器只在其余折上训练，得到诚实的“校准后OOF概率”
 calibrated_oof = np.zeros_like(oof_arr_cal)
-for tr_idx_cal, te_idx_cal in cv5.split(X, y_arr_cal):
+for tr_idx_cal, te_idx_cal in cv5.split(X_raw, y_arr_cal):
     iso_fold = IsotonicRegression(out_of_bounds='clip')
     iso_fold.fit(oof_arr_cal[tr_idx_cal], y_arr_cal[tr_idx_cal])
     calibrated_oof[te_idx_cal] = iso_fold.predict(oof_arr_cal[te_idx_cal])
@@ -517,7 +520,7 @@ ap_results = {}
 pr_data = {}
 for name, model in models.items():
     y_prob_oof = cross_val_predict(
-        build_honest_pipeline(model), X, y, cv=cv5, method='predict_proba', n_jobs=-1
+        build_honest_pipeline(model), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
     )[:, 1]
     precision, recall, _ = precision_recall_curve(y, y_prob_oof)
     ap = average_precision_score(y, y_prob_oof)
@@ -528,7 +531,7 @@ for name, model in models.items():
 
 # Voting PR
 y_prob_v = cross_val_predict(
-    build_honest_pipeline(voting), X, y, cv=cv5, method='predict_proba', n_jobs=-1
+    build_honest_pipeline(voting), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
 )[:, 1]
 precision_v, recall_v, _ = precision_recall_curve(y, y_prob_v)
 ap_v = average_precision_score(y, y_prob_v)
@@ -611,11 +614,11 @@ for idx, name in enumerate(model_order):
     # Get OOF predictions
     if name == 'Voting Ensemble':
         y_prob = cross_val_predict(
-            build_honest_pipeline(voting), X, y, cv=cv5, method='predict_proba', n_jobs=-1
+            build_honest_pipeline(voting), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
         )[:, 1]
     else:
         y_prob = cross_val_predict(
-            build_honest_pipeline(models[name]), X, y, cv=cv5, method='predict_proba', n_jobs=-1
+            build_honest_pipeline(models[name]), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
         )[:, 1]
     y_pred = (y_prob >= 0.5).astype(int)
     cm = confusion_matrix(y, y_pred)
@@ -672,11 +675,11 @@ for idx, name in enumerate(model_order):
     # OOF predictions
     if name == 'Voting Ensemble':
         y_prob = cross_val_predict(
-            build_honest_pipeline(voting), X, y, cv=cv5, method='predict_proba', n_jobs=-1
+            build_honest_pipeline(voting), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
         )[:, 1]
     else:
         y_prob = cross_val_predict(
-            build_honest_pipeline(models[name]), X, y, cv=cv5, method='predict_proba', n_jobs=-1
+            build_honest_pipeline(models[name]), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
         )[:, 1]
 
     prob_true, prob_pred = calibration_curve(y, y_prob, n_bins=10, strategy='uniform')
@@ -718,11 +721,11 @@ for name in model_order:
     # Reuse OOF predictions from above (re-compute for simplicity)
     if name == 'Voting Ensemble':
         y_prob = cross_val_predict(
-            build_honest_pipeline(voting), X, y, cv=cv5, method='predict_proba', n_jobs=-1
+            build_honest_pipeline(voting), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
         )[:, 1]
     else:
         y_prob = cross_val_predict(
-            build_honest_pipeline(models[name]), X, y, cv=cv5, method='predict_proba', n_jobs=-1
+            build_honest_pipeline(models[name]), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
         )[:, 1]
 
     prob_true, prob_pred = calibration_curve(y, y_prob, n_bins=10, strategy='uniform')
@@ -759,7 +762,7 @@ for name in model_order:
         y_prob = y_prob_voting_oof
     else:
         y_prob = cross_val_predict(
-            build_honest_pipeline(models[name]), X, y, cv=cv5, method='predict_proba', n_jobs=-1
+            build_honest_pipeline(models[name]), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
         )[:, 1]
 
     prob_true, prob_pred = calibration_curve(y, y_prob, n_bins=10, strategy='uniform')
@@ -1257,9 +1260,9 @@ for name, model in models.items():
     joblib.dump(model, f'models/{name}.pkl')
 
 # 保存scaler（基于全量数据，仅选中的特征列）
-X_raw = X[top_features].fillna(X[top_features].median())
+X_final_fill = X[top_features].fillna(X[top_features].median())
 clean_scaler = StandardScaler()
-clean_scaler.fit(X_raw)
+clean_scaler.fit(X_final_fill)
 joblib.dump(clean_scaler, 'models/scaler.pkl')
 
 # 保存特征名
