@@ -1,6 +1,4 @@
 # -*- coding: utf-8 -*-
-# [LEGACY] 该模块未被 run_clean/run_bonus/run_evaluation/streamlit_app 引用。
-# 正式建模、清洗与评估统一走 src/data/prepare.py 与 run_clean.py；本模块仅作历史参考。
 """
 ======================================================================
   AKI Phase 3 — 时序风险轨迹预测模块
@@ -34,10 +32,13 @@ matplotlib.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu S
 matplotlib.rcParams['axes.unicode_minus'] = False
 
 from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
 from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier, VotingClassifier
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.metrics import roc_auc_score
+from xgboost import XGBClassifier
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -194,11 +195,44 @@ def prepare_temporal_datasets(X, y, feature_names, cv=5, random_state=42):
     return datasets
 
 
+def _build_voting_pipeline(y_series):
+    """与 run_clean.py 最终模型一致的 Voting 管线（中位数填补 + 标准化 + 加权Voting）。"""
+    lr = LogisticRegression(
+        C=0.02, penalty='l2', class_weight='balanced',
+        max_iter=5000, random_state=42, solver='saga',
+    )
+    rf = RandomForestClassifier(
+        n_estimators=300, max_depth=5, min_samples_leaf=15,
+        min_samples_split=15, class_weight='balanced', random_state=42, n_jobs=-1,
+    )
+    xgb = XGBClassifier(
+        n_estimators=200, max_depth=3, learning_rate=0.02,
+        subsample=0.8, colsample_bytree=0.8,
+        reg_alpha=1.0, reg_lambda=1.0, min_child_weight=5,
+        scale_pos_weight=(y_series == 0).sum() / max((y_series == 1).sum(), 1),
+        random_state=42, use_label_encoder=False,
+        eval_metric='logloss', verbosity=0,
+    )
+    et = ExtraTreesClassifier(
+        n_estimators=200, max_depth=5, min_samples_leaf=15,
+        class_weight='balanced', random_state=42, n_jobs=-1,
+    )
+    voting = VotingClassifier(
+        estimators=[('LR', lr), ('RF', rf), ('XGB', xgb), ('ET', et)],
+        voting='soft', weights=[2, 2, 1, 1],
+    )
+    return Pipeline([
+        ('imputer', SimpleImputer(strategy='median')),
+        ('scaler', StandardScaler()),
+        ('model', voting),
+    ])
+
+
 def evaluate_temporal_models(datasets, cv=5, random_state=42):
     """
     Train and evaluate models at each temporal stage.
 
-    Uses a consistent model (RandomForest) across all time points
+    Uses the final Voting pipeline across all time points
     to isolate the effect of adding temporal information.
 
     Returns:
@@ -210,12 +244,8 @@ def evaluate_temporal_models(datasets, cv=5, random_state=42):
         X_tp = ds['X']
         y_tp = ds['y']
 
-        # Model with controlled complexity
-        model = RandomForestClassifier(
-            n_estimators=200, max_depth=5,
-            min_samples_leaf=10, min_samples_split=10,
-            class_weight='balanced', random_state=random_state, n_jobs=-1
-        )
+        # 与 run_clean.py 最终模型一致的 Voting 管线
+        model = _build_voting_pipeline(y_tp)
 
         # Stratified CV
         skf = StratifiedKFold(n_splits=cv, shuffle=True, random_state=random_state)
@@ -460,11 +490,7 @@ def run_full_temporal_analysis(X, y, feature_names, cv=5, random_state=42,
     print("\n[Step 5] Generating example risk trajectory...")
     models_dict = {}
     for tp_key, ds in datasets.items():
-        model = RandomForestClassifier(
-            n_estimators=200, max_depth=5, min_samples_leaf=10,
-            min_samples_split=10, class_weight='balanced',
-            random_state=random_state, n_jobs=-1
-        )
+        model = _build_voting_pipeline(ds['y'])
         model.fit(ds['X'], ds['y'])
         models_dict[tp_key] = model
 
@@ -500,8 +526,24 @@ def run_full_temporal_analysis(X, y, feature_names, cv=5, random_state=42,
 
 
 if __name__ == '__main__':
-    # Quick test
-    print("Temporal prediction module loaded.")
-    print(f"  {len(TEMPORAL_FEATURE_MAP)} time point categories defined.")
-    for tp, info in TEMPORAL_FEATURE_MAP.items():
-        print(f"  {info['label']}: {len(info['keywords'])} keywords")
+    # 真实可复现入口：读取当前数据与最终特征，生成 phase3 全部图表和表格
+    import joblib
+
+    from src.data.prepare import prepare_training_data
+
+    df = pd.read_excel(PROJECT_ROOT / 'data' / 'raw' / 'AKI数据.xlsx')
+    prep = prepare_training_data(df)
+    X_all = prep['X']
+    y_all = prep['y']
+
+    feat_file = PROJECT_ROOT / 'models' / 'selected_features.txt'
+    if not feat_file.exists():
+        raise SystemExit('请先运行 python run_clean.py 生成最终特征文件')
+    feats = [l.strip() for l in feat_file.read_text(encoding='utf-8').splitlines() if l.strip()]
+    X_all = X_all[feats]
+
+    run_full_temporal_analysis(
+        X_all.values, y_all, feats,
+        cv=5, random_state=42,
+        output_dir=str(PROJECT_ROOT / 'outputs' / 'phase3'),
+    )

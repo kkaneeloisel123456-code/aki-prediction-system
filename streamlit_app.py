@@ -558,6 +558,8 @@ def page_performance(assets):
             cv_auc_path = PHASE1_FIG_DIR / 'cv_auc_distribution.png'
         if not cv_auc_path.exists():
             cv_auc_path = FIG_DIR / 'cv_auc_distribution.png'
+        if not cv_auc_path.exists():
+            cv_auc_path = FIG_DIR / 'bootstrap_auc_dist.png'
         if cv_auc_path.exists():
             st.image(str(cv_auc_path), width='stretch')
         else:
@@ -589,7 +591,7 @@ def page_performance(assets):
         # Individual model ablation charts
         st.markdown("---")
         st.markdown("#### 📊 各模型消融详情")
-        abl_model = st.selectbox("选择模型", ["xgboost", "randomforest", "catboost", "lightgbm", "logisticregression"],
+        abl_model = st.selectbox("选择模型", ["logisticregression", "randomforest", "xgboost", "extratrees"],
                                   format_func=lambda x: x.upper() if x == 'xgboost' else x.title())
         abl_bar_path = PHASE1_FIG_DIR / f'ablation_{abl_model}.png'
         if abl_bar_path.exists():
@@ -1089,12 +1091,14 @@ def page_prediction(assets):
                     💡 **临床洞察**: 如果 **{cf_selected}** 从当前值降低到 **{cf_best_val:.1f}**，
                     预测的AKI风险将从 **{cf_current_prob:.1%}** 降至 **{cf_best_prob:.1%}**
                     （降低 {cf_delta:.1%}）。这提示 **{cf_selected}** 可能是可干预的风险因素。
+                    （探索性分析，非临床干预建议。）
                     """)
                 else:
                     st.info(f"""
                     💡 **临床洞察**: 如果 **{cf_selected}** 从当前值提升到 **{cf_best_val:.1f}**，
                     预测的AKI风险将从 **{cf_current_prob:.1%}** 改善至 **{cf_best_prob:.1%}**
                     （改善 {cf_delta:.1%}）。这提示维持较高水平的 **{cf_selected}** 可能具有保护作用。
+                    （探索性分析，非临床干预建议。）
                     """)
 
             except Exception as e:

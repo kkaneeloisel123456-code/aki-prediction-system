@@ -50,9 +50,9 @@
 | 术中特征 | 4 | 失血量、输液量、尿量 |
 | ICU入室值 | 2 | 入ICU即刻eGFR、肌酐 |
 | 术后早期非肌酐 | 33 | 血常规、炎症标志物、血气 |
-| **候选建模特征** | **87** | 83保留特征（含手术类型5个one-hot编码） |
+| **候选建模特征** | **87** | 97列→排除14列→83原始候选列；手术类型One-Hot后共87个数值特征 |
 | **精筛后** | **35** | RF重要性筛选 Top35 |
-| **已排除** | **14** | 身份字段 + KDIGO诊断标准 + 结局变量 + 术后7d + 通气时间 |
+| **已排除** | **14** | 13个泄漏列（身份字段+KDIGO诊断标准+结局变量+术后7d+通气时间）+ 目标列AKI分组 |
 
 ### 数据泄漏控制
 
@@ -73,7 +73,7 @@
 | 初始模型（含泄漏） | >0.99 | 单次划分 | 用KDIGO标准预测AKI — 不可信 |
 | 纯术前（保守） | 0.74 | 5折CV | 仅术前特征，完全无泄漏（历史对比） |
 | 术前+术中+ICU入室 | 0.79 | 5折CV | 临床可论证的预测时点（历史对比） |
-| **最终版（+术后早期）** | **0.81** | **5折×10次=50次嵌套CV** | **当前最优，筛选/缩放均在训练折内** |
+| **最终版（+术后早期）** | **0.807±0.045** | **5折×10次=50次嵌套CV** | **当前最优，筛选/缩放均在训练折内** |
 
 > **"一个可信的 0.81，胜过一百个泄漏的 0.99。"**
 
@@ -82,10 +82,9 @@
 ## 项目结构
 
 ```
-aki-project/
+aki-prediction-system/
 ├── data/                         # 数据
 │   ├── raw/AKI数据.xlsx          # 原始数据
-│   └── tables/                   # 数据字典、质量报告
 ├── models/                       # 训练好的模型
 │   ├── final_voting_model.pkl    # 最终Voting模型
 │   ├── LogisticRegression.pkl    # 子模型
@@ -103,7 +102,7 @@ aki-project/
 │   └── visualization/            # 可视化模块
 ├── web/                          # Streamlit Web组件
 │   └── components/               # 预测/SHAP/报告组件
-├── app_data/                     # Streamlit Cloud部署文件
+├── app_data/                     # Streamlit Cloud部署文件（model/scaler/features/calibrator/impute_values）
 ├── streamlit_app.py              # ★ Web应用主入口
 ├── run_clean.py                  # ★ 一键运行（最终版）
 ├── run_evaluation.py             # 综合评估图表
@@ -121,7 +120,7 @@ aki-project/
 | **三方法交叉验证** | Logistic回归 + XGBoost + SHAP 独立验证 | 8个核心特征被≥2种方法确认 |
 | **PDP非线性分析** | 部分依赖图展示剂量-效应关系 | 核心特征呈现阈值加速、开关效应 |
 | **亚组分析** | 按风险/肾功能分层评估（使用5折OOF预测，避免训练集内自评） | 高风险组AKI率48.6%，低风险组11.0%（约4.4倍差距） |
-| **VIF共线性诊断** | 方差膨胀因子检验 | 肾功能相关指标天然相关（VIF>10共22项），RF筛选+L2正则化缓解，解释时需注意 |
+| **VIF共线性诊断** | 方差膨胀因子检验（标准化矩阵+截距） | VIF>10共6项（最高ICUAdmeGFR=36.5），RF筛选+L2正则化缓解，解释时需注意 |
 | **Hosmer-Lemeshow** | 拟合优度检验 | P=0.149（未见显著失准；但整体预测概率水平偏高，详见校准限制） |
 
 > **校准说明**：原始模型在 OOF 上期望阳性合计约181.6，而实际阳性为125，说明未校准概率整体偏高。系统已内置 Isotonic 校准（基于5折OOF概率拟合），校准后 Brier 由 0.180 降至 0.169；Web 端展示的即为校准后概率，SHAP 解释仍基于原始模型。
@@ -142,11 +141,17 @@ python run_clean.py
 # 3. 生成比赛图表（ROC/PR/校准/DCA/SHAP）
 python run_evaluation.py
 
-# 4. 启动 Web 应用
+# 4. 生成加分项图表（VIF+PDP+三方法交叉验证+HL）
+python run_bonus.py
+
+# 5. 生成时序风险轨迹（T0→T1→T2）
+python -m src.models.temporal
+
+# 6. 启动 Web 应用
 streamlit run streamlit_app.py
 # → http://localhost:8501
 
-# 5. 运行一致性回归测试
+# 7. 运行一致性回归测试
 python -m unittest discover -s tests -v
 ```
 
@@ -176,7 +181,7 @@ python -m unittest discover -s tests -v
 
 ## 技术栈
 
-- **语言**: Python 3.10+
+- **语言**: Python 3.11
 - **数据处理**: pandas, numpy, scikit-learn
 - **模型**: LogisticRegression, RandomForest, XGBoost, ExtraTrees
 - **可解释性**: SHAP
@@ -194,7 +199,7 @@ python -m unittest discover -s tests -v
 | 数据清洗/特征工程 | 李婷、蓝可 | 数据预处理、EDA |
 | 建模/SHAP | 梁日娇、蓝可 | 模型训练、评估、可解释性 |
 | Web开发 | 王若兮 | Streamlit系统开发 |
-|报告pdf|叶宇晨|报告pdf|
+| 报告撰写 | 叶宇晨、蓝可 | 报告撰写 |
 ---
 
 ## 免责声明

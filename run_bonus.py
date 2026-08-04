@@ -47,14 +47,16 @@ print(f"  35特征, 420样本, AKI率 {y.mean():.1%}")
 # ============================================================
 print("\n[2/5] VIF colinearity diagnosis...")
 from statsmodels.stats.outliers_influence import variance_inflation_factor
+from statsmodels.tools.tools import add_constant
 
-X_vif = X[n35].copy()
+# 在标准化矩阵上加入截距列计算，避免无截距回归使 VIF 失真
+X_vif = X35.copy()
 vif_rows = []
 for i in range(len(n35)):
     try:
-        v = variance_inflation_factor(X_vif.values, i)
+        v = variance_inflation_factor(add_constant(X_vif), i + 1)
         vif_rows.append({'feature': n35[i], 'VIF': round(v, 1)})
-    except:
+    except Exception:
         vif_rows.append({'feature': n35[i], 'VIF': np.nan})
 
 vif_df = pd.DataFrame(vif_rows).sort_values('VIF', ascending=False)
