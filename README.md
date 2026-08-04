@@ -13,7 +13,7 @@
 1. 解压项目压缩包
 2. 双击 `启动系统.bat`
 3. 脚本会自动创建虚拟环境、安装依赖，并启动 Web 系统
-4. 浏览器访问 http://localhost:8501
+4. 浏览器访问 https://aki-prediction.streamlit.app
 
 也可以手动运行，见下方“快速开始”。
 
