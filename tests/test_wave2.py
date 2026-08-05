@@ -33,20 +33,6 @@ class Wave2HelpersTest(unittest.TestCase):
         self.assertEqual((tp, fp), (2, 0))
         self.assertAlmostEqual(nb, 0.5)
 
-    def test_mimic_feature_map_covers_all_final_features(self):
-        features = [
-            line.strip()
-            for line in (ROOT / 'models' / 'selected_features.txt')
-            .read_text(encoding='utf-8').splitlines()
-            if line.strip()
-        ]
-        mapping = pd.read_csv(
-            ROOT / 'scripts' / 'mimic_feature_map.csv', encoding='utf-8-sig'
-        )
-        mapped = set(mapping['project_feature'])
-        self.assertEqual(len(features), 35)
-        self.assertEqual(len(set(features) - mapped), 0)
-
 
 if __name__ == '__main__':
     unittest.main()

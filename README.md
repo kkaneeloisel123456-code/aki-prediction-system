@@ -141,35 +141,6 @@
 
 患者级预测区间在受控环境生成（`outputs/tables/wave2_uncertainty_patients.csv`），按仓库隐私约定不随公开仓库分发；报告可使用汇总统计或去标识化展示。
 
-### 外部验证框架（MIMIC-IV）
-
-`scripts/mimic_validation.py` 已提供：
-
-- 35 个最终特征到 MIMIC-IV 概念的映射表：`scripts/mimic_feature_map.csv`
-- 项目模型 / scaler / 中位数 / 校准器加载接口
-- 外部 DataFrame 评分与 AUC 计算接口
-
-新增（2026-08-05）：
-
-- `scripts/mimic_extract.sql`：MIMIC-IV v2.x PostgreSQL 提取脚本（心脏手术队列 + 35 特征 + KDIGO 肌酐结局），文件内逐项注明口径与近似（基线肌酐来源、48h/7d 结局窗口、APACHE II 以 apsiii 代理、术中指标缺失处理、晶体液量代理等）。
-- `scripts/mimic_pipeline_self_test.py`：合成数据端到端管线自测（**明确标注 SIMULATION ONLY，不是外部验证证据**），当前自检 **PASS**（35/35 映射、35/35 特征可定位）。
-
-当前仓库不含 MIMIC-IV 数据，可先运行：
-
-```bash
-python scripts/mimic_validation.py --dry-run        # 映射覆盖检查（35/35）
-python scripts/mimic_pipeline_self_test.py          # 合成数据管线自测（SIMULATION ONLY）
-```
-
-拿到 PhysioNet 授权数据后：
-
-```bash
-psql -d mimic -f scripts/mimic_extract.sql -o outputs/tables/mimic_external_cohort.csv
-python scripts/mimic_validation.py --data outputs/tables/mimic_external_cohort.csv --outcome outcome_aki
-```
-
-论文中应写为“外部验证计划 + 已完成映射设计与提取脚本”，不写“已完成外部验证”。
-
 ---
 
 ## P1 补充实验：临床基线 / 精简模型 / DCA / TabNet（2026-08-05）
@@ -293,7 +264,6 @@ aki-prediction-system/
 │   ├── data/                     # 数据处理模块
 │   ├── models/                   # 模型训练/评估/校准
 │   └── visualization/            # 可视化模块
-├── scripts/                      # MIMIC-IV外部验证（映射表/SQL提取/管线自测）
 ├── web/                          # Streamlit Web组件
 │   └── components/               # 预测/SHAP/报告组件
 ├── app_data/                     # Streamlit Cloud部署文件（model/scaler/features/calibrator/impute_values）
@@ -355,8 +325,6 @@ python run_advanced.py
 # 9. Wave 2：MICE/SMOTE/阈值/不确定性
 python run_wave2.py
 
-# 10. MIMIC-IV 外部验证框架（dry-run）
-python scripts/mimic_validation.py --dry-run
 ```
 
 ---
@@ -389,7 +357,7 @@ python scripts/mimic_validation.py --dry-run
 - **数据处理**: pandas, numpy, scikit-learn
 - **模型**: LogisticRegression, RandomForest, XGBoost, ExtraTrees
 - **高级对比**: Optuna, StackingClassifier, RFECV, Boruta-lite
-- **补充证据**: IterativeImputer, SMOTE, DCA 阈值推荐, 重复CV不确定性, MIMIC-IV 映射
+- **补充证据**: IterativeImputer, SMOTE, DCA 阈值推荐, 重复CV不确定性
 - **可解释性**: SHAP
 - **可视化**: matplotlib, seaborn
 - **Web**: Streamlit
