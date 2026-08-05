@@ -1060,6 +1060,13 @@ fig_dca.savefig('outputs/figures/dca_with_ci.png', dpi=300, bbox_inches='tight',
                 facecolor=fig_dca.get_facecolor())
 plt.close(fig_dca)
 print(f"  [OK] DCA with CI saved -> outputs/figures/dca_with_ci.png")
+# ── Clinical Impact Curve（Voting Ensemble, OOF）──
+print("\n  生成 Clinical Impact Curve...")
+from src.models.calibration import plot_clinical_impact_curve
+plot_clinical_impact_curve(y.values, y_prob_voting_oof,
+                           save_name='clinical_impact_curve.png')
+print(f"  [OK] Clinical impact curve saved -> outputs/figures/clinical_impact_curve.png")
+
 
 # ── 数据质量仪表盘 ──
 print("\n  生成数据质量 + CV可信度 + 消融实验图...")

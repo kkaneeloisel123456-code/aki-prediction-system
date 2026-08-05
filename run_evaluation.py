@@ -7,7 +7,7 @@
 直接加载 run_clean.py 输出的 models/*.pkl 和 models/selected_features.txt，
 重建相同的 Top35 特征矩阵并用 5 折 OOF 预测生成比赛图表，
 保证 ROC / PR / 校准 / DCA / SHAP 与最终 Voting Ensemble
-(50次嵌套CV AUC=0.8067) 一致，不再使用旧版"仅术前特征"模型。
+(50次嵌套CV AUC=0.8096) 一致，不再使用旧版"仅术前特征"模型。
 """
 
 import os
