@@ -26,6 +26,7 @@ outputs/tables/aki_logic_validation_flags.csv
 outputs/tables/wave2_uncertainty_patients.csv
 
 # Temp / IDE
+outputs/tmp_gauge.png
 catboost_info/
 .vscode/
 .idea/

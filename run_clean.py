@@ -1144,7 +1144,7 @@ feature_groups = {
                       '术前PLR', '术前LMR', '术前BNP', '术前BE', '术前NEUT',
                       '术前MONO', '术前PaO2', '术前PLT', '术前WBC', '术前MB'],
     '+ Intra-op': ['手术时间', '术中失血量', '术中晶体液量'],
-    '+ ICU Admission': ['ICUAdmeGFR', 'ICUAdmSCr'],
+    '+ ICU Admission': ['ICUAdmSCr', 'ICUAdmeGFR'],
     '+ Early Post-op\n(non-creatinine)': ['术后β2MG', '术后Lactate', '术后hsTn', '术后Mb',
                        '术后BE', '术后MONO', '术后BNP', '术后UA', '术后CRP',
                        '术后CAR', '术后PLR', '术后LMR', '术后PaO2', '术后CKMB'],
@@ -1247,6 +1247,22 @@ bootstrap_ci_lower = float(ci_lo)
 bootstrap_ci_upper = float(ci_hi)
 print(f"Bootstrap AUC: {bootstrap_auc_mean:.4f}")
 print(f"95% 置信区间: [{bootstrap_ci_lower:.4f}, {bootstrap_ci_upper:.4f}]")
+
+# 落盘：测试集 AUC 与 Bootstrap AUC（README 引用，评审可复现）
+os.makedirs('outputs/tables', exist_ok=True)
+pd.DataFrame([{
+    '指标': '测试集AUC',
+    '数值': round(test_auc, 4),
+    '说明': '20%独立测试集（stratify, random_state=42）',
+}]).to_csv('outputs/tables/test_auc.csv', index=False, encoding='utf-8-sig')
+pd.DataFrame([{
+    '指标': 'Bootstrap AUC（对5折OOF概率按患者重采样1000次）',
+    '均值': round(bootstrap_auc_mean, 4),
+    '95%CI下限': round(bootstrap_ci_lower, 4),
+    '95%CI上限': round(bootstrap_ci_upper, 4),
+    '说明': '对OOF预测按患者重采样（rng=42）',
+}]).to_csv('outputs/tables/bootstrap_auc.csv', index=False, encoding='utf-8-sig')
+print("[OK] 测试AUC/Bootstrap已落盘 -> outputs/tables/test_auc.csv, bootstrap_auc.csv")
 
 # ============================================================
 # 模块7：保存模型 + 输出

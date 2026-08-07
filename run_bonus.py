@@ -64,7 +64,7 @@ high_vif = len(vif_df[vif_df['VIF'] > 10])
 vif_df.columns = ['特征', 'VIF']
 vif_df.to_csv(f'{OUT}/tables/VIF共线性诊断.csv', index=False, encoding='utf-8-sig')
 print(f"  VIF>10: {high_vif}个")
-print(f"  Note: ICUAdmeGFR/eGFR, ICUAdmSCr/Scr naturally highly correlated")
+print(f"  Note: ICUAdmSCr/Scr, ICUAdmeGFR/eGFR naturally highly correlated")
 print(f"  Solution: RF筛选 + 正则化处理共线性")
 
 # ============================================================
@@ -173,6 +173,20 @@ p_hl = 1 - chi2.cdf(chi_sq, n_groups - 2)
 pd.DataFrame(hl_rows).to_csv(f'{OUT}/tables/HL检验.csv', index=False, encoding='utf-8-sig')
 verdict_hl = 'no significant miscalibration (P>=0.05)' if p_hl >= 0.05 else 'calibration differs (P<0.05)'
 print(f"  chi2={chi_sq:.2f}, P={p_hl:.4f} -> {verdict_hl}")
+
+# 落盘：HL 检验汇总（chi2/P/n，README 引用；原 HL检验.csv 仅存分组明细）
+n_test_hl = int(len(y_te))
+pd.DataFrame([{
+    '检验': 'Hosmer-Lemeshow',
+    'chi2': round(chi_sq, 4),
+    '自由度': n_groups - 2,
+    'P值': round(p_hl, 4),
+    '测试集样本数': n_test_hl,
+    '测试集事件数': int(y_te.sum()),
+    '模型': 'LogisticRegression(C=0.02, balanced) 在20%测试集上的近似检验',
+    '说明': 'n≈84，样本量小，仅供参考',
+}]).to_csv(f'{OUT}/tables/HL检验汇总.csv', index=False, encoding='utf-8-sig')
+print(f"  [OK] HL汇总已落盘 -> outputs/tables/HL检验汇总.csv (n={n_test_hl})")
 
 # ============================================================
 # 4. PDP + Subgroup
