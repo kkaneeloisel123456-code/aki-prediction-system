@@ -87,7 +87,7 @@ def make_impute_pipeline(y, imputer):
     return Pipeline([
         ('imputer', imputer),
         ('scaler', StandardScaler()),
-        ('selector', SelectFromModel(clone(ra.SELECTOR_RF), max_features=35)),
+        ('selector', SelectFromModel(clone(ra.SELECTOR_RF), max_features=35, threshold=-np.inf)),
         ('model', ra.make_voting(y)),
     ])
 
@@ -134,7 +134,7 @@ def make_smote_pipeline(y, model, use_smote):
     steps = [
         ('imputer', SimpleImputer(strategy='median')),
         ('scaler', StandardScaler()),
-        ('selector', SelectFromModel(clone(ra.SELECTOR_RF), max_features=35)),
+        ('selector', SelectFromModel(clone(ra.SELECTOR_RF), max_features=35, threshold=-np.inf)),
     ]
     if use_smote:
         steps.append(('smote', SMOTE(random_state=42)))

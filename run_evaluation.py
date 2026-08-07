@@ -110,7 +110,7 @@ def build_honest_pipeline(model):
     return Pipeline([
         ('imputer', SimpleImputer(strategy='median')),
         ('scaler', StandardScaler()),
-        ('selector', SelectFromModel(_cv_selector, max_features=35)),
+        ('selector', SelectFromModel(_cv_selector, max_features=35, threshold=-np.inf)),
         ('model', model),
     ])
 

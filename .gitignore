@@ -37,3 +37,4 @@ catboost_info/
 .DS_Store
 Thumbs.db
 desktop.ini
+outputs/tables/clinical_range_flags.csv
