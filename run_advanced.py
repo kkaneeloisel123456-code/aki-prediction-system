@@ -155,9 +155,9 @@ class ShadowBorutaSelector(BaseEstimator, TransformerMixin):
 
 def build_selector(name: str):
     if name == 'top35':
-        return SelectFromModel(clone(SELECTOR_RF), max_features=35)
+        return SelectFromModel(clone(SELECTOR_RF), max_features=35, threshold=-np.inf)
     if name == 'top20':
-        return SelectFromModel(clone(SELECTOR_RF), max_features=20)
+        return SelectFromModel(clone(SELECTOR_RF), max_features=20, threshold=-np.inf)
     if name == 'rfecv':
         return RFECV(
             estimator=RandomForestClassifier(
