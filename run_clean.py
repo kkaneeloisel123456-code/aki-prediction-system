@@ -1081,6 +1081,18 @@ try:
 except Exception as e:
     print(f"  [WARN] Data quality dashboard skipped: {e}")
 
+# Bootstrap 95% CI for Voting Ensemble (OOF, n=1000)
+rng_bt = np.random.default_rng(42)
+y_arr = np.asarray(y)
+oof_arr = np.asarray(y_prob_voting_oof)
+bt_aucs = np.array([
+    roc_auc_score(y_arr[idx], oof_arr[idx])
+    for idx in (rng_bt.integers(0, len(y_arr), size=len(y_arr)) for _ in range(1000))
+])
+bt_aucs = np.clip(bt_aucs, 0, 1)
+bootstrap_auc_mean = float(bt_aucs.mean())
+ci_lo, ci_hi = np.percentile(bt_aucs, [2.5, 97.5])
+
 # ── CV ROC 置信带（5模型 OOF ROC + 95% CI）──
 fig_cv, ax_cv = plt.subplots(figsize=(10, 8))
 fig_cv.patch.set_facecolor('#F8F9FA')
@@ -1091,8 +1103,12 @@ for name in model_order:
     cv_mean = all_results[name]['mean']
     cv_std = all_results[name]['std']
     lw = 3.0 if name == 'Voting Ensemble' else 1.8
-    ax_cv.plot(r['fpr'], r['tpr'], color=model_colors[name], lw=lw,
-               label=f'{name} (AUC={cv_mean:.3f}±{cv_std:.3f})')
+    if name == 'Voting Ensemble':
+        label = (f'{name} (AUC={cv_mean:.4f}±{cv_std:.4f}, '
+                 f'Bootstrap 95% CI: {ci_lo:.3f}–{ci_hi:.3f})')
+    else:
+        label = f'{name} (AUC={cv_mean:.4f}±{cv_std:.4f})'
+    ax_cv.plot(r['fpr'], r['tpr'], color=model_colors[name], lw=lw, label=label)
 
 ax_cv.plot([0, 1], [0, 1], 'k--', lw=1, alpha=0.35)
 ax_cv.set_xlabel('False Positive Rate', fontsize=13)
@@ -1108,22 +1124,10 @@ plt.close(fig_cv)
 print(f"  [OK] CV ROC with CI saved -> outputs/figures/cv_roc_with_ci.png")
 
 # ── Bootstrap AUC 分布（对 OOF 预测按患者重采样 1000 次）──
-rng_bt = np.random.default_rng(42)
-y_arr = np.asarray(y)
-oof_arr = np.asarray(y_prob_voting_oof)
-bt_aucs = np.array([
-    roc_auc_score(y_arr[idx], oof_arr[idx])
-    for idx in (rng_bt.integers(0, len(y_arr), size=len(y_arr)) for _ in range(1000))
-])
-bt_aucs = np.clip(bt_aucs, 0, 1)
-bootstrap_auc_mean = float(bt_aucs.mean())
-ci_lo, ci_hi = np.percentile(bt_aucs, [2.5, 97.5])
-
 fig_bt, ax_bt = plt.subplots(figsize=(9, 6))
 fig_bt.patch.set_facecolor('#F8F9FA')
 ax_bt.set_facecolor('#F8F9FA')
 ax_bt.hist(bt_aucs, bins=40, color='#1B1B1B', alpha=0.7, edgecolor='white')
-ci_lo, ci_hi = np.percentile(bt_aucs, [2.5, 97.5])
 ax_bt.axvline(ci_lo, color='#C73E1D', lw=2, ls='--', label=f'95% CI lower = {ci_lo:.3f}')
 ax_bt.axvline(ci_hi, color='#C73E1D', lw=2, ls='--', label=f'95% CI upper = {ci_hi:.3f}')
 ax_bt.axvline(bt_aucs.mean(), color='#2E86AB', lw=3, label=f'Mean = {bt_aucs.mean():.3f}')
