@@ -1,5 +1,5 @@
 ﻿配置,CV折数,AUC均值,AUC标准差,Brier均值,Brier标准差
-XGB_baseline_scale_pos_weight,15,0.7967,0.0491,0.1701,0.022
-XGB_SMOTE_no_scale_pos_weight,15,0.7861,0.0439,0.1768,0.0209
-LR_baseline_class_weight_balanced,15,0.7958,0.0492,0.1842,0.0174
-LR_SMOTE_no_class_weight,15,0.7929,0.046,0.1845,0.0185
+XGB_baseline_scale_pos_weight,15,0.7984,0.0506,0.17,0.023
+XGB_SMOTE_no_scale_pos_weight,15,0.7884,0.0457,0.1752,0.021
+LR_baseline_class_weight_balanced,15,0.8005,0.0445,0.1822,0.0176
+LR_SMOTE_no_class_weight,15,0.7973,0.0435,0.1822,0.0191

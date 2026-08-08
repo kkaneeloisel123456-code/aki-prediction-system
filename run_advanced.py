@@ -16,6 +16,8 @@ AKI 高级方法对比实验（Wave 1）
     outputs/tables/advanced_tuning_params.json
     outputs/tables/advanced_feature_selection.csv
     outputs/tables/advanced_interactions.csv
+    outputs/tables/optuna_tuning_history.csv
+    outputs/figures/optuna_optimization_history.png
 """
 
 from __future__ import annotations
@@ -26,6 +28,11 @@ import json
 import os
 import warnings
 from datetime import datetime
+
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.font_manager as fm
+import matplotlib.pyplot as plt
 from pathlib import Path
 
 warnings.filterwarnings('ignore')
@@ -61,7 +68,18 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 ROOT = Path(__file__).resolve().parent
 OUT_TABLES = ROOT / 'outputs' / 'tables'
+OUT_FIGS = ROOT / 'outputs' / 'figures'
 OUT_TABLES.mkdir(parents=True, exist_ok=True)
+OUT_FIGS.mkdir(parents=True, exist_ok=True)
+
+for _font_path in [r'C:\Windows\Fonts\simhei.ttf', r'C:\Windows\Fonts\msyh.ttc']:
+    try:
+        if os.path.exists(_font_path):
+            fm.fontManager.addfont(_font_path)
+    except Exception:
+        pass
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False
 
 SELECTOR_RF = RandomForestClassifier(
     n_estimators=200, class_weight='balanced', random_state=42, n_jobs=-1
@@ -372,6 +390,7 @@ def nested_tune_and_evaluate(model_name, X, y, outer_cv, n_trials, inner_splits=
     aucs = []
     inner_aucs = []
     params_list = []
+    history = []
     for fold_no, (tr_idx, te_idx) in enumerate(outer_cv.split(X, y), start=1):
         X_tr, X_te = X.iloc[tr_idx], X.iloc[te_idx]
         y_tr, y_te = y.iloc[tr_idx], y.iloc[te_idx]
@@ -399,11 +418,42 @@ def nested_tune_and_evaluate(model_name, X, y, outer_cv, n_trials, inner_splits=
         aucs.append(float(auc))
         inner_aucs.append(float(study.best_value))
         params_list.append(best)
+        # 收集该折 trials 历史（内层 CV AUC），供调参曲线与历史表使用
+        for t in study.trials:
+            history.append({
+                '模型': model_name,
+                '外折': fold_no,
+                'trial': t.number + 1,
+                '内层CV_AUC': float(t.value) if t.value is not None else float('nan'),
+            })
         print(
             f'    fold {fold_no}/{len(list(outer_cv.split(X, y)))}: '
             f'inner CV AUC={study.best_value:.4f}, outer AUC={auc:.4f}'
         )
-    return aucs, inner_aucs, params_list
+    return aucs, inner_aucs, params_list, history
+
+
+def plot_optuna_history(history, out_path):
+    """绘制 4 个模型 best-so-far 内层 CV AUC 的 Optuna 调参曲线。"""
+    hist = pd.DataFrame(history)
+    models = ['LogisticRegression', 'RandomForest', 'XGBoost', 'ExtraTrees']
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    for ax, model in zip(axes.ravel(), models):
+        sub = hist[hist['模型'] == model].sort_values(['外折', 'trial'])
+        for fold_no, g in sub.groupby('外折'):
+            best_sofar = g['内层CV_AUC'].cummax()
+            ax.plot(g['trial'], best_sofar, marker='o', ms=3, lw=1.2,
+                    label=f'折{fold_no}')
+        ax.set_title(model, fontsize=11)
+        ax.set_xlabel('trial')
+        ax.set_ylabel('best-so-far 内层CV AUC')
+        ax.grid(alpha=0.3)
+        ax.legend(fontsize=8, ncol=5)
+    fig.suptitle('Optuna 调参优化历史（每折 20 trials，内层 3 折 CV，TPE seed=42+fold）',
+                 fontsize=12)
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    fig.savefig(out_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
 
 
 # ----------------------------------------------------------------------
@@ -505,23 +555,43 @@ def main():
     n_tune_folds = 5 * args.tune_repeats
     tune_rows = []
     params_store = {}
+    history_all = []
+    fixed_on_tune = {}
     for model_name in ['LogisticRegression', 'RandomForest', 'XGBoost', 'ExtraTrees']:
         print(f'  {model_name} ...')
-        aucs, inner_aucs, params_list = nested_tune_and_evaluate(
+        aucs, inner_aucs, params_list, hist = nested_tune_and_evaluate(
             model_name, X, y, cv_tune, args.tune_trials, inner_splits=3
         )
+        history_all.extend(hist)
+        # 同一 5 折上的固定配置外层 AUC（与 Optuna 同折对比，保证表格可复现）
+        fixed_pipe = build_pipeline(make_base_models(y)[model_name])
+        fixed_scores = cross_val_score(
+            fixed_pipe, X, y, cv=cv_tune, scoring='roc_auc', n_jobs=1
+        )
+        fixed_on_tune[model_name] = float(np.mean(fixed_scores))
         params_store[model_name] = params_list
         tune_rows.append(summarize_scores(
             model_name, aucs,
+            固定配置AUC=round(fixed_on_tune[model_name], 4),
             内层CV_AUC均值=np.mean(inner_aucs),
             每折最优参数=json.dumps(params_list, ensure_ascii=False),
         ))
         print(f'    外层 AUC = {np.mean(aucs):.4f} ± {np.std(aucs):.4f}')
+    # Voting 不调参，仅在同一 5 折上报告固定配置 AUC
+    voting_fixed = cross_val_score(
+        build_pipeline(make_voting(y)), X, y, cv=cv_tune, scoring='roc_auc', n_jobs=1
+    )
+    print(f'  Voting（不调参）固定配置 5 折 AUC = {np.mean(voting_fixed):.4f}')
     tune_df = pd.DataFrame(tune_rows)
     tune_df.to_csv(OUT_TABLES / 'advanced_tuning_summary.csv', index=False, encoding='utf-8-sig')
     (OUT_TABLES / 'advanced_tuning_params.json').write_text(
         json.dumps(params_store, ensure_ascii=False, indent=2), encoding='utf-8'
     )
+    # 调参历史与优化曲线
+    pd.DataFrame(history_all).to_csv(
+        OUT_TABLES / 'optuna_tuning_history.csv', index=False, encoding='utf-8-sig'
+    )
+    plot_optuna_history(history_all, OUT_FIGS / 'optuna_optimization_history.png')
     all_rows.append(('Optuna 调参', tune_df))
 
     # ---------------------------------------------------------------
