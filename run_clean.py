@@ -625,17 +625,18 @@ for idx, name in enumerate(model_order):
     cm = confusion_matrix(y, y_pred)
     cm_norm = cm.astype('float') / cm.sum(axis=1, keepdims=True).clip(min=1)
 
-    # Display
+    # Display (hide sklearn's built-in decimals to avoid overlapping text)
     disp = ConfusionMatrixDisplay(confusion_matrix=cm_norm, display_labels=['Non-AKI', 'AKI'])
-    disp.plot(ax=ax, cmap=plt.cm.Blues, colorbar=False, values_format='.2f')
+    disp.plot(ax=ax, cmap=plt.cm.Blues, colorbar=False, include_values=False)
 
-    # Overlay raw counts
+    # Overlay percentage and raw count as two separate lines
     for i in range(2):
         for j in range(2):
-            ax.text(j, i, f'{cm_norm[i,j]:.1%}\n(n={cm[i,j]})',
-                    ha='center', va='center', fontsize=9,
-                    color='white' if cm_norm[i,j] > 0.5 else '#333333',
-                    fontweight='bold')
+            color = 'white' if cm_norm[i, j] > 0.5 else '#333333'
+            ax.text(j, i - 0.15, f'{cm_norm[i, j]:.0%}', ha='center', va='center',
+                    fontsize=12, fontweight='bold', color=color)
+            ax.text(j, i + 0.15, f'n = {cm[i, j]}', ha='center', va='center',
+                    fontsize=9, color=color)
 
     # Label with model name + metrics
     tn, fp, fn, tp = cm.ravel()
