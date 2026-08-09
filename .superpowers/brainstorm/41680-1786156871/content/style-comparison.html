@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AKI 前端视觉风格对比</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #f1f5f9;
+      color: #1e293b;
+      line-height: 1.5;
+      padding: 32px;
+    }
+    h2 { font-size: 22px; font-weight: 600; margin-bottom: 6px; }
+    .subtitle { color: #64748b; font-size: 14px; margin-bottom: 24px; }
+    .styles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .style-card {
+      background: #fff;
+      border-radius: 8px;
+      border: 2px solid #e2e8f0;
+      overflow: hidden;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .style-card:hover { border-color: #94a3b8; box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+    .style-card.selected { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
+    .style-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .style-title { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+    .style-desc { font-size: 12px; color: #64748b; }
+    .mock-container { padding: 12px; background: #f8fafc; }
+
+    /* Mini mockup base */
+    .mini-app {
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid #cbd5e1;
+      font-size: 9px;
+      height: 260px;
+      display: flex;
+    }
+    .mini-sidebar { width: 62px; padding: 8px 6px; display: flex; flex-direction: column; gap: 6px; }
+    .mini-nav { display: flex; align-items: center; gap: 5px; padding: 5px; border-radius: 4px; }
+    .mini-nav svg { width: 11px; height: 11px; }
+    .mini-main { flex: 1; display: flex; flex-direction: column; background: #fff; }
+    .mini-topbar { height: 22px; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; border-bottom: 1px solid; font-size: 8px; }
+    .mini-content { padding: 8px; flex: 1; overflow: hidden; }
+    .mini-row { display: flex; gap: 6px; margin-bottom: 6px; }
+    .mini-card { border-radius: 4px; border: 1px solid; padding: 6px; flex: 1; }
+    .mini-kpi { font-size: 13px; font-weight: 700; }
+    .mini-label { font-size: 7px; opacity: 0.8; }
+    .mini-input { border: 1px solid; border-radius: 3px; padding: 3px 4px; margin-top: 2px; }
+    .mini-btn { padding: 3px 6px; border-radius: 3px; font-size: 8px; border: none; margin-top: 4px; }
+    .mini-table { width: 100%; border-collapse: collapse; font-size: 7px; }
+    .mini-table th, .mini-table td { padding: 3px 4px; text-align: left; border-bottom: 1px solid; }
+    .mini-risk { padding: 8px; border-radius: 4px; text-align: center; margin-bottom: 6px; }
+    .mini-risk-num { font-size: 16px; font-weight: 700; }
+
+    /* Style A - Epic dense blue */
+    .style-a .mini-sidebar { background: #1e3a5f; color: #bfdbfe; }
+    .style-a .mini-nav:hover, .style-a .mini-nav.active { background: rgba(255,255,255,0.1); color: #fff; }
+    .style-a .mini-topbar { background: #fff; border-color: #e2e8f0; color: #334155; }
+    .style-a .mini-card { border-color: #e2e8f0; }
+    .style-a .mini-input { border-color: #cbd5e1; }
+    .style-a .mini-btn.primary { background: #2563eb; color: #fff; }
+    .style-a .mini-risk { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+    .style-a .mini-table th { background: #f1f5f9; }
+    .style-a .mini-table td { border-color: #f1f5f9; }
+
+    /* Style B - Modern gray Cerner */
+    .style-b .mini-sidebar { background: #f8fafc; color: #475569; border-right: 1px solid #e2e8f0; }
+    .style-b .mini-nav:hover, .style-b .mini-nav.active { background: #e2e8f0; color: #0f172a; }
+    .style-b .mini-topbar { background: #fff; border-color: #e2e8f0; color: #334155; }
+    .style-b .mini-card { border-color: #e2e8f0; }
+    .style-b .mini-input { border-color: #cbd5e1; }
+    .style-b .mini-btn.primary { background: #475569; color: #fff; }
+    .style-b .mini-risk { background: #fff7ed; color: #9a3412; border: 1px solid #fdba74; }
+    .style-b .mini-table th { background: #f8fafc; }
+    .style-b .mini-table td { border-color: #f1f5f9; }
+
+    /* Style C - Dark navy clinical */
+    .style-c .mini-sidebar { background: #0f172a; color: #94a3b8; }
+    .style-c .mini-nav:hover, .style-c .mini-nav.active { background: rgba(255,255,255,0.08); color: #f8fafc; }
+    .style-c .mini-topbar { background: #1e293b; border-color: #334155; color: #e2e8f0; }
+    .style-c .mini-content { background: #0f172a; }
+    .style-c .mini-card { background: #1e293b; border-color: #334155; color: #e2e8f0; }
+    .style-c .mini-input { background: #0f172a; border-color: #475569; color: #e2e8f0; }
+    .style-c .mini-btn.primary { background: #38bdf8; color: #0f172a; }
+    .style-c .mini-risk { background: #451a03; color: #fdba74; border: 1px solid #92400e; }
+    .style-c .mini-table th { background: #1e293b; }
+    .style-c .mini-table td { border-color: #334155; }
+
+    .selection-bar {
+      margin-top: 24px;
+      padding: 16px;
+      background: #fff;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .selection-bar .hint { font-size: 13px; color: #64748b; }
+    .selection-bar .selected-name { font-weight: 600; color: #2563eb; }
+  </style>
+</head>
+<body>
+  <h2>选择新的视觉风格</h2>
+  <p class="subtitle">针对“太 AI”的问题，我准备了 3 种更贴近真实医院系统的方向。每个卡片都是可交互的缩略预览。</p>
+
+  <div class="styles">
+    <!-- Style A -->
+    <div class="style-card style-a" data-choice="a" onclick="selectStyle(this, 'A. Epic 密集蓝')">
+      <div class="style-header">
+        <div class="style-title">A. Epic 密集蓝</div>
+        <div class="style-desc">深蓝色侧边栏 + 白色内容区 + 扁平蓝色强调，信息密度最高，最接近 Epic/Cerner 真实 HIS 系统</div>
+      </div>
+      <div class="mock-container">
+        <div class="mini-app">
+          <div class="mini-sidebar">
+            <div class="mini-nav active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg> 首页</div>
+            <div class="mini-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg> 性能</div>
+            <div class="mini-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg> 预测</div>
+          </div>
+          <div class="mini-main">
+            <div class="mini-topbar">AKI 风险预测 | 王医生</div>
+            <div class="mini-content">
+              <div class="mini-row">
+                <div class="mini-card" style="flex:2">
+                  <div class="mini-label">患者信息</div>
+                  <div class="mini-row" style="margin-bottom:0;margin-top:4px">
+                    <div style="flex:1"><div class="mini-label">年龄</div><div class="mini-input">55</div></div>
+                    <div style="flex:1"><div class="mini-label">性别</div><div class="mini-input">男</div></div>
+                    <div style="flex:1"><div class="mini-label">APACHE II</div><div class="mini-input">18</div></div>
+                  </div>
+                </div>
+                <div class="mini-card" style="flex:1">
+                  <div class="mini-risk">
+                    <div class="mini-label">中风险</div>
+                    <div class="mini-risk-num">42.3%</div>
+                  </div>
+                </div>
+              </div>
+              <div class="mini-card">
+                <table class="mini-table">
+                  <tr><th>特征</th><th>SHAP</th><th>影响</th></tr>
+                  <tr><td>术前 eGFR</td><td>-0.082</td><td>保护</td></tr>
+                  <tr><td>APACHE II</td><td>+0.076</td><td>危险</td></tr>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Style B -->
+    <div class="style-card style-b" data-choice="b" onclick="selectStyle(this, 'B. 现代浅灰')">
+      <div class="style-header">
+        <div class="style-title">B. 现代浅灰</div>
+        <div class="style-desc">浅灰侧边栏 + 大量留白 + 灰蓝/深灰强调，比 Epic 更清爽，但仍保持医疗系统的专业感</div>
+      </div>
+      <div class="mock-container">
+        <div class="mini-app">
+          <div class="mini-sidebar">
+            <div class="mini-nav active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg> 首页</div>
+            <div class="mini-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg> 性能</div>
+            <div class="mini-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg> 预测</div>
+          </div>
+          <div class="mini-main">
+            <div class="mini-topbar">AKI 风险预测 | 王医生</div>
+            <div class="mini-content">
+              <div class="mini-row">
+                <div class="mini-card" style="flex:2">
+                  <div class="mini-label">患者信息</div>
+                  <div class="mini-row" style="margin-bottom:0;margin-top:4px">
+                    <div style="flex:1"><div class="mini-label">年龄</div><div class="mini-input">55</div></div>
+                    <div style="flex:1"><div class="mini-label">性别</div><div class="mini-input">男</div></div>
+                    <div style="flex:1"><div class="mini-label">APACHE II</div><div class="mini-input">18</div></div>
+                  </div>
+                </div>
+                <div class="mini-card" style="flex:1">
+                  <div class="mini-risk">
+                    <div class="mini-label">中风险</div>
+                    <div class="mini-risk-num">42.3%</div>
+                  </div>
+                </div>
+              </div>
+              <div class="mini-card">
+                <table class="mini-table">
+                  <tr><th>特征</th><th>SHAP</th><th>影响</th></tr>
+                  <tr><td>术前 eGFR</td><td>-0.082</td><td>保护</td></tr>
+                  <tr><td>APACHE II</td><td>+0.076</td><td>危险</td></tr>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Style C -->
+    <div class="style-card style-c" data-choice="c" onclick="selectStyle(this, 'C. 深色临床')">
+      <div class="style-header">
+        <div class="style-title">C. 深色临床</div>
+        <div class="style-desc">深色 navy 主题 + 高对比度文字，适合长时间盯屏的 ICU/手术室场景，降低视觉疲劳</div>
+      </div>
+      <div class="mock-container">
+        <div class="mini-app">
+          <div class="mini-sidebar">
+            <div class="mini-nav active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg> 首页</div>
+            <div class="mini-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg> 性能</div>
+            <div class="mini-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg> 预测</div>
+          </div>
+          <div class="mini-main">
+            <div class="mini-topbar">AKI 风险预测 | 王医生</div>
+            <div class="mini-content">
+              <div class="mini-row">
+                <div class="mini-card" style="flex:2">
+                  <div class="mini-label">患者信息</div>
+                  <div class="mini-row" style="margin-bottom:0;margin-top:4px">
+                    <div style="flex:1"><div class="mini-label">年龄</div><div class="mini-input">55</div></div>
+                    <div style="flex:1"><div class="mini-label">性别</div><div class="mini-input">男</div></div>
+                    <div style="flex:1"><div class="mini-label">APACHE II</div><div class="mini-input">18</div></div>
+                  </div>
+                </div>
+                <div class="mini-card" style="flex:1">
+                  <div class="mini-risk">
+                    <div class="mini-label">中风险</div>
+                    <div class="mini-risk-num">42.3%</div>
+                  </div>
+                </div>
+              </div>
+              <div class="mini-card">
+                <table class="mini-table">
+                  <tr><th>特征</th><th>SHAP</th><th>影响</th></tr>
+                  <tr><td>术前 eGFR</td><td>-0.082</td><td>保护</td></tr>
+                  <tr><td>APACHE II</td><td>+0.076</td><td>危险</td></tr>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="selection-bar">
+    <div class="hint">当前选择：<span class="selected-name" id="selected-name">未选择</span></div>
+    <div class="hint">点击上方卡片选择风格</div>
+  </div>
+
+  <script>
+    function selectStyle(el, name) {
+      document.querySelectorAll('.style-card').forEach(c => c.classList.remove('selected'));
+      el.classList.add('selected');
+      document.getElementById('selected-name').textContent = name;
+    }
+  </script>
+</body>
+</html>

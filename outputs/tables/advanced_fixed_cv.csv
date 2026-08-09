@@ -1,0 +1,8 @@
+﻿配置,CV折数,AUC均值,AUC标准差
+LogisticRegression,25,0.7928,0.0457
+RandomForest,25,0.8051,0.0376
+XGBoost,25,0.7999,0.0435
+ExtraTrees,25,0.795,0.0396
+Voting,25,0.807,0.0433
+Stacking,25,0.7741,0.0415
+Blending,25,0.7994,0.0402

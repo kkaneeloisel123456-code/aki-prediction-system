@@ -1,0 +1,57 @@
+<h2>AKI 预测系统前端重做：布局方案</h2>
+<p class="subtitle">面向临床医生的专业 HIS/EMR 风格。请选择一种整体导航与页面结构。</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>经典 EMR 侧边栏</h3>
+      <p>左侧固定导航 + 顶部患者/全局信息栏 + 右侧主工作区。信息层级清晰，医生可快速切换模块，适合高频操作。</p>
+      <div class="mockup" style="margin-top:10px">
+        <div class="mockup-header" style="font-size:0.75rem">顶部：患者ID | 当前科室 | 用户</div>
+        <div style="display:flex;height:120px">
+          <div class="mock-sidebar" style="width:25%;font-size:0.7rem">🏠 首页<br>📊 模型性能<br>🔮 风险预测<br>🏥 医生工作台<br>📊 管理仪表盘<br>📋 报告<br>🔍 数据治理</div>
+          <div class="mock-content" style="width:75%;font-size:0.7rem">主工作区（表单 / 图表 / 表格）</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>三栏临床工作站</h3>
+      <p>左侧导航 + 中间患者列表/操作面板 + 右侧实时结果/解释。适合医生工作台和风险预测页，强调“录入→结果→解释”的连贯工作流。</p>
+      <div class="mockup" style="margin-top:10px">
+        <div style="display:flex;height:120px">
+          <div class="mock-sidebar" style="width:18%;font-size:0.65rem">导航</div>
+          <div class="mock-content" style="width:42%;font-size:0.65rem">患者列表 / 输入表单</div>
+          <div class="mock-content" style="width:40%;font-size:0.65rem;background:#f0f4f8">风险结果 / SHAP / 建议</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>仪表盘卡片布局</h3>
+      <p>顶部 KPI 卡片 + 下方可拖拽/可折叠的内容卡片。信息密度最高，适合管理仪表盘和模型性能页，但表单页需要额外整理。</p>
+      <div class="mockup" style="margin-top:10px">
+        <div style="display:flex;gap:5px;margin-bottom:5px">
+          <div class="placeholder" style="flex:1;font-size:0.6rem">KPI 1</div>
+          <div class="placeholder" style="flex:1;font-size:0.6rem">KPI 2</div>
+          <div class="placeholder" style="flex:1;font-size:0.6rem">KPI 3</div>
+          <div class="placeholder" style="flex:1;font-size:0.6rem">KPI 4</div>
+        </div>
+        <div style="display:flex;gap:5px;height:90px">
+          <div class="placeholder" style="flex:1;font-size:0.6rem">图表卡片</div>
+          <div class="placeholder" style="flex:1;font-size:0.6rem">图表卡片</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>推荐</h3>
+  <p><strong>方案 A（经典 EMR 侧边栏）</strong>作为主框架，在“风险预测”和“医生工作台”页局部采用方案 B 的三栏思想，在“管理仪表盘”和“模型性能”页采用方案 C 的卡片密度。这样既有统一导航，又能按场景优化布局。</p>
+</div>

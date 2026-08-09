@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Data (sensitive / generated)
+data/raw/
+data/processed/
+data/tables/
+
+# Backup files (sed/editor)
+*.bak
+*.bak2
+*.bak3
+
+# Large outputs
+outputs.zip
+outputs/reports/
+*.pdf
+
+# Patient-level detail (keep repo public-safe)
+outputs/tables/aki_logic_validation_flags.csv
+outputs/tables/wave2_uncertainty_patients.csv
+
+# Temp / IDE
+outputs/tmp_gauge.png
+catboost_info/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+outputs/tables/clinical_range_flags.csv
+
+# Full-stack (React + FastAPI)
+frontend/node_modules/
+frontend/dist/
+backend/__pycache__/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Archived legacy code
+_archive_streamlit/
+
+# React backup (Vue replaced it)
+frontend/src_react_backup/
+
+# Frontend build output
+frontend/dist/
+
+# Python caches
+**/__pycache__/
+*.pyc
+
+# Backend
+backend/__pycache__/
+
+# Logs / temp
+*.log
+/tmp/

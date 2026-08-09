@@ -1,0 +1,2 @@
+﻿检验,chi2,自由度,P值,测试集样本数,测试集事件数,模型,说明
+Hosmer-Lemeshow,12.053,8,0.1489,84,25,"LogisticRegression(C=0.02, balanced) 在20%测试集上的近似检验",n≈84，样本量小，仅供参考

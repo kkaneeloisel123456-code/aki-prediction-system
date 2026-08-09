@@ -1,0 +1,51 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "typeCheckingMode": "basic",
+  "include": [
+    "backend",
+    "src",
+    "tests",
+    "run_clean.py",
+    "run_advanced.py",
+    "run_wave2.py",
+    "run_p1.py",
+    "run_evaluation.py",
+    "run_bonus.py",
+    "scripts"
+  ],
+  "exclude": [
+    "**/.git",
+    "**/__pycache__",
+    "**/node_modules",
+    "_archive_streamlit",
+    "frontend",
+    "frontend/src_react_backup",
+    "outputs"
+  ],
+  "ignore": [
+    "src/data/cleaning.py",
+    "src/data/eda.py",
+    "src/data/features.py",
+    "src/models/cross_validate.py",
+    "src/models/train.py",
+    "src/models/evaluate.py",
+    "src/models/ablation.py",
+    "src/models/ensemble.py",
+    "src/models/temporal.py",
+    "src/visualization/plots.py",
+    "src/visualization/roc_pr.py",
+    "src/visualization/shap_viz.py",
+    "src/visualization/data_governance.py"
+  ],
+  "reportMissingModuleSource": "none",
+  "reportAttributeAccessIssue": "warning",
+  "reportArgumentType": "warning",
+  "reportCallIssue": "warning",
+  "reportIndexIssue": "warning",
+  "reportOperatorIssue": "warning",
+  "reportPossiblyUnboundVariable": "error",
+  "reportUndefinedVariable": "error",
+  "reportSelfClsParameterName": "error",
+  "reportAssertAlwaysTrue": "error"
+}

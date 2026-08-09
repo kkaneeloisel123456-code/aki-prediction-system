@@ -1,0 +1,3 @@
+﻿配置,CV折数,AUC均值,AUC标准差
+baseline_no_interaction,15,0.8065,0.0484
+with_6_clinical_interactions,15,0.807,0.0476
