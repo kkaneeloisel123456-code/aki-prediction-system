@@ -68,3 +68,11 @@ backend/__pycache__/
 # Logs / temp
 *.log
 /tmp/
+
+# Removed legacy/proto items
+frontend-v2/
+.streamlit/
+.superpowers/
+runtime.txt
+__pycache__/
+*.pyc

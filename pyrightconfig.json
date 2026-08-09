@@ -18,9 +18,7 @@
     "**/.git",
     "**/__pycache__",
     "**/node_modules",
-    "_archive_streamlit",
     "frontend",
-    "frontend/src_react_backup",
     "outputs"
   ],
   "ignore": [
