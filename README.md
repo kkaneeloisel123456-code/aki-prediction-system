@@ -17,6 +17,10 @@
 
 也可以手动运行，见下方“快速开始”。
 
+**在线预览（GitHub Pages）**：https://kkaneeloisel123456-code.github.io/aki-prediction-system/
+这是与 API 分离的静态网站地址，可在 GitHub 上直接打开；首次使用需在仓库
+Settings -> Pages 中选择 “GitHub Actions” 作为发布源，Actions 会自动完成部署。
+
 ---
 
 ## 在 GitHub 上打开 Web（GitHub Pages / 静态托管）
