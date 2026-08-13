@@ -17,25 +17,21 @@
 
 也可以手动运行，见下方“快速开始”。
 
-**在线预览（GitHub Pages）**：https://kkaneeloisel123456-code.github.io/aki-prediction-system/
-这是与 API 分离的静态网站地址，可在 GitHub 上直接打开；首次使用需在仓库
-Settings -> Pages 中选择 “GitHub Actions” 作为发布源，Actions 会自动完成部署。
-
 ---
 
-## 在 GitHub 上打开 Web（GitHub Pages / 静态托管）
+## 在线部署（FastAPI 后端 + 前端一体）
 
-前端已经与 API 解耦，可以独立发布到 GitHub Pages：
+部署后一个公网地址同时提供网站和 API，评委直接打开即可使用真实模型预测，无需本机运行。
+仓库已内置 `Dockerfile`、`render.yaml` 和 `railway.toml`，可在任一平台一键部署：
 
-- 构建时用 `VITE_API_BASE` 指定后端地址（例如 `VITE_API_BASE=https://api.example.com npm run build`）；
-- 运行时也可以在页面加载前设置 `window.AKI_API_BASE`，优先级高于构建时的配置；
-- 不设置时默认与前端同源，即本地由 FastAPI 托管时直接访问 `http://localhost:8000`。
+- **Render**：New -> Blueprint -> 选择本仓库（自动读取 `render.yaml`），部署完成后访问
+  `https://aki-prediction-system.onrender.com`（具体域名以部署结果为准）。
+- **Railway**：New Project -> Deploy from GitHub -> 选择本仓库（自动读取 `railway.toml`）。
+- 也可以在任何支持 Docker 的平台构建本仓库的 `Dockerfile` 后运行。
 
-仓库已内置 `.github/workflows/deploy-frontend.yml`：推送到 `main` 后会自动构建
-`frontend/dist` 并发布到 GitHub Pages。前端页面可以独立打开；预测、PDF 等接口需要
-把 `VITE_API_BASE`（仓库变量 `VITE_API_BASE`）指向已部署的 FastAPI 后端。
-
-> 提示：首次使用需在仓库 Settings -> Pages 中选择 “GitHub Actions” 作为发布源。
+部署使用 `app_data/` 下已训练好的模型工件（非 Git-LFS），不需要训练数据即可运行；
+健康检查地址为 `/api/health`。前端已支持可选的 `VITE_API_BASE` / `window.AKI_API_BASE`
+配置，缺省时与后端同源，一体部署无需额外设置。
 
 ---
 

@@ -48,45 +48,27 @@ if errorlevel 1 (
     echo [2/5] Backend dependencies found.
 )
 
-rem ---------- Install frontend deps if missing ----------
-if not exist "frontend\node_modules" (
-    echo [3/5] Installing frontend dependencies, please wait...
-    pushd frontend
-    call npm install
-    set "NPM_ERR=!errorlevel!"
-    popd
-    if not "!NPM_ERR!"=="0" ( echo [ERROR] npm install failed. & pause & exit /b 1 )
-) else (
-    echo [3/5] Frontend dependencies found.
+rem ---------- Use prebuilt frontend if available (no Node.js needed) ----------
+if exist "frontend\dist\index.html" (
+    echo [3/5] Using prebuilt frontend. Skipping npm install/build.
+    goto start_server
 )
 
-rem ---------- Build frontend (skip if dist is newer than all sources) ----------
-set "NEED_BUILD=0"
-if not exist "frontend\dist\index.html" (
-    set "NEED_BUILD=1"
-) else (
-    rem Find newest source file under frontend/src
-    set "NEWEST_SRC=0"
-    for /f "delims=" %%F in ('dir /b /s /a-d "frontend\src\*" 2^>nul') do (
-        if "%%~tF" gtr "!NEWEST_SRC!" set "NEWEST_SRC=%%~tF"
-    )
-    set "DIST_TIME=0"
-    for %%F in ("frontend\dist\index.html") do set "DIST_TIME=%%~tF"
-    if "!NEWEST_SRC!" gtr "!DIST_TIME!" set "NEED_BUILD=1"
-)
-if "!NEED_BUILD!"=="0" (
-    echo [4/5] Frontend up-to-date. Skipping rebuild.
-) else (
-    echo [4/5] Building frontend...
-    pushd frontend
-    call npm run build
-    set "BUILD_ERR=!errorlevel!"
-    popd
-    if not "!BUILD_ERR!"=="0" ( echo [ERROR] Frontend build failed. & pause & exit /b 1 )
-)
+rem ---------- Build frontend from source (requires Node.js) ----------
+echo [3/5] Prebuilt frontend not found, building from source...
+pushd frontend
+call npm install
+set "NPM_ERR=!errorlevel!"
+if "!NPM_ERR!"=="0" call npm run build
+set "BUILD_ERR=!errorlevel!"
+popd
+if not "!NPM_ERR!"=="0" ( echo [ERROR] npm install failed. & pause & exit /b 1 )
+if not "!BUILD_ERR!"=="0" ( echo [ERROR] Frontend build failed. & pause & exit /b 1 )
+
+:start_server
 
 rem ---------- Start server & open browser when it is ready ----------
-echo [5/5] Starting server...
+echo [4/5] Starting server...
 echo.
 echo ============================================
 echo   App will open at:  http://localhost:8000
