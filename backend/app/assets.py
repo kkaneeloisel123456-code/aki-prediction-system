@@ -46,6 +46,16 @@ def load_assets() -> Dict[str, Any]:
     if named is not None and "XGBoost" in named:
         shap_model = named["XGBoost"]
 
+    # Validate consistency between the feature list and the imputation dictionary.
+    # A mismatch means deployment artifacts are out of sync — fail fast rather
+    # than silently filling model features with 0.0 at inference time.
+    missing = [f for f in features if f not in impute_values]
+    if missing:
+        raise RuntimeError(
+            f"impute_values.json is missing medians for features: {missing}. "
+            "Re-run training or copy a complete impute_values.json into app_data/."
+        )
+
     return {
         "model": model,
         "scaler": scaler,

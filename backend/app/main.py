@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import io
 import logging
-from typing import Any, Dict, List
+import math
+import re
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
-from pydantic import BaseModel
+from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from . import predictor
 from .assets import load_assets
@@ -27,10 +30,44 @@ from .schemas import (
 logger = logging.getLogger("aki_backend")
 logging.basicConfig(level=logging.INFO)
 
+
+def _safe_join(base: Path, name: str) -> Path:
+    """Join name under base and prevent path traversal.
+
+    Raises HTTP 404 if the resolved path escapes base. Only a single path
+    segment (filename) is accepted.
+    """
+    if not name or "/" in name or "\\" in name or name in (".", ".."):
+        raise HTTPException(status_code=404, detail="Not found")
+    candidate = (base / name).resolve()
+    base_resolved = base.resolve()
+    try:
+        candidate.relative_to(base_resolved)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Not found")
+    return candidate
+
+
+def _safe_filename(pid: Optional[str]) -> str:
+    """Sanitize a patient ID for safe use in a Content-Disposition filename."""
+    if not pid:
+        return "patient"
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", pid)[:64]
+
+
+@asynccontextmanager
+async def _lifespan(application: FastAPI):  # noqa: ARG001
+    """Load model assets once at startup; fail fast if critical files are missing."""
+    load_assets()
+    logger.info("Model assets loaded.")
+    yield
+
+
 app = FastAPI(
     title="AKI Prediction API",
     version="1.0.0",
     description="急性肾损伤预测：单患者/批量预测、SHAP解释、PDF报告。",
+    lifespan=_lifespan,
 )
 
 app.add_middleware(
@@ -40,16 +77,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-def _warmup() -> None:
-    """Load models at startup so the first request isn't slow."""
-    try:
-        load_assets()
-        logger.info("Model assets loaded.")
-    except Exception as exc:
-        logger.error("Failed to load assets: %s", exc)
 
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -73,7 +100,11 @@ def predict_single(req: PredictRequest) -> PredictResponse:
 def predict_batch(rows: List[Dict[str, Any]]) -> BatchPredictResponse:
     if not rows:
         raise HTTPException(status_code=400, detail="rows must not be empty")
-    results = [PredictResponse(**predictor.predict(r)) for r in rows]
+    results = []
+    for i, r in enumerate(rows):
+        pid = r.get("ID") or r.get("patient_id") or i + 1
+        out = predictor.predict(r, patient_id=str(pid))
+        results.append(PredictResponse(**out))
     return BatchPredictResponse(count=len(results), results=results)
 
 
@@ -89,14 +120,34 @@ def features() -> FeaturesResponse:
     )
 
 
+@app.get("/api/data/imputation")
+def data_imputation() -> Dict[str, Any]:
+    """Return each feature's training-phase imputation median.
+
+    Used by the data-governance page to let users look up which features
+    have imputation values (i.e., which features had missing values in the
+    training cohort and were median-filled before model training).
+    """
+    assets = load_assets()
+    rows = [
+        {"feature": feat, "median": assets["impute_values"].get(feat)}
+        for feat in assets["features"]
+    ]
+    return {"count": len(rows), "features": rows}
+
+
 @app.post("/api/report/pdf")
 def report_pdf(req: PredictRequest) -> Response:
     result = predictor.predict(req.features, patient_id=req.patient_id)
+    if req.override_prob is not None:
+        result["probability"] = req.override_prob
+        result["risk_level"] = predictor.risk_band(req.override_prob)
     pdf_bytes = generate_pdf(
         {"id": req.patient_id or "N/A", "age": req.features.get("年龄")},
         result,
     )
-    filename = f"AKI_Report_{req.patient_id or 'patient'}.pdf"
+    safe = _safe_filename(req.patient_id)
+    filename = f"AKI_Report_{safe}.pdf"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -105,20 +156,40 @@ def report_pdf(req: PredictRequest) -> Response:
 
 
 @app.post("/api/predict/csv")
-async def predict_csv(file: UploadFile = File(...)) -> StreamingResponse:
-    """Upload a CSV; one prediction per row; columns are feature names."""
+def predict_csv(file: UploadFile = File(...)) -> StreamingResponse:
+    """Upload a CSV; one prediction per row; columns are feature names.
+
+    Synchronous `def` so FastAPI runs it in the threadpool (the per-row
+    predict() call is CPU-bound). Non-numeric cells are treated as missing
+    and median-filled by the predictor; an optional ``ID`` column is echoed
+    back as ``patient_id``.
+    """
     try:
-        raw = await file.read()
-        df = pd.read_csv(io.BytesIO(raw))
+        raw = file.file.read()
+        # utf-8-sig transparently strips a BOM so the first column name is
+        # not mangled when Excel exports a UTF-8 CSV.
+        df = pd.read_csv(io.BytesIO(raw), encoding="utf-8-sig")
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"CSV parse failed: {exc}")
 
     rows = df.to_dict(orient="records")
     results = []
     for i, row in enumerate(rows):
-        # NaN -> missing (median-filled by predictor)
-        clean = {k: (None if pd.isna(v) else v) for k, v in row.items()}
-        r = predictor.predict(clean, patient_id=str(clean.get("ID", i + 1)))
+        pid = row.get("ID", row.get("patient_id", i + 1))
+        clean: Dict[str, Optional[float]] = {}
+        for k, v in row.items():
+            if not isinstance(k, str) or k in ("ID", "patient_id"):
+                continue
+            # NaN -> None; non-numeric strings -> None (median-filled by predictor)
+            if pd.isna(v):
+                clean[k] = None
+                continue
+            try:
+                fv = float(v)
+                clean[k] = None if math.isnan(fv) or math.isinf(fv) else fv
+            except (TypeError, ValueError):
+                clean[k] = None
+        r = predictor.predict(clean, patient_id=str(pid), explain=False)
         results.append({
             "patient_id": r["patient_id"],
             "probability": round(r["probability"], 4),
@@ -126,14 +197,21 @@ async def predict_csv(file: UploadFile = File(...)) -> StreamingResponse:
             "prediction": r["prediction"],
         })
 
-    out = io.StringIO()
+    # Write to BytesIO with utf-8-sig so Excel on Windows reads Chinese correctly.
+    out = io.BytesIO()
     pd.DataFrame(results).to_csv(out, index=False, encoding="utf-8-sig")
     out.seek(0)
     return StreamingResponse(
         iter([out.getvalue()]),
-        media_type="text/csv",
+        media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="AKI_predictions.csv"'},
     )
+
+
+def _read_csv_records(path: Path) -> List[Dict[str, Any]]:
+    """Read a CSV and return records with NaN replaced by None (JSON-safe)."""
+    df = pd.read_csv(path)
+    return df.where(pd.notna(df), None).to_dict(orient="records")
 
 
 @app.get("/api/performance")
@@ -144,31 +222,24 @@ def performance() -> Dict[str, Any]:
 
     cv = tables / "final_cv_results.csv"
     if cv.exists():
-        df = pd.read_csv(cv)
-        data["cv"] = df.to_dict(orient="records")
+        data["cv"] = _read_csv_records(cv)
 
     cal = tables / "calibration_metrics.csv"
     if cal.exists():
-        df = pd.read_csv(cal)
-        data["calibration"] = df.to_dict(orient="records")
+        data["calibration"] = _read_csv_records(cal)
 
     summary = tables / "model_summary_clean.csv"
     if summary.exists():
-        df = pd.read_csv(summary)
-        data["summary"] = df.to_dict(orient="records")
+        data["summary"] = _read_csv_records(summary)
 
     hl = tables / "HL检验.csv"
     if hl.exists():
-        df = pd.read_csv(hl)
-        data["hosmer_lemeshow"] = df.to_dict(orient="records")
+        data["hosmer_lemeshow"] = _read_csv_records(hl)
 
     return data
 
 
 # --- Outputs: figures, tables, and the synthetic workstation cohort -----
-from pathlib import Path
-from fastapi.responses import FileResponse
-
 _FIG_DIR = OUTPUTS_DIR / "figures"
 _TAB_DIR = OUTPUTS_DIR / "tables"
 _P1_FIG = OUTPUTS_DIR / "p1"
@@ -182,16 +253,21 @@ def list_figures() -> List[str]:
     for d in (_FIG_DIR, _P1_FIG, _PHASE3_FIG):
         if d.exists():
             names.update(p.name for p in d.glob("*.png"))
+            names.update(p.name for p in d.glob("*.jpg"))
+            names.update(p.name for p in d.glob("*.jpeg"))
     return sorted(names)
 
 
 @app.get("/api/figures/{name}")
 def get_figure(name: str):
-    """Serve a PNG figure from outputs (first match wins)."""
+    """Serve a PNG or JPG figure from outputs (first match wins)."""
+    ext = Path(name).suffix.lower()
+    media_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
+    media_type = media_map.get(ext, "image/png")
     for d in (_FIG_DIR, _P1_FIG, _PHASE3_FIG):
-        candidate = d / name
-        if candidate.exists() and candidate.is_file():
-            return FileResponse(str(candidate), media_type="image/png")
+        candidate = _safe_join(d, name)
+        if candidate.is_file():
+            return FileResponse(str(candidate), media_type=media_type)
     raise HTTPException(status_code=404, detail=f"Figure {name} not found")
 
 
@@ -205,16 +281,38 @@ def list_tables() -> List[str]:
 @app.get("/api/tables/{name}")
 def get_table(name: str) -> Response:
     """Return a table as JSON (CSV/JSON converted) or raw text."""
-    candidate = _TAB_DIR / name
-    if not candidate.exists():
+    candidate = _safe_join(_TAB_DIR, name)
+    if not candidate.is_file():
         raise HTTPException(status_code=404, detail=f"Table {name} not found")
     if name.endswith(".csv"):
         df = pd.read_csv(candidate)
-        return Response(df.to_json(orient="records", force_ascii=False),
-                        media_type="application/json")
+        # na_rep="null" keeps the output valid JSON when cells are empty.
+        body = df.to_json(orient="records", force_ascii=False, na_rep="null")
+        return Response(body, media_type="application/json")
     if name.endswith(".json"):
         return FileResponse(str(candidate), media_type="application/json")
     return Response(candidate.read_text(encoding="utf-8"), media_type="text/plain")
+
+
+@app.get("/api/template.csv")
+def download_template():
+    """CSV with the 35 feature column names for batch prediction (UTF-8 BOM)."""
+    import csv
+    assets = load_assets()
+    buf = io.BytesIO()
+    # Write BOM + text so Excel on Windows opens Chinese column names correctly.
+    buf.write(b"\xef\xbb\xbf")
+    text_buf = io.StringIO()
+    w = csv.writer(text_buf)
+    w.writerow(assets["features"])
+    w.writerow([assets["impute_values"].get(f, "") for f in assets["features"]])
+    buf.write(text_buf.getvalue().encode("utf-8"))
+    buf.seek(0)
+    return Response(
+        buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="AKI_prediction_template.csv"'},
+    )
 
 
 @app.get("/api/meta")
@@ -227,7 +325,9 @@ def app_meta() -> Dict[str, Any]:
         df = pd.read_csv(cv_csv)
         auc_col = "50次CV AUC均值" if "50次CV AUC均值" in df.columns else "AUC"
         if auc_col in df.columns:
-            best_auc = float(df[auc_col].max())
+            value = df[auc_col].max()
+            if pd.notna(value):
+                best_auc = float(value)
     return {
         "n_features": len(assets["features"]),
         "n_models": 5,
@@ -241,10 +341,10 @@ def app_meta() -> Dict[str, Any]:
 def workstation_cohort() -> Dict[str, Any]:
     """Synthetic 20-patient cohort (seed=42), predicted by the real model.
 
-    Mirrors streamlit_app.page_doctor_workstation; demo data only.
+    Demo data only — not real patients.
     """
-    import numpy as np
-    rng = np.random.RandomState(42)
+    import random
+    rng = random.Random(42)
     n = 20
     surgery_types = [
         "心脏瓣膜手术", "冠状动脉旁路移植术", "联合手术",
@@ -252,26 +352,62 @@ def workstation_cohort() -> Dict[str, Any]:
     ]
     patients = []
     for i in range(n):
-        age = int(rng.randint(25, 85))
-        scr = round(float(rng.uniform(50, 180)), 1)
-        egfr = round(max(15.0, 120 - age * 0.8 + float(rng.normal(0, 10))), 1)
-        apache = int(rng.randint(5, 35))
-        surgery = str(rng.choice(surgery_types))
+        age    = rng.randint(45, 81)
         sex = "男" if rng.choice([True, False]) else "女"
+        surgery = rng.choice(surgery_types)
+        apache = rng.randint(8, 29)
+        # Pre-op values (clinically plausible, correlated with age)
+        pre_scr  = round(rng.uniform(60, 130), 1)
+        pre_egfr = round(max(35.0, 110 - age * 0.55 + rng.gauss(0, 12)), 1)
+        pre_bnp  = round(max(50.0, 300 + (age - 55) * 18 + rng.gauss(0, 250)), 1)
+        pre_hstn = round(max(2.0, 8 + (age - 55) * 0.25 + rng.gauss(0, 6)), 2)
+        pre_wbc  = round(max(3.5, 7 + rng.gauss(0, 2)), 2)
+        # ICU admission values — the model's top drivers; vary widely so the
+        # cohort shows a realistic mix of low / medium / high risk.
+        icu_scr  = round(max(45.0, pre_scr * rng.uniform(0.8, 2.6) + rng.gauss(0, 12)), 1)
+        icu_egfr = round(max(10.0, pre_egfr * rng.uniform(0.4, 1.15) + rng.gauss(0, 8)), 1)
+        # Post-op biomarkers (elevated in AKI)
+        post_lac = round(max(0.8, 2.5 + (icu_scr - pre_scr) * 0.04 + rng.gauss(0, 1.6)), 2)
+        post_b2m = round(max(1.0, 1.5 + (icu_scr - pre_scr) * 0.025 + rng.gauss(0, 0.9)), 2)
+        post_mb  = round(max(100.0, 250 + rng.gauss(0, 180) + (post_lac - 2.5) * 80), 1)
+        post_urea= round(max(3.0, 5.0 + (icu_scr - pre_scr) * 0.05 + rng.gauss(0, 2.5)), 2)
+        post_alb = round(min(42.0, 33 - (post_lac - 2.5) * 0.8 + rng.gauss(0, 2)), 1)
+        post_be  = round(max(-10.0, -2.5 - (post_lac - 2.5) * 1.2 + rng.gauss(0, 1.5)), 2)
+        post_hstn= round(max(50.0, pre_hstn * rng.uniform(1.5, 8) + rng.gauss(0, 200)), 1)
+        surg_time = int(max(120.0, rng.gauss(290, 90)))
+        blood_loss= int(max(100.0, rng.gauss(400, 250)))
+        crystalloid=int(max(200.0, rng.gauss(600, 250)))
         features = {
             "年龄": float(age),
             "性别": 1.0 if sex == "男" else 2.0,
-            "术前Scr": scr,
-            "术前eGFR": egfr,
+            "术前Scr": pre_scr,
+            "术前eGFR": pre_egfr,
+            "术前BNP": pre_bnp,
+            "术前hsTn": pre_hstn,
+            "术前WBC": pre_wbc,
             "APACHEII": float(apache),
+            "ICUAdmSCr": icu_scr,
+            "ICUAdmeGFR": icu_egfr,
+            "术后Lactate": post_lac,
+            "术后β2MG": post_b2m,
+            "术后Mb": post_mb,
+            "术后Urea": post_urea,
+            "术后Alb": post_alb,
+            "术后BE": post_be,
+            "术后hsTn": post_hstn,
+            "手术时间": float(surg_time),
+            "术中失血量": float(blood_loss),
+            "术中晶体液量": float(crystalloid),
         }
-        pred = predictor.predict(features)
+        pred = predictor.predict(features, explain=False)
         patients.append({
             "id": f"P{1001+i:04d}",
             "age": age, "sex": sex, "surgery": surgery,
-            "preScr": scr, "preEgfr": egfr, "apache": apache,
+            "preScr": pre_scr, "preEgfr": pre_egfr, "apache": apache,
             "probability": pred["probability"],
             "riskLevel": pred["risk_level"],
+            # Full feature vector so "查看" can pre-fill the prediction form.
+            "features": features,
         })
     high = sum(1 for p in patients if p["riskLevel"] == "高")
     mid = sum(1 for p in patients if p["riskLevel"] == "中")
@@ -284,7 +420,7 @@ def workstation_cohort() -> Dict[str, Any]:
 
 @app.get("/api/dashboard/demo")
 def dashboard_demo() -> Dict[str, Any]:
-    """Hard-coded demo data for the management dashboard (mirrors Streamlit)."""
+    """Hard-coded demo data for the management dashboard (not real statistics)."""
     return {
         "trend": {
             "months": ["2025-09","2025-10","2025-11","2025-12","2026-01",
@@ -303,14 +439,89 @@ def dashboard_demo() -> Dict[str, Any]:
     }
 
 
-# --- Serve the built React frontend in production (MUST be last) -----
+
+def _data_types() -> dict:
+    """Count dtypes across ALL columns in the data dictionary (98 columns)."""
+    counts = {"float64": 0, "int64": 0, "object": 0}
+    dd = _TAB_DIR / "data_dictionary.csv"
+    if dd.exists():
+        try:
+            ddf = pd.read_csv(dd)
+            type_col = next((c for c in ddf.columns if "类型" in c), None)
+            if type_col:
+                for t in ddf[type_col].astype(str):
+                    if "int" in t: counts["int64"] += 1
+                    elif "float" in t or "数值" in t: counts["float64"] += 1
+                    else: counts["object"] += 1
+                return counts
+        except Exception:
+            pass
+    return counts
+
+
+@app.get("/api/data/quality")
+def data_quality_dashboard() -> Dict[str, Any]:
+    """Serve data quality metrics for the interactive dashboard frontend."""
+    assets = load_assets()
+    n_features = len(assets["features"])
+    # Real stats from the training cohort (420 patients, 125 AKI / 295 non-AKI)
+    missing_rates: list = []
+    total_missing_cells = 0
+    if _TAB_DIR.exists():
+        dd = _TAB_DIR / "data_dictionary.csv"
+        if dd.exists():
+            try:
+                ddf = pd.read_csv(dd)
+                name_col = ddf.columns[0]
+                miss_col = next((c for c in ddf.columns if "缺失" in c), None)
+                if miss_col:
+                    for _, r in ddf.iterrows():
+                        try:
+                            v = float(str(r[miss_col]).replace("%", ""))
+                            if v > 0:
+                                missing_rates.append({"feature": str(r[name_col]), "rate": round(v, 1)})
+                        except (ValueError, TypeError):
+                            pass
+                    missing_rates.sort(key=lambda x: -x["rate"])
+                    total_missing_cells = sum(x["rate"] for x in missing_rates)
+                    missing_rates = missing_rates[:6]
+            except Exception:
+                pass
+    completeness_rates = [
+        {"feature": r["feature"], "rate": round(100 - r["rate"], 1)}
+        for r in missing_rates
+    ]
+    total_cells = 420 * 98
+    completeness_pct = round(100 - total_missing_cells / max(total_cells, 1) * 100, 1)
+    return {
+        "stats": {
+            "samples": 420,
+            "features": n_features,
+            "missingRate": f"{round(total_missing_cells / max(420 * n_features,1) * 100, 1)}%",
+            "completeness": f"{completeness_pct}%",
+            "duplicates": 0
+        },
+        "missingRates": missing_rates,
+        "completenessRates": completeness_rates,
+        "classBalance": {"aki": 125, "nonAki": 295},
+        "dataTypes": _data_types()
+    }
+
+
+# --- Serve the built Vue frontend in production (MUST be last) -----
 _FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 if _FRONTEND_DIST.exists():
-    from fastapi.responses import FileResponse as _FileResponse
-
     @app.get("/{full_path:path}", include_in_schema=False)
     def _spa(full_path: str):
-        candidate = _FRONTEND_DIST / full_path
+        # Unknown /api/* routes must return JSON 404, not the SPA index.html
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        # Only serve files that resolve inside frontend/dist (block path traversal)
+        candidate = (_FRONTEND_DIST / full_path).resolve()
+        try:
+            candidate.relative_to(_FRONTEND_DIST.resolve())
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Not Found")
         if full_path and candidate.is_file():
-            return _FileResponse(candidate)
-        return _FileResponse(_FRONTEND_DIST / "index.html")
+            return FileResponse(candidate)
+        return FileResponse(_FRONTEND_DIST / "index.html")

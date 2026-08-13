@@ -2,6 +2,7 @@
   "venvPath": ".",
   "venv": ".venv",
   "typeCheckingMode": "basic",
+  "extraPaths": ["backend"],
   "include": [
     "backend",
     "src",

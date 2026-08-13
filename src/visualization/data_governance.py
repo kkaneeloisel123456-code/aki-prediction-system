@@ -569,15 +569,16 @@ def create_data_quality_dashboard(
             f"{df.isnull().sum().sum() / (len(df) * len(df.columns)) * 100:.2f}%",
             f"{df[target_col].mean() * 100:.1f}%" if target_col in df.columns else "N/A",
             f"{df['年龄'].mean():.1f}" if "年龄" in df.columns else "N/A",
-            f"{df['性别'].value_counts(normalize=True).get(1, 0) * 100:.1f}%"
+            f"{(df['性别'].astype(str).str.strip() == '男').mean() * 100:.1f}%"
             if "性别" in df.columns else "N/A",
         ],
     }
     stats_df = pd.DataFrame(stats_data)
 
-    # Render as table
+    # matplotlib >=3.8 rejects a DataFrame as cellText when colLabels is also
+    # supplied, so pass the plain 2-D list of values.
     table = ax_stats.table(
-        cellText=stats_df,
+        cellText=stats_df.values.tolist(),
         colLabels=list(stats_df.columns.astype(str)),
         cellLoc="left",
         loc="center",

@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """P1 实验 1-4（仓库根目录内执行：python run_p1.py）
 1) 临床基线对比：Thakar简化 / STS简化 / 临床LR(仅术前+术中) vs Voting，DeLong 检验（标准算法）
 2) Top8/Top12 精简模型（LR/Ridge）同一5折x10嵌套CV口径
@@ -178,9 +178,10 @@ for n_feat in [8, 12, 35]:
 pd.DataFrame(res3).to_csv(os.path.join(OUT, 'topN_reduced_models.csv'), index=False, encoding='utf-8-sig')
 
 # ---------- 3) DCA 阈值 + 成本效益 ----------
-from sklearn.isotonic import IsotonicRegression
-iso = IsotonicRegression(out_of_bounds='clip')
-cal_oof = iso.fit(voting_oof, y).predict(voting_oof)
+# NOTE: use raw OOF predictions for threshold decisions. The previous
+# iso.fit(voting_oof,y).predict(voting_oof) self-fit leaked the outcome
+# and inflated DCA net benefit. Use cross-fitted calibration if needed.
+cal_oof = voting_oof
 prev = y.mean()
 res4 = []
 for t in np.arange(0.05, 0.55, 0.05):
@@ -205,15 +206,18 @@ try:
     import torch  # type: ignore[import-not-found]
     from pytorch_tabnet.tab_model import TabNetClassifier  # type: ignore[import-not-found]
     print('torch', torch.__version__, '| pytorch_tabnet OK')
-    imp = SimpleImputer(strategy='median'); sc = StandardScaler()
-    Xn = sc.fit_transform(imp.fit_transform(X)).astype(np.float32)
     rskf25 = RepeatedStratifiedKFold(n_splits=5, n_repeats=5, random_state=42)
     tab_aucs = []; vot_aucs25 = []
-    for k, (tr, te) in enumerate(rskf25.split(Xn, y), 1):
+    for k, (tr, te) in enumerate(rskf25.split(X, y), 1):
+        # Fold-contained preprocessing: fit imputer/scaler on the training fold
+        # only, so TabNet and Voting use the same leakage-free input.
+        imp = SimpleImputer(strategy='median'); sc = StandardScaler()
+        Xtr = np.asarray(sc.fit_transform(imp.fit_transform(X.iloc[tr]))).astype(np.float32)
+        Xte = np.asarray(sc.transform(imp.transform(X.iloc[te]))).astype(np.float32)
         clf = TabNetClassifier(n_d=8, n_a=8, n_steps=3, gamma=1.5, lambda_sparse=0,
                                verbose=0, seed=42, device_name='cpu')
-        clf.fit(Xn[tr], y[tr], eval_set=[(Xn[te], y[te])], max_epochs=100, patience=15, batch_size=32, drop_last=False)
-        tab_aucs.append(roc_auc_score(y[te], clf.predict_proba(Xn[te])[:, 1]))
+        clf.fit(Xtr, y[tr], eval_set=[(Xte, y[te])], max_epochs=100, patience=15, batch_size=32, drop_last=False)
+        tab_aucs.append(roc_auc_score(y[te], clf.predict_proba(Xte)[:, 1]))
         pipe = build_honest_pipeline(make_voting())
         pipe.fit(X.iloc[tr], y[tr])
         vot_aucs25.append(roc_auc_score(y[te], pipe.predict_proba(X.iloc[te])[:, 1]))

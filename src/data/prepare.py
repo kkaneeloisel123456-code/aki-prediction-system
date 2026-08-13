@@ -210,7 +210,7 @@ def save_app_data(
     impute_values: Dict[str, float],
     app_data_dir: str = 'app_data',
 ) -> None:
-    """Write the deployment copies used by the Streamlit app."""
+    """Write the deployment copies (app_data/) loaded by the FastAPI backend."""
     import json
     from pathlib import Path
 

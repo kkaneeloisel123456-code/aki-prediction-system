@@ -28,6 +28,10 @@ from datetime import datetime
 from src.config import TARGET, is_leakage
 from src.data.prepare import prepare_raw_numeric, prepare_training_data, save_app_data
 
+# Ensure all output / artifact directories exist before any save.
+for _d in ('outputs/figures', 'outputs/tables', 'models', 'app_data'):
+    os.makedirs(_d, exist_ok=True)
+
 print("=" * 65)
 print("  AKI 急性肾损伤智能预测系统 —— 最终优化版")
 print(f"  开始: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -40,7 +44,15 @@ print("\n" + "=" * 65)
 print("  模块1：数据加载 + 泄漏特征排除")
 print("=" * 65)
 
-df = pd.read_excel('data/raw/AKI数据.xlsx')
+_DATA_PATH = 'data/raw/AKI数据.xlsx'
+if not os.path.exists(_DATA_PATH):
+    raise SystemExit(
+        f"[ERROR] 找不到原始数据文件: {_DATA_PATH}\n"
+        "训练脚本需要受控环境中的临床数据，公开仓库不随包分发。\n"
+        "请将 AKI数据.xlsx 放到 data/raw/ 后重新运行。"
+    )
+
+df = pd.read_excel(_DATA_PATH)
 print(f"原始数据: {len(df)} 人 x {len(df.columns)} 列")
 
 prep = prepare_training_data(df)

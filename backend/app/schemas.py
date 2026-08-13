@@ -20,6 +20,10 @@ class PredictRequest(BaseModel):
     patient_id: Optional[str] = Field(
         default=None, description="Optional label echoed back in the response."
     )
+    override_prob: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="Optional override for the final probability (used for UI demo mocks). Must be in [0, 1].",
+    )
 
 
 class ShapContribution(BaseModel):
@@ -55,6 +59,10 @@ class FeatureMeta(BaseModel):
     name: str
     median: float
     timing: str  # preop / intraop / icu / postop
+    label: str | None = None
+    unit: str | None = None
+    reference: str | None = None
+    input: str | None = "number"
 
 
 class FeaturesResponse(BaseModel):

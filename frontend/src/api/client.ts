@@ -2,7 +2,14 @@ import type { FeaturesResponse, HealthResponse, PerformanceResponse, PredictResp
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`
+    try {
+      const body = await res.json()
+      if (body?.detail) detail = String(body.detail)
+    } catch { /* keep default message */ }
+    throw new Error(detail)
+  }
   return res.json() as Promise<T>
 }
 
@@ -16,16 +23,28 @@ export const api = {
   figures: () => request<string[]>('/api/figures'),
   figureUrl: (name: string) => `/api/figures/${encodeURIComponent(name)}`,
   tables: () => request<string[]>('/api/tables'),
-  tableData: (name: string) => fetch(`/api/tables/${encodeURIComponent(name)}`).then(r => r.json()),
+  tableData: (name: string) => request<any>(`/api/tables/${encodeURIComponent(name)}`),
   cohort: () => request<CohortResponse>('/api/workstation/cohort'),
   dashboard: () => request<DashboardDemo>('/api/dashboard/demo'),
-  reportPdf: async (features: Record<string, number>) => {
-    const res = await fetch('/api/report/pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ features }) })
-    if (!res.ok) throw new Error('PDF failed')
+  imputation: () => request<{ count: number; features: Array<{ feature: string; median: number | null }> }>('/api/data/imputation'),
+  dataQuality: () => request<any>('/api/data/quality'),
+  reportPdf: async (features: Record<string, number>, patientId?: string, overrideProb?: number) => {
+    const res = await fetch('/api/report/pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ features, patient_id: patientId, override_prob: overrideProb }) })
+    if (!res.ok) throw new Error(`PDF 生成失败 (${res.status})`)
     return res.blob()
   },
-  csvUpload: (file: File) => {
-    const form = new FormData(); form.append('file', file)
-    return fetch('/api/predict/csv', { method: 'POST', body: form }).then(r => r.blob())
+  csvUpload: async (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch('/api/predict/csv', { method: 'POST', body: form })
+    if (!res.ok) {
+      let detail = `CSV 处理失败 (${res.status})`
+      try {
+        const body = await res.json()
+        if (body?.detail) detail = String(body.detail)
+      } catch { /* keep default message */ }
+      throw new Error(detail)
+    }
+    return res.blob()
   },
 }
