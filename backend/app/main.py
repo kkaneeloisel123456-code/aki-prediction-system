@@ -466,6 +466,7 @@ def data_quality_dashboard() -> Dict[str, Any]:
     n_features = len(assets["features"])
     # Real stats from the training cohort (420 patients, 125 AKI / 295 non-AKI)
     missing_rates: list = []
+    missing_counts: list = []
     total_missing_cells = 0
     if _TAB_DIR.exists():
         dd = _TAB_DIR / "data_dictionary.csv"
@@ -479,12 +480,15 @@ def data_quality_dashboard() -> Dict[str, Any]:
                         try:
                             v = float(str(r[miss_col]).replace("%", ""))
                             if v > 0:
-                                missing_rates.append({"feature": str(r[name_col]), "rate": round(v, 1)})
+                                missing_counts.append((str(r[name_col]), v))
                         except (ValueError, TypeError):
                             pass
-                    missing_rates.sort(key=lambda x: -x["rate"])
-                    total_missing_cells = sum(x["rate"] for x in missing_rates)
-                    missing_rates = missing_rates[:6]
+                    missing_counts.sort(key=lambda x: -x[1])
+                    total_missing_cells = sum(c for _, c in missing_counts)
+                    missing_rates = [
+                        {"feature": name, "rate": round(count / 420 * 100, 1)}
+                        for name, count in missing_counts[:6]
+                    ]
             except Exception:
                 pass
     completeness_rates = [
@@ -497,7 +501,7 @@ def data_quality_dashboard() -> Dict[str, Any]:
         "stats": {
             "samples": 420,
             "features": n_features,
-            "missingRate": f"{round(total_missing_cells / max(420 * n_features,1) * 100, 1)}%",
+            "missingRate": f"{round(total_missing_cells / max(total_cells, 1) * 100, 1)}%",
             "completeness": f"{completeness_pct}%",
             "duplicates": 0
         },

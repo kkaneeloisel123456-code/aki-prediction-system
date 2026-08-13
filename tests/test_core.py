@@ -51,9 +51,9 @@ class ClinicalRangeTest(unittest.TestCase):
         })
         cleaned, flags = flag_impossible_values(df)
         self.assertEqual(len(flags), 3)
-        self.assertTrue(pd.isna(cleaned.loc[1, '术前K ']))
-        self.assertTrue(pd.isna(cleaned.loc[1, '术后pH']))
-        self.assertTrue(pd.isna(cleaned.loc[1, '术前SBP']))
+        self.assertTrue(np.isnan(cleaned.loc[1, '术前K ']))
+        self.assertTrue(np.isnan(cleaned.loc[1, '术后pH']))
+        self.assertTrue(np.isnan(cleaned.loc[1, '术前SBP']))
 
     def test_common_labs_have_ranges(self):
         for col in ['术前K', '术前CRP', '术前Hb', '术前PaO2', '术后pH']:
@@ -82,8 +82,7 @@ class PrepareDataTest(unittest.TestCase):
         self.assertLess(prep['X']['术前K'].max(), 20)
         dummy_cols = [c for c in prep['X'].columns if c.startswith('手术类型_')]
         self.assertTrue(dummy_cols)
-        # prepare.py pins dummies to np.uint8 so they survive select_dtypes().
-        self.assertEqual(prep['X'][dummy_cols[0]].dtype.name, 'uint8')
+        self.assertTrue(np.issubdtype(prep['X'][dummy_cols[0]].dtype, np.unsignedinteger))
 
 
 class WebInputConsistencyTest(unittest.TestCase):

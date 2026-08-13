@@ -1,0 +1,22 @@
+# 精确版本锁定（Python 3.14.2 全量复跑验证；Python 3.11 开发容器基线一致）
+# 安装：pip install -r requirements_lock.txt
+fastapi==0.141.1
+uvicorn[standard]==0.52.1
+pydantic==2.13.4
+python-multipart==0.0.32
+pandas==3.0.5
+numpy==2.4.3
+scipy==1.18.0
+openpyxl==3.1.5
+matplotlib==3.10.8
+seaborn==0.13.2
+plotly==6.9.0
+scikit-learn==1.9.0
+xgboost==3.3.0
+imbalanced-learn==0.14.2
+shap==0.52.0
+fpdf2==2.8.7
+joblib==1.5.3
+tqdm==4.68.4
+statsmodels==0.14.6
+optuna==4.9.0

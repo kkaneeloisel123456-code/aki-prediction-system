@@ -24,7 +24,7 @@ class AdvancedBenchmarkTest(unittest.TestCase):
         X = pd.DataFrame(rng.randn(60, 6), columns=[f'f{i}' for i in range(6)])
         y = pd.Series(rng.randint(0, 2, size=60))
         selector = ra.build_selector('top35')
-        selector.fit(np.asarray(X), np.asarray(y))
+        selector.fit(X.values, y.values)
         count = ra.count_selected_features(selector, X.iloc[:1])
         self.assertGreater(count, 0)
         self.assertLessEqual(count, 6)
@@ -44,8 +44,8 @@ class AdvancedBenchmarkTest(unittest.TestCase):
             inner_cv=2,
             random_state=42,
         )
-        blender.fit(np.asarray(X), np.asarray(y))
-        proba = blender.predict_proba(np.asarray(X))
+        blender.fit(X.values, y.values)
+        proba = blender.predict_proba(X.values)
         self.assertEqual(proba.shape[1], 2)
         self.assertTrue(np.all((proba >= 0) & (proba <= 1)))
 

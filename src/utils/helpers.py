@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib
-import matplotlib.font_manager as fm
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -55,7 +54,7 @@ def setup_chinese_font():
     for font_path in [r"C:\Windows\Fonts\simhei.ttf", r"C:\Windows\Fonts\msyh.ttc"]:
         try:
             if os.path.exists(font_path):
-                fm.fontManager.addfont(font_path)
+                matplotlib.font_manager.fontManager.addfont(font_path)
         except Exception:
             pass
     chinese_fonts = ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS',
@@ -63,7 +62,7 @@ def setup_chinese_font():
 
     for font in chinese_fonts:
         try:
-            fm.findfont(font, fallback_to_default=False)
+            matplotlib.font_manager.findfont(font, fallback_to_default=False)
             plt.rcParams['font.sans-serif'] = [font, 'DejaVu Sans']
             plt.rcParams['axes.unicode_minus'] = False
             logger.info(f"Using font: {font}")

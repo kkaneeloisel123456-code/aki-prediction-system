@@ -28,7 +28,6 @@ import os, sys
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
 matplotlib.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
 matplotlib.rcParams['axes.unicode_minus'] = False
 
@@ -422,7 +421,7 @@ def plot_risk_trajectory(models_dict, patient_X, patient_features,
         Patch(facecolor='#f39c12', alpha=0.2, label='Medium-High (40-70%)'),
         Patch(facecolor='#e74c3c', alpha=0.2, label='High Risk (>70%)'),
     ]
-    ax.legend(handles=[Line2D([0], [0], color='#2c3e50', linewidth=3,
+    ax.legend(handles=[plt.Line2D([0], [0], color='#2c3e50', linewidth=3,
                                   marker='o', markersize=8, markerfacecolor='white')]
               + legend_elements,
               loc='upper left', fontsize=8)

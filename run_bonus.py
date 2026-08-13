@@ -88,7 +88,7 @@ except Exception as e1:
     print(f"  Method1 standard fit failed ({e1}), using ridge-regularized fallback")
     try:
         logit_res = sm.Logit(y, X_sm).fit_regularized(
-            alpha=0.01, L1_wt=0, disp=False, maxiter=1000)  # type: ignore[arg-type]
+            alpha=0.01, L1_wt=0, disp=False, maxiter=1000)
     except Exception as e2:
         print(f"  Method1 fallback also failed: {e2}")
         logit_res = None
@@ -157,7 +157,7 @@ n_groups = 10
 edges = np.percentile(y_prob, np.linspace(0, 100, n_groups+1))
 edges[0] = 0; edges[-1] = 1.01
 
-chi_sq = 0.0  # float: chi-squared is continuous; also lets round() type-check
+chi_sq = 0
 hl_rows = []
 for i in range(n_groups):
     mask = (y_prob >= edges[i]) & (y_prob < edges[i+1])
@@ -169,7 +169,7 @@ for i in range(n_groups):
     hl_rows.append({'组': i+1, '样本数': int(n_g), '观测阳性': int(obs), '期望阳性': round(exp, 1)})
 
 from scipy.stats import chi2
-p_hl = float(1 - chi2.cdf(chi_sq, n_groups - 2))
+p_hl = 1 - chi2.cdf(chi_sq, n_groups - 2)
 pd.DataFrame(hl_rows).to_csv(f'{OUT}/tables/HL检验.csv', index=False, encoding='utf-8-sig')
 verdict_hl = 'no significant miscalibration (P>=0.05)' if p_hl >= 0.05 else 'calibration differs (P<0.05)'
 print(f"  chi2={chi_sq:.2f}, P={p_hl:.4f} -> {verdict_hl}")

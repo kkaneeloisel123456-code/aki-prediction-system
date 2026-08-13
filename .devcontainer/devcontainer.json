@@ -20,7 +20,7 @@
       ]
     }
   },
-  "postCreateCommand": "pip install --user -r backend/requirements.txt && (cd frontend && npm install)",
+  "postCreateCommand": "pip install --user -r backend/requirements.txt && (cd frontend && npm install && npm run build)",
   "postAttachCommand": {
     "server": "uvicorn backend.app.main:app --host 0.0.0.0 --port 8000"
   },

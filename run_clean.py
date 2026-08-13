@@ -28,10 +28,6 @@ from datetime import datetime
 from src.config import TARGET, is_leakage
 from src.data.prepare import prepare_raw_numeric, prepare_training_data, save_app_data
 
-# Ensure all output / artifact directories exist before any save.
-for _d in ('outputs/figures', 'outputs/tables', 'models', 'app_data'):
-    os.makedirs(_d, exist_ok=True)
-
 print("=" * 65)
 print("  AKI 急性肾损伤智能预测系统 —— 最终优化版")
 print(f"  开始: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -44,15 +40,7 @@ print("\n" + "=" * 65)
 print("  模块1：数据加载 + 泄漏特征排除")
 print("=" * 65)
 
-_DATA_PATH = 'data/raw/AKI数据.xlsx'
-if not os.path.exists(_DATA_PATH):
-    raise SystemExit(
-        f"[ERROR] 找不到原始数据文件: {_DATA_PATH}\n"
-        "训练脚本需要受控环境中的临床数据，公开仓库不随包分发。\n"
-        "请将 AKI数据.xlsx 放到 data/raw/ 后重新运行。"
-    )
-
-df = pd.read_excel(_DATA_PATH)
+df = pd.read_excel('data/raw/AKI数据.xlsx')
 print(f"原始数据: {len(df)} 人 x {len(df.columns)} 列")
 
 prep = prepare_training_data(df)
@@ -157,7 +145,7 @@ fig_corr.patch.set_facecolor('#F8F9FA')
 ax_corr.set_facecolor('#F8F9FA')
 mask = np.triu(np.ones_like(corr_matrix, dtype=bool), k=1)
 cmap = sns.diverging_palette(250, 15, s=75, l=40, n=256, center='light')
-sns.heatmap(corr_matrix, mask=mask, cmap=cmap, center=0,  # type: ignore[arg-type]
+sns.heatmap(corr_matrix, mask=mask, cmap=cmap, center=0,
             annot=True, fmt='.2f', linewidths=0.3,
             annot_kws={'size': 6.5},
             cbar_kws={'shrink': 0.6, 'label': 'Pearson r'},
@@ -176,9 +164,7 @@ print("  [OK] correlation_heatmap.png")
 pairs = []
 for i in range(len(corr_matrix.columns)):
     for j in range(i+1, len(corr_matrix.columns)):
-        # .iloc scalar is typed as the wide pandas Scalar union; a Pearson
-        # correlation is always a real float, so cast it explicitly.
-        r = float(corr_matrix.iloc[i, j])  # type: ignore[arg-type]
+        r = corr_matrix.iloc[i, j]
         pairs.append({'Var1': corr_matrix.columns[i], 'Var2': corr_matrix.columns[j],
                       'Correlation': r, 'AbsCorr': abs(r)})
 pairs_df = pd.DataFrame(pairs).sort_values('AbsCorr', ascending=False).head(15)
@@ -189,10 +175,7 @@ print(f"  [OK] high_correlation_pairs.csv (Top: {pairs_df.iloc[0]['Var1']} vs {p
 from scipy import stats
 target_corr = []
 for feat in top_features:
-    # scipy stubs type pearsonr as a generic tuple even though it returns
-    # (r, p) scalars; pull them out via numpy to get concrete floats.
-    r_arr, p_arr = np.asarray(stats.pearsonr(X_corr[feat], y_series))[:2]
-    r, p = float(r_arr), float(p_arr)
+    r, p = stats.pearsonr(X_corr[feat], y_series)
     sig = '***' if p < 0.001 else ('**' if p < 0.01 else ('*' if p < 0.05 else 'ns'))
     direction = '+' if r > 0 else '-'
     target_corr.append({'Feature': feat, 'Pearson_r': round(r, 4), 'P_value': round(p, 4),
@@ -484,8 +467,8 @@ ax.set_xlabel('False Positive Rate (1 - Specificity)', fontsize=13)
 ax.set_ylabel('True Positive Rate (Sensitivity)', fontsize=13)
 ax.set_title('ROC Curves — 5-Fold CV OOF Predictions', fontsize=14, fontweight='bold')
 ax.legend(loc='lower right', fontsize=10, framealpha=0.85, edgecolor='#CCCCCC')
-ax.set_xlim((-0.02, 1.02))
-ax.set_ylim((-0.02, 1.02))
+ax.set_xlim([-0.02, 1.02])
+ax.set_ylim([-0.02, 1.02])
 ax.grid(True, alpha=0.3, linewidth=0.5, color='#CCCCCC')
 ax.spines['top'].set_visible(False)
 ax.spines['right'].set_visible(False)
@@ -529,7 +512,7 @@ ax_roc.set_xlabel('False Positive Rate', fontsize=12)
 ax_roc.set_ylabel('True Positive Rate', fontsize=12)
 ax_roc.set_title('ROC Curves', fontsize=14, fontweight='bold')
 ax_roc.legend(loc='lower right', fontsize=8, framealpha=0.85)
-ax_roc.set_xlim((-0.02, 1.02)); ax_roc.set_ylim((-0.02, 1.02))
+ax_roc.set_xlim([-0.02, 1.02]); ax_roc.set_ylim([-0.02, 1.02])
 ax_roc.grid(True, alpha=0.3, linewidth=0.5)
 ax_roc.spines['top'].set_visible(False); ax_roc.spines['right'].set_visible(False)
 
@@ -566,7 +549,7 @@ ax_pr.set_xlabel('Recall (Sensitivity)', fontsize=12)
 ax_pr.set_ylabel('Precision (PPV)', fontsize=12)
 ax_pr.set_title('Precision-Recall Curves', fontsize=14, fontweight='bold')
 ax_pr.legend(loc='lower left', fontsize=8, framealpha=0.85)
-ax_pr.set_xlim((-0.02, 1.02)); ax_pr.set_ylim((-0.02, 1.02))
+ax_pr.set_xlim([-0.02, 1.02]); ax_pr.set_ylim([-0.02, 1.02])
 ax_pr.grid(True, alpha=0.3, linewidth=0.5)
 ax_pr.spines['top'].set_visible(False); ax_pr.spines['right'].set_visible(False)
 
@@ -604,7 +587,7 @@ ax3.set_xlabel('Recall (Sensitivity)', fontsize=13)
 ax3.set_ylabel('Precision (Positive Predictive Value)', fontsize=13)
 ax3.set_title('Precision-Recall Curves — 5-Fold CV OOF Predictions', fontsize=14, fontweight='bold')
 ax3.legend(loc='lower left', fontsize=10, framealpha=0.85, edgecolor='#CCCCCC')
-ax3.set_xlim((-0.02, 1.02)); ax3.set_ylim((-0.02, 1.02))
+ax3.set_xlim([-0.02, 1.02]); ax3.set_ylim([-0.02, 1.02])
 ax3.grid(True, alpha=0.3, linewidth=0.5, color='#CCCCCC')
 ax3.spines['top'].set_visible(False); ax3.spines['right'].set_visible(False)
 ax3.spines['left'].set_color('#999999'); ax3.spines['bottom'].set_color('#999999')
@@ -642,17 +625,18 @@ for idx, name in enumerate(model_order):
     cm = confusion_matrix(y, y_pred)
     cm_norm = cm.astype('float') / cm.sum(axis=1, keepdims=True).clip(min=1)
 
-    # Display
+    # Display (hide sklearn's built-in decimals to avoid overlapping text)
     disp = ConfusionMatrixDisplay(confusion_matrix=cm_norm, display_labels=['Non-AKI', 'AKI'])
-    disp.plot(ax=ax, cmap=plt.cm.Blues, colorbar=False, values_format='.2f')
+    disp.plot(ax=ax, cmap=plt.cm.Blues, colorbar=False, include_values=False)
 
-    # Overlay raw counts
+    # Overlay percentage and raw count as two separate lines
     for i in range(2):
         for j in range(2):
-            ax.text(j, i, f'{cm_norm[i,j]:.1%}\n(n={cm[i,j]})',
-                    ha='center', va='center', fontsize=9,
-                    color='white' if cm_norm[i,j] > 0.5 else '#333333',
-                    fontweight='bold')
+            color = 'white' if cm_norm[i, j] > 0.5 else '#333333'
+            ax.text(j, i - 0.15, f'{cm_norm[i, j]:.0%}', ha='center', va='center',
+                    fontsize=12, fontweight='bold', color=color)
+            ax.text(j, i + 0.15, f'n = {cm[i, j]}', ha='center', va='center',
+                    fontsize=9, color=color)
 
     # Label with model name + metrics
     tn, fp, fn, tp = cm.ravel()
@@ -716,7 +700,7 @@ for idx, name in enumerate(model_order):
     ax.set_xlabel('Predicted Probability', fontsize=10, color='#666666')
     ax.set_ylabel('Observed Proportion', fontsize=10, color='#666666')
     ax.legend(loc='lower right', fontsize=7.5, framealpha=0.85)
-    ax.set_xlim((-0.02, 1.02)); ax.set_ylim((-0.02, 1.02))
+    ax.set_xlim([-0.02, 1.02]); ax.set_ylim([-0.02, 1.02])
     ax.grid(True, alpha=0.3, linewidth=0.5)
     ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False)
 
@@ -762,7 +746,7 @@ ax6.set_xlabel('Predicted Probability', fontsize=13)
 ax6.set_ylabel('Observed Proportion', fontsize=13)
 ax6.set_title('Calibration Curves — Overlay Comparison', fontsize=14, fontweight='bold')
 ax6.legend(loc='lower right', fontsize=9, framealpha=0.85, edgecolor='#CCCCCC')
-ax6.set_xlim((-0.02, 1.02)); ax6.set_ylim((-0.02, 1.02))
+ax6.set_xlim([-0.02, 1.02]); ax6.set_ylim([-0.02, 1.02])
 ax6.grid(True, alpha=0.3, linewidth=0.5, color='#CCCCCC')
 ax6.spines['top'].set_visible(False); ax6.spines['right'].set_visible(False)
 ax6.spines['left'].set_color('#999999'); ax6.spines['bottom'].set_color('#999999')
@@ -985,7 +969,7 @@ ax_sub.set_yticks(y_pos)
 ax_sub.set_yticklabels(labels, fontsize=10)
 ax_sub.set_xlabel('AKI Incidence (%)', fontsize=12)
 ax_sub.set_title('Subgroup Analysis — AKI Risk Stratification (Voting Ensemble, OOF)', fontsize=13, fontweight='bold')
-ax_sub.set_xlim((0, max(rates) * 1.15))
+ax_sub.set_xlim([0, max(rates) * 1.15])
 ax_sub.grid(axis='x', alpha=0.3)
 ax_sub.spines['top'].set_visible(False); ax_sub.spines['right'].set_visible(False)
 
@@ -1058,8 +1042,8 @@ ax_dca.set_xlabel('Threshold Probability', fontsize=13)
 ax_dca.set_ylabel('Net Benefit', fontsize=13)
 ax_dca.set_title('Decision Curve Analysis — Voting Ensemble with 95% CI', fontsize=14, fontweight='bold')
 ax_dca.legend(loc='upper right', fontsize=10, framealpha=0.85, edgecolor='#CCCCCC')
-ax_dca.set_xlim((0, 1))
-ax_dca.set_ylim((-0.05, None))
+ax_dca.set_xlim([0, 1])
+ax_dca.set_ylim([-0.05, None])
 ax_dca.grid(True, alpha=0.3, linewidth=0.5, color='#CCCCCC')
 ax_dca.spines['top'].set_visible(False); ax_dca.spines['right'].set_visible(False)
 ax_dca.spines['left'].set_color('#999999'); ax_dca.spines['bottom'].set_color('#999999')
@@ -1097,33 +1081,7 @@ try:
 except Exception as e:
     print(f"  [WARN] Data quality dashboard skipped: {e}")
 
-# ── CV ROC 置信带（5模型 OOF ROC + 95% CI）──
-fig_cv, ax_cv = plt.subplots(figsize=(10, 8))
-fig_cv.patch.set_facecolor('#F8F9FA')
-ax_cv.set_facecolor('#F8F9FA')
-
-for name in model_order:
-    r = roc_results[name]
-    cv_mean = all_results[name]['mean']
-    cv_std = all_results[name]['std']
-    lw = 3.0 if name == 'Voting Ensemble' else 1.8
-    ax_cv.plot(r['fpr'], r['tpr'], color=model_colors[name], lw=lw,
-               label=f'{name} (AUC={cv_mean:.3f}±{cv_std:.3f})')
-
-ax_cv.plot([0, 1], [0, 1], 'k--', lw=1, alpha=0.35)
-ax_cv.set_xlabel('False Positive Rate', fontsize=13)
-ax_cv.set_ylabel('True Positive Rate', fontsize=13)
-ax_cv.set_title('CV ROC Curves with 95% CI — 50x Repeated 5-fold CV', fontsize=13, fontweight='bold')
-ax_cv.legend(loc='lower right', fontsize=9, framealpha=0.85)
-ax_cv.set_xlim((-0.02, 1.02)); ax_cv.set_ylim((-0.02, 1.02))
-ax_cv.grid(True, alpha=0.3)
-for spine in ['top','right']: ax_cv.spines[spine].set_visible(False)
-fig_cv.tight_layout()
-fig_cv.savefig('outputs/figures/cv_roc_with_ci.png', dpi=300, bbox_inches='tight')
-plt.close(fig_cv)
-print(f"  [OK] CV ROC with CI saved -> outputs/figures/cv_roc_with_ci.png")
-
-# ── Bootstrap AUC 分布（对 OOF 预测按患者重采样 1000 次）──
+# Bootstrap 95% CI for Voting Ensemble (OOF, n=1000)
 rng_bt = np.random.default_rng(42)
 y_arr = np.asarray(y)
 oof_arr = np.asarray(y_prob_voting_oof)
@@ -1135,11 +1093,41 @@ bt_aucs = np.clip(bt_aucs, 0, 1)
 bootstrap_auc_mean = float(bt_aucs.mean())
 ci_lo, ci_hi = np.percentile(bt_aucs, [2.5, 97.5])
 
+# ── CV ROC 置信带（5模型 OOF ROC + 95% CI）──
+fig_cv, ax_cv = plt.subplots(figsize=(10, 8))
+fig_cv.patch.set_facecolor('#F8F9FA')
+ax_cv.set_facecolor('#F8F9FA')
+
+for name in model_order:
+    r = roc_results[name]
+    cv_mean = all_results[name]['mean']
+    cv_std = all_results[name]['std']
+    lw = 3.0 if name == 'Voting Ensemble' else 1.8
+    if name == 'Voting Ensemble':
+        label = (f'{name} (AUC={cv_mean:.4f}±{cv_std:.4f}, '
+                 f'Bootstrap 95% CI: {ci_lo:.3f}–{ci_hi:.3f})')
+    else:
+        label = f'{name} (AUC={cv_mean:.4f}±{cv_std:.4f})'
+    ax_cv.plot(r['fpr'], r['tpr'], color=model_colors[name], lw=lw, label=label)
+
+ax_cv.plot([0, 1], [0, 1], 'k--', lw=1, alpha=0.35)
+ax_cv.set_xlabel('False Positive Rate', fontsize=13)
+ax_cv.set_ylabel('True Positive Rate', fontsize=13)
+ax_cv.set_title('CV ROC Curves with 95% CI — 50x Repeated 5-fold CV', fontsize=13, fontweight='bold')
+ax_cv.legend(loc='lower right', fontsize=9, framealpha=0.85)
+ax_cv.set_xlim([-0.02, 1.02]); ax_cv.set_ylim([-0.02, 1.02])
+ax_cv.grid(True, alpha=0.3)
+for spine in ['top','right']: ax_cv.spines[spine].set_visible(False)
+fig_cv.tight_layout()
+fig_cv.savefig('outputs/figures/cv_roc_with_ci.png', dpi=300, bbox_inches='tight')
+plt.close(fig_cv)
+print(f"  [OK] CV ROC with CI saved -> outputs/figures/cv_roc_with_ci.png")
+
+# ── Bootstrap AUC 分布（对 OOF 预测按患者重采样 1000 次）──
 fig_bt, ax_bt = plt.subplots(figsize=(9, 6))
 fig_bt.patch.set_facecolor('#F8F9FA')
 ax_bt.set_facecolor('#F8F9FA')
 ax_bt.hist(bt_aucs, bins=40, color='#1B1B1B', alpha=0.7, edgecolor='white')
-ci_lo, ci_hi = np.percentile(bt_aucs, [2.5, 97.5])
 ax_bt.axvline(ci_lo, color='#C73E1D', lw=2, ls='--', label=f'95% CI lower = {ci_lo:.3f}')
 ax_bt.axvline(ci_hi, color='#C73E1D', lw=2, ls='--', label=f'95% CI upper = {ci_hi:.3f}')
 ax_bt.axvline(bt_aucs.mean(), color='#2E86AB', lw=3, label=f'Mean = {bt_aucs.mean():.3f}')
@@ -1239,7 +1227,7 @@ for full_name, short in abl_model_map.items():
     ax_a.set_ylabel('5-fold CV AUC', fontsize=12)
     ax_a.set_title(f'Ablation Study — {full_name}', fontsize=13, fontweight='bold',
                    color=model_colors[full_name])
-    ax_a.set_ylim((0.5, 0.9))
+    ax_a.set_ylim([0.5, 0.9])
     ax_a.grid(axis='y', alpha=0.3)
     ax_a.spines['top'].set_visible(False); ax_a.spines['right'].set_visible(False)
     ax_a.spines['left'].set_color('#999999'); ax_a.spines['bottom'].set_color('#999999')

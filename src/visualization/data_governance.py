@@ -22,7 +22,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
 
@@ -70,7 +69,7 @@ plt.rcParams["axes.facecolor"] = "white"
 # ============================================================================
 
 def _draw_node(
-    ax: Axes,
+    ax: plt.Axes,
     x: float, y: float,
     width: float, height: float,
     title: str,
@@ -119,7 +118,7 @@ def _draw_node(
 
 
 def _draw_arrow(
-    ax: Axes,
+    ax: plt.Axes,
     x_from: float, y_from: float,
     x_to: float, y_to: float,
     color: str = _MUTED,
@@ -494,7 +493,7 @@ def create_data_quality_dashboard(
     if len(missing_nonzero) > 0:
         colors_miss = [_PALETTE["red"] if p > 1 else _PALETTE["yellow"]
                        for p in missing_nonzero]
-        ax_miss.barh(range(len(missing_nonzero)), np.asarray(missing_nonzero.values),
+        ax_miss.barh(range(len(missing_nonzero)), missing_nonzero.values,
                     color=colors_miss, edgecolor="white", linewidth=0.5)
         ax_miss.set_yticks(range(len(missing_nonzero)))
         ax_miss.set_yticklabels(missing_nonzero.index, fontsize=7, color=_PRIMARY_INK)
@@ -516,7 +515,7 @@ def create_data_quality_dashboard(
     colors_types = [_PALETTE["blue"], _PALETTE["aqua"], _PALETTE["yellow"],
                     _PALETTE["orange"]]
     wedges, texts, autotexts = ax_types.pie(
-        np.asarray(dtype_counts.values), labels=list(dtype_counts.index.astype(str)),
+        dtype_counts.values, labels=dtype_counts.index,
         autopct="%1.1f%%", colors=colors_types[:len(dtype_counts)],
         textprops={"fontsize": 9, "color": _PRIMARY_INK},
     )
@@ -530,9 +529,9 @@ def create_data_quality_dashboard(
         class_counts = df[target_col].value_counts().sort_index()
         labels = ["非AKI (0)", "AKI (1)"] if len(class_counts) == 2 else class_counts.index.astype(str)
         colors_class = [_PALETTE["aqua"], _PALETTE["red"]]
-        bars = ax_class.bar(labels, np.asarray(class_counts.values), color=colors_class,
+        bars = ax_class.bar(labels, class_counts.values, color=colors_class,
                            edgecolor="white", linewidth=1)
-        for bar, count in zip(bars, list(class_counts.values)):
+        for bar, count in zip(bars, class_counts.values):
             pct = count / len(df) * 100
             ax_class.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
                          f"{count}\n({pct:.1f}%)", ha="center", fontsize=10,
@@ -569,17 +568,16 @@ def create_data_quality_dashboard(
             f"{df.isnull().sum().sum() / (len(df) * len(df.columns)) * 100:.2f}%",
             f"{df[target_col].mean() * 100:.1f}%" if target_col in df.columns else "N/A",
             f"{df['年龄'].mean():.1f}" if "年龄" in df.columns else "N/A",
-            f"{(df['性别'].astype(str).str.strip() == '男').mean() * 100:.1f}%"
+            f"{df['性别'].value_counts(normalize=True).get(1, 0) * 100:.1f}%"
             if "性别" in df.columns else "N/A",
         ],
     }
     stats_df = pd.DataFrame(stats_data)
 
-    # matplotlib >=3.8 rejects a DataFrame as cellText when colLabels is also
-    # supplied, so pass the plain 2-D list of values.
+    # Render as table
     table = ax_stats.table(
-        cellText=stats_df.values.tolist(),
-        colLabels=list(stats_df.columns.astype(str)),
+        cellText=stats_df.values,
+        colLabels=stats_df.columns,
         cellLoc="left",
         loc="center",
         colWidths=[0.35, 0.25],

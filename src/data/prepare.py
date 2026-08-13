@@ -8,28 +8,12 @@ clinical range checks, and categorical encoding cannot drift between scripts.
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple, TypedDict
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
 
 from src.config import TARGET, is_leakage
-
-
-class PreparedData(TypedDict):
-    """Return type of :func:`prepare_training_data`.
-
-    Declared explicitly (instead of ``Dict[str, object]``) so callers keep
-    precise types — otherwise ``for c in prep['leaked']`` raises
-    "object is not iterable" type errors.
-    """
-
-    df_clean: pd.DataFrame
-    X: pd.DataFrame
-    y: pd.Series
-    leaked: List[str]
-    flags: pd.DataFrame
-    impute_values: Dict[str, float]
 
 
 # Clinically plausible bounds. Values outside these bounds are treated as
@@ -140,7 +124,7 @@ def flag_impossible_values(
 def prepare_training_data(
     df: pd.DataFrame,
     target: str = TARGET,
-) -> PreparedData:
+) -> Dict[str, object]:
     """Shared preprocessing for training/evaluation scripts.
 
     Returns a dict with:
@@ -157,19 +141,17 @@ def prepare_training_data(
     leaked = [c for c in df_clean.columns if is_leakage(c) and c != target]
     y = df_clean[target].copy()
     X = prepare_raw_numeric(df_clean, target=target)
-    impute_values: Dict[str, float] = {
-        str(col): float(val) for col, val in X.median().items()
-    }
+    impute_values = X.median().to_dict()
     X = X.fillna(X.median())
 
-    return PreparedData(
-        df_clean=df_clean,
-        X=X,
-        y=y,
-        leaked=leaked,
-        flags=flags,
-        impute_values=impute_values,
-    )
+    return {
+        'df_clean': df_clean,
+        'X': X,
+        'y': y,
+        'leaked': leaked,
+        'flags': flags,
+        'impute_values': impute_values,
+    }
 
 
 def prepare_raw_numeric(
@@ -192,7 +174,7 @@ def prepare_raw_numeric(
         if (
             pd.api.types.is_object_dtype(X[c])
             or pd.api.types.is_string_dtype(X[c])
-            or isinstance(X[c].dtype, pd.CategoricalDtype)
+            or pd.api.types.is_categorical_dtype(X[c])
         )
     ]
     if cat_cols:
@@ -210,7 +192,7 @@ def save_app_data(
     impute_values: Dict[str, float],
     app_data_dir: str = 'app_data',
 ) -> None:
-    """Write the deployment copies (app_data/) loaded by the FastAPI backend."""
+    """Write the deployment copies used by the Streamlit app."""
     import json
     from pathlib import Path
 

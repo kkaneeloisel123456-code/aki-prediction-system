@@ -5,12 +5,12 @@ import { api } from '../api/client'
 const meta = ref<any>(null)
 onMounted(() => api.meta().then((m: any) => { meta.value = m }).catch(() => {}))
 
-// 模型 AUC 对比数据（训练阶段固定值）
+// 模型 AUC 对比数据（与 outputs/tables/final_cv_results.csv 一致）
 const MODEL_PERF = [
-  { name: 'LR',     auc: 0.774, color: '#a78bfa' },
-  { name: 'RF',     auc: 0.789, color: '#38bdf8' },
-  { name: 'XGB',    auc: 0.782, color: '#fb923c' },
-  { name: 'ET',     auc: 0.790, color: '#4ade80' },
+  { name: 'LR',     auc: 0.794, color: '#a78bfa' },
+  { name: 'RF',     auc: 0.807, color: '#38bdf8' },
+  { name: 'XGB',    auc: 0.806, color: '#fb923c' },
+  { name: 'ET',     auc: 0.794, color: '#4ade80' },
   { name: 'Voting', auc: 0.810, color: '#38bdf8', highlight: true },
 ]
 // bar 宽度百分比（基准 0.72, 上限 0.86）
@@ -66,7 +66,7 @@ const barPct = (auc: number) =>
     <div class="kpi-card kpi-card-blue">
       <div class="kpi-label">50次嵌套 CV AUC</div>
       <div class="kpi-value">{{ meta?.best_auc ? meta.best_auc.toFixed(3) : '0.810' }}</div>
-      <div class="kpi-delta positive">均值 ± 0.045</div>
+      <div class="kpi-delta positive">均值 ± 0.043</div>
     </div>
     <div class="kpi-card kpi-card-green">
       <div class="kpi-label">集成策略</div>
