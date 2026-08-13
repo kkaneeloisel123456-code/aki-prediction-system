@@ -19,6 +19,22 @@
 
 ---
 
+## 在 GitHub 上打开 Web（GitHub Pages / 静态托管）
+
+前端已经与 API 解耦，可以独立发布到 GitHub Pages：
+
+- 构建时用 `VITE_API_BASE` 指定后端地址（例如 `VITE_API_BASE=https://api.example.com npm run build`）；
+- 运行时也可以在页面加载前设置 `window.AKI_API_BASE`，优先级高于构建时的配置；
+- 不设置时默认与前端同源，即本地由 FastAPI 托管时直接访问 `http://localhost:8000`。
+
+仓库已内置 `.github/workflows/deploy-frontend.yml`：推送到 `main` 后会自动构建
+`frontend/dist` 并发布到 GitHub Pages。前端页面可以独立打开；预测、PDF 等接口需要
+把 `VITE_API_BASE`（仓库变量 `VITE_API_BASE`）指向已部署的 FastAPI 后端。
+
+> 提示：首次使用需在仓库 Settings -> Pages 中选择 “GitHub Actions” 作为发布源。
+
+---
+
 ## 模型性能
 
 | 指标 | 数值 |

@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import Home from '../pages/HomePage.vue'
 import Performance from '../pages/PerformancePage.vue'
 import Predict from '../pages/PredictPage.vue'
@@ -18,4 +18,4 @@ const routes = [
   { path: '/governance', component: Governance, meta: { title: '数据治理' } },
   { path: '/batch', component: Batch, meta: { title: '批量预测' } },
 ]
-export default createRouter({ history: createWebHistory(), routes })
+export default createRouter({ history: createWebHashHistory(), routes })
