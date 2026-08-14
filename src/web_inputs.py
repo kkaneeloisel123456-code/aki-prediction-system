@@ -2,7 +2,7 @@
 """Single source of truth for the web prediction form's model-feature inputs."""
 
 # Every one of the 35 model features must have a corresponding input in the
-# Streamlit form.  Keeping the list here lets tests catch drift between the
+# Web form.  Keeping the list here lets tests catch drift between the
 # trained feature file and the UI.
 MODEL_FEATURE_INPUT_KEYS = [
     'ICUAdmSCr',

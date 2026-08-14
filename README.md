@@ -29,14 +29,13 @@
 
 **当前已上线地址**：https://aki-prediction-system.onrender.com
 
-- **Render**：New -> Blueprint -> 选择本仓库（自动读取 `render.yaml`），部署完成后访问
-  `https://aki-prediction-system.onrender.com`（具体域名以部署结果为准）。
+- **Render（推荐，已部署）**：
+  1. 打开 https://render.com 并登录；
+  2. New -> Blueprint -> 选择仓库 `kkaneeloisel123456-code/aki-prediction-system`，Branch 选 `main`；
+  3. Blueprint Path 留空（自动读取根目录 `render.yaml`），点击 Create Web Service；
+  4. 等待状态变为 `Live` 后，访问 `https://aki-prediction-system.onrender.com`。
 - **Railway**：New Project -> Deploy from GitHub -> 选择本仓库（自动读取 `railway.toml`）。
 - 也可以在任何支持 Docker 的平台构建本仓库的 `Dockerfile` 后运行。
-- **Streamlit Cloud（可选，需 Streamlit 账号）**：部署 `streamlit-cloud` 分支，
-  Main file 填 `streamlit_app.py`，Python 版本选 3.11，即可获得公网地址。
-  该分支是 Streamlit 界面版，使用同一套 `app_data` 模型与 v14 数字；
-  FastAPI + Vue 3 全栈版仍为仓库主版本。
 
 部署使用 `app_data/` 下已训练好的模型工件（非 Git-LFS），不需要训练数据即可运行；
 健康检查地址为 `/api/health`。前端已支持可选的 `VITE_API_BASE` / `window.AKI_API_BASE`

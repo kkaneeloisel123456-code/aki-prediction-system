@@ -1299,7 +1299,7 @@ with open('models/selected_features.txt', 'w', encoding='utf-8') as f:
     f.write('\n'.join(top_features))
 print(f"[OK] {len(top_features)} 个特征 -> models/selected_features.txt")
 
-# 同步部署文件：Streamlit 优先读取 app_data/，避免重训后网页仍用旧模型
+# 同步部署文件：Web 端优先读取 app_data/，避免重训后网页仍用旧模型
 save_app_data(voting, clean_scaler, top_features, impute_values)
 print(f"[OK] 部署文件已同步 -> app_data/ (model/scaler/features/impute_values)")
 
