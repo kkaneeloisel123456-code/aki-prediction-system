@@ -17,12 +17,17 @@
 
 也可以手动运行，见下方“快速开始”。
 
+**在线体验地址**：https://aki-prediction-system.onrender.com
+（部署在 Render，评委可直接打开；首次访问若稍慢是免费实例冷启动）
+
 ---
 
 ## 在线部署（FastAPI 后端 + 前端一体）
 
 部署后一个公网地址同时提供网站和 API，评委直接打开即可使用真实模型预测，无需本机运行。
 仓库已内置 `Dockerfile`、`render.yaml` 和 `railway.toml`，可在任一平台一键部署：
+
+**当前已上线地址**：https://aki-prediction-system.onrender.com
 
 - **Render**：New -> Blueprint -> 选择本仓库（自动读取 `render.yaml`），部署完成后访问
   `https://aki-prediction-system.onrender.com`（具体域名以部署结果为准）。
