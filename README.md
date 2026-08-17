@@ -65,7 +65,7 @@
 
 ---
 
-## 高级方法对比（Wave 1）
+## 方法对比（Wave 1）
 
 新增 `run_advanced.py`，与 `run_clean.py` 共用同一套数据准备与泄漏规则。所有实验（调参、特征选择、交互项、Stacking/Blending）都在训练折内完成，统一用嵌套 CV 报告。
 
