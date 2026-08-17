@@ -360,7 +360,7 @@ python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
 # 7. 运行一致性回归测试
 python -m unittest discover -s tests -v
 
-# 8. 高级方法对比（Optuna/Stacking/特征选择/交互项）
+# 8. 方法对比（Optuna/Stacking/特征选择/交互项）
 python run_advanced.py
 
 # 9. Wave 2：MICE/SMOTE/阈值/不确定性
