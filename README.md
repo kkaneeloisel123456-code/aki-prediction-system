@@ -346,7 +346,7 @@ python run_clean.py
 # 3. 生成比赛图表（ROC/PR/校准/DCA/SHAP）
 python run_evaluation.py
 
-# 4. 生成加分项图表（VIF+PDP+三方法交叉验证+HL）
+# 4. 生成图表（VIF+PDP+三方法交叉验证+HL）
 python run_bonus.py
 
 # 5. 生成时序风险轨迹（T0→T1→T2）
