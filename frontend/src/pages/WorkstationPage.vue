@@ -13,7 +13,8 @@ const busy      = ref(false)
 const dragging  = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 
-onMounted(() => { api.cohort().then((c: any) => cohort.value = c).catch(() => {}) })
+const loadErr = ref('')
+onMounted(() => { api.cohort().then((c: any) => cohort.value = c).catch(() => { loadErr.value = '队列加载失败，请确认后端已启动' }) })
 
 function viewPatient(p: any) {
   setSelectedPatient({
@@ -38,6 +39,7 @@ function tagClass(level: string): string {
 }
 
 async function processFile(file: File) {
+  if (busy.value) return
   busy.value = true; csvResult.value = ''
   try {
     const blob = await api.csvUpload(file)
@@ -59,10 +61,11 @@ async function onUpload(e: Event) {
 }
 function onDrop(e: DragEvent) {
   dragging.value = false
+  if (busy.value) return
   const f = e.dataTransfer?.files?.[0]
   if (f && f.name.toLowerCase().endsWith('.csv')) processFile(f)
 }
-function triggerInput() { fileInput.value?.click() }
+function triggerInput() { if (!busy.value) fileInput.value?.click() }
 </script>
 
 <template>
@@ -86,14 +89,15 @@ function triggerInput() { fileInput.value?.click() }
   </div>
 
   <div class="grid-2-1">
-    <!-- 左：患者表格 -->
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">今日待评估患者（演示队列 seed=42）</span>
-        <span class="badge badge-info">{{ cohort?.patients?.length ?? 0 }} 例</span>
-      </div>
-      <div style="overflow-x:auto">
-        <table>
+    <!-- 左：患者表格（高度跟随右列，底部与风险分布对齐，表格内部滚动） -->
+    <div class="ws-left">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">今日待评估患者（演示队列 seed=42）</span>
+          <span class="badge badge-info">{{ cohort?.patients?.length ?? 0 }} 例</span>
+        </div>
+        <div class="ws-table-scroll">
+          <table>
           <thead>
             <tr>
               <th>ID</th><th>年龄</th><th>手术类型</th>
@@ -135,7 +139,8 @@ function triggerInput() { fileInput.value?.click() }
               </td>
             </tr>
           </tbody>
-        </table>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -146,6 +151,8 @@ function triggerInput() { fileInput.value?.click() }
         <div class="card-body">
           <div class="info-box" style="margin-bottom:12px">
             上传包含患者特征的 CSV，系统逐行预测并下载结果文件。
+            <a href="/api/template.csv" download style="color:var(--primary);font-weight:600">下载模板 CSV ↓</a>
+            （35 个特征列名需与模板一致，可含 ID 列）
           </div>
           <div
             class="upload-zone"
@@ -165,14 +172,14 @@ function triggerInput() { fileInput.value?.click() }
           </div>
           <input type="file" accept=".csv" ref="fileInput" style="display:none" @change="onUpload" />
           <p v-if="busy" class="muted" style="margin-top:10px;text-align:center">⏳ 预测中，请稍候…</p>
-          <p v-else-if="csvResult" style="margin-top:10px;font-size:12px;color:var(--green);text-align:center">
+          <p v-else-if="csvResult" :style="{marginTop:'10px',fontSize:'12px',textAlign:'center',color:csvResult.startsWith('✓')?'var(--green)':'var(--red)'}">
             {{ csvResult }}
           </p>
         </div>
       </div>
 
       <!-- 风险分布小卡 -->
-      <div class="card">
+      <div class="card" style="margin-bottom:0">
         <div class="card-header"><span class="card-title">风险分布</span></div>
         <div class="card-body">
           <template v-if="cohort">
@@ -196,9 +203,34 @@ function triggerInput() { fileInput.value?.click() }
               </div>
             </div>
           </template>
+          <p v-else-if="loadErr" class="error" style="text-align:center;padding:12px">{{ loadErr }}</p>
           <p v-else class="muted" style="text-align:center">加载中…</p>
         </div>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+/* 左侧表格卡高度由右列内容决定：外层占位容器跟随网格拉伸，
+   卡片绝对定位填满，表格在有限区域内滚动 → 底边与“风险分布”对齐 */
+.ws-left { position: relative; }
+.ws-left .card {
+  position: absolute; inset: 0;
+  margin-bottom: 0;
+  display: flex; flex-direction: column;
+}
+.ws-table-scroll { flex: 1; min-height: 0; overflow: auto; }
+/* 滚动时表头固定 */
+.ws-table-scroll thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--bg-card);
+}
+
+/* 窄屏单列布局时网格不再拉伸左列，给占位容器一个保底高度
+   （表头约44px + 滚动区 420px），卡片仍绝对定位填满，避免底部空隙 */
+@media (max-width: 1100px) {
+  .ws-left { min-height: 464px; }
+  .ws-table-scroll { max-height: 420px; }
+}
+</style>

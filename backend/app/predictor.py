@@ -51,7 +51,9 @@ def build_vector(features: List[str], impute_values: Dict[str, float],
     for i, feat in enumerate(features):
         val = inputs.get(feat, None)
         if not _is_missing(val):
-            X[i] = float(val)
+            # Clamp to a clinically sane range: huge values overflow float32
+            # inside the tree models and crash with a 500.
+            X[i] = float(np.clip(float(val), -1e6, 1e6))
         else:
             X[i] = impute_values.get(feat, 0.0)
             missing.append(feat)

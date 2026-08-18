@@ -8,12 +8,30 @@ clinical range checks, and categorical encoding cannot drift between scripts.
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+import os
+import shutil
+from typing import Dict, List, Tuple, TypedDict
 
 import numpy as np
 import pandas as pd
 
 from src.config import TARGET, is_leakage
+
+
+class PreparedData(TypedDict):
+    """Return type of :func:`prepare_training_data`.
+
+    Declared explicitly (instead of ``Dict[str, object]``) so callers keep
+    precise types — otherwise ``for c in prep['leaked']`` raises
+    "object is not iterable" type errors.
+    """
+
+    df_clean: pd.DataFrame
+    X: pd.DataFrame
+    y: pd.Series
+    leaked: List[str]
+    flags: pd.DataFrame
+    impute_values: Dict[str, float]
 
 
 # Clinically plausible bounds. Values outside these bounds are treated as
@@ -124,7 +142,7 @@ def flag_impossible_values(
 def prepare_training_data(
     df: pd.DataFrame,
     target: str = TARGET,
-) -> Dict[str, object]:
+) -> PreparedData:
     """Shared preprocessing for training/evaluation scripts.
 
     Returns a dict with:
@@ -141,17 +159,19 @@ def prepare_training_data(
     leaked = [c for c in df_clean.columns if is_leakage(c) and c != target]
     y = df_clean[target].copy()
     X = prepare_raw_numeric(df_clean, target=target)
-    impute_values = X.median().to_dict()
+    impute_values: Dict[str, float] = {
+        str(col): float(val) for col, val in X.median().items()
+    }
     X = X.fillna(X.median())
 
-    return {
-        'df_clean': df_clean,
-        'X': X,
-        'y': y,
-        'leaked': leaked,
-        'flags': flags,
-        'impute_values': impute_values,
-    }
+    return PreparedData(
+        df_clean=df_clean,
+        X=X,
+        y=y,
+        leaked=leaked,
+        flags=flags,
+        impute_values=impute_values,
+    )
 
 
 def prepare_raw_numeric(
@@ -174,7 +194,7 @@ def prepare_raw_numeric(
         if (
             pd.api.types.is_object_dtype(X[c])
             or pd.api.types.is_string_dtype(X[c])
-            or pd.api.types.is_categorical_dtype(X[c])
+            or isinstance(X[c].dtype, pd.CategoricalDtype)
         )
     ]
     if cat_cols:
@@ -190,21 +210,58 @@ def save_app_data(
     scaler,
     top_features: List[str],
     impute_values: Dict[str, float],
+    calibrator=None,
     app_data_dir: str = 'app_data',
 ) -> None:
-    """Write the deployment copies used by the Web app."""
+    """Write the deployment copies loaded by the FastAPI backend.
+
+    Artifacts are written to a staging directory first and swapped in only
+    after every file is complete, so an interrupted training run can never
+    leave a mixed set (e.g. a new calibrator paired with an old model)
+    that the backend would silently load on its next restart.
+    """
     import json
     from pathlib import Path
 
     import joblib
 
     out = Path(app_data_dir)
-    out.mkdir(exist_ok=True)
-    joblib.dump(voting, out / 'final_model.joblib')
-    joblib.dump(scaler, out / 'scaler.joblib')
-    (out / 'features.txt').write_text('\n'.join(top_features), encoding='utf-8')
+    staging = out.with_name(out.name + '_staging')
+    backup = out.with_name(out.name + '_backup')
+
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
+
+    joblib.dump(voting, staging / 'final_model.joblib')
+    joblib.dump(scaler, staging / 'scaler.joblib')
+    if calibrator is not None:
+        joblib.dump(calibrator, staging / 'calibrator.joblib')
+    elif (out / 'calibrator.joblib').is_file():
+        # Keep the previously deployed calibrator rather than dropping it.
+        shutil.copy2(out / 'calibrator.joblib', staging / 'calibrator.joblib')
+    (staging / 'features.txt').write_text('\n'.join(top_features), encoding='utf-8')
     medians = {k: float(v) for k, v in impute_values.items() if k in set(top_features)}
-    (out / 'impute_values.json').write_text(
+    (staging / 'impute_values.json').write_text(
         json.dumps(medians, ensure_ascii=False, indent=2),
         encoding='utf-8',
     )
+    # Preserve non-artifact files (e.g. the app_data README) across swaps.
+    if out.is_dir():
+        for extra in out.iterdir():
+            if extra.is_file() and not (staging / extra.name).exists():
+                shutil.copy2(extra, staging / extra.name)
+
+    # Atomic swap: current -> backup, staging -> current, then drop backup.
+    if backup.exists():
+        shutil.rmtree(backup)
+    if out.exists():
+        os.replace(out, backup)
+    try:
+        os.replace(staging, out)
+    except OSError:
+        if backup.exists() and not out.exists():
+            os.replace(backup, out)  # restore the previous deployment
+        raise
+    if backup.exists():
+        shutil.rmtree(backup)

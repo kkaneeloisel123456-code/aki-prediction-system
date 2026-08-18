@@ -247,10 +247,10 @@ body {
 
 /* ── Grid layouts ───────────────────────────────────────────── */
 .grid     { display: grid; gap: 16px; }
-.grid-2   { grid-template-columns: 1fr 1fr; }
-.grid-3   { grid-template-columns: repeat(3, 1fr); }
-.grid-4   { grid-template-columns: repeat(4, 1fr); }
-.grid-2-1 { grid-template-columns: 2fr 1fr; gap: 16px; }
+.grid-2   { display: grid; grid-template-columns: 1fr 1fr; }
+.grid-3   { display: grid; grid-template-columns: repeat(3, 1fr); }
+.grid-4   { display: grid; grid-template-columns: repeat(4, 1fr); }
+.grid-2-1 { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
 @media (max-width: 1100px) { .grid-2, .grid-3, .grid-4, .grid-2-1 { grid-template-columns: 1fr; } }
 
 /* ── Table ──────────────────────────────────────────────────── */
@@ -420,3 +420,4 @@ tr:hover td { background: var(--bg-hover); }
 .mini-risk-track { width: 50px; height: 5px; background: var(--bg-inset); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
 .mini-risk-fill  { height: 100%; border-radius: 3px; transition: width .5s ease; }
 .mini-risk-val   { font-size: 11px; font-weight: 600; color: var(--text); }
+.badge-warn { background: rgba(251,191,36,.12); color: var(--yellow); border: 1px solid rgba(251,191,36,.2); }

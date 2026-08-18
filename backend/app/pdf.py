@@ -49,7 +49,11 @@ def _setup_font(pdf) -> str:
         pdf.add_font("CJK", style="", fname=str(font_path))
         pdf.add_font("CJK", style="B", fname=str(font_path))
         return "CJK"
-    return "Helvetica"
+    # Helvetica cannot render Chinese and would crash mid-report with an
+    # encoding exception - fail fast with an actionable message instead.
+    raise RuntimeError(
+        "未找到中文字体（backend/assets/fonts/*.ttf 或系统 simhei.ttf），无法生成中文 PDF。"
+    )
 
 
 def _effective_width(pdf) -> float:

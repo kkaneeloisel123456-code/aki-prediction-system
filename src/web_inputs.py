@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """Single source of truth for the web prediction form's model-feature inputs."""
 
-# Every one of the 35 model features must have a corresponding input in the
-# Web form.  Keeping the list here lets tests catch drift between the
-# trained feature file and the UI.
+# Every one of the 35 model features must be accepted by the prediction form.
+# Keeping the list here lets tests catch drift between the trained feature file
+# and the API / frontend.
 MODEL_FEATURE_INPUT_KEYS = [
     'ICUAdmSCr',
     '术后β2MG',

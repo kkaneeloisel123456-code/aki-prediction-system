@@ -29,7 +29,7 @@ KDIGO_LEAK_COLUMNS = [
 LEAK_PATTERNS = [
     # Any AKI/KDIGO grading or diagnosis column is the label itself.
     r'(aki|kdigo)\s*[_-]?\s*(分组|分期|分级|阶段|诊断|stage|grade|group)',
-    r'^(是否)?aki$',
+    r'^(是否)?(发生|出现)?aki$',
     r'^kdigo$',
     # Post-operative creatinine in any spelling, plus derived ratios/deltas.
     r'(术后|postop|post[_-]?op).*(scr|肌酐|egfr)',
@@ -57,13 +57,13 @@ RISK_HIGH = 0.7
 def is_leakage(col_name) -> bool:
     """Return True for features that must be excluded from modeling."""
     name = str(col_name).strip()
-    if name in ID_COLUMNS or name in (TARGET, 'AKI分期'):
+    if name in ID_COLUMNS or '姓名' in name or '住院号' in name or name in (TARGET, 'AKI分期'):
         return True
     if any(kw in name for kw in KDIGO_LEAK_COLUMNS):
         return True
     if any(kw in name for kw in OUTCOME_KEYWORDS):
         return True
-    if POST_7D_KEYWORD in name:
+    if POST_7D_KEYWORD in name or '术后7天' in name:
         return True
     if VENTILATION_KEYWORD in name:
         return True

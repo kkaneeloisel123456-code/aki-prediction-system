@@ -1,10 +1,21 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useTheme } from './composables/useTheme'
 
 const route = useRoute()
 const { theme, toggle } = useTheme()
+const online = ref(false)
+const bestAuc = ref('—')
+import { api } from './api/client'
+onMounted(async () => {
+  try {
+    const h = await api.health()
+    online.value = h.model_loaded
+    const m = await api.meta()
+    if (m.best_auc != null) bestAuc.value = m.best_auc.toFixed(3)
+  } catch { online.value = false }
+})
 const title = computed(() => (route.meta?.title as string) ?? '')
 
 const nav = [
@@ -101,8 +112,8 @@ const nav = [
           <span class="current-page">{{ title }}</span>
         </div>
         <div class="topbar-actions">
-          <span class="badge badge-success">● 模型在线</span>
-          <span class="badge badge-info">AUC 0.810</span>
+          <span class="badge" :class="online ? 'badge-success' : 'badge-warn'" style="cursor:default">● {{ online ? '模型在线' : '模型离线' }}</span>
+          <span class="badge badge-info">AUC {{ bestAuc }}</span>
         </div>
       </header>
       <div class="content">

@@ -26,6 +26,7 @@ const filteredRows = computed(() => {
 })
 
 const dashboardData = ref<any>(null)
+const dashboardError = ref('')
 const dashboardLoading = ref(false)
 
 const typePieStyle = computed(() => {
@@ -49,7 +50,7 @@ onMounted(() => {
   dashboardLoading.value = true
   api.dataQuality()
     .then((d: any) => { dashboardData.value = d })
-    .catch(() => {})
+    .catch(() => { dashboardError.value = '质量数据加载失败' })
     .finally(() => { dashboardLoading.value = false })
 })
 </script>
@@ -143,6 +144,7 @@ onMounted(() => {
 
   <!-- 质量仪表盘 -->
   <div v-if="tab === 'dashboard'">
+    <div v-if="dashboardError" class="error" style="margin-bottom:12px">{{ dashboardError }}</div>
     <div v-if="dashboardLoading" style="text-align:center;padding:40px;color:var(--text-dim)">数据加载中...</div>
     <div v-else-if="dashboardData" style="display:flex;flex-direction:column;gap:16px;">
       <!-- Key Stats -->

@@ -42,7 +42,7 @@ def main():
     for xi, (_, row) in zip(x, df.iterrows()):
         y_pos = row['AUC均值'] + row['AUC标准差'] + 0.004
         txt_color = HIGHLIGHT if row['配置'] == 'Voting' else '#333333'
-        ax.text(xi, y_pos, f"{row['AUC均值']:.4f}\u00b1{row['AUC标准差']:.4f}",
+        ax.text(float(xi), float(y_pos), f"{row['AUC均值']:.4f}\u00b1{row['AUC标准差']:.4f}",
                 ha='center', va='bottom', fontsize=10, color=txt_color, fontweight='bold' if row['配置'] == 'Voting' else 'normal')
 
     best_auc = df['AUC均值'].max()

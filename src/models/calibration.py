@@ -2,6 +2,7 @@
 AKI Prediction Project - Calibration & Decision Curve Analysis
 Calibration curves, DCA (Decision Curve Analysis), Clinical Impact Curve.
 """
+from typing import Any, Dict
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -70,14 +71,17 @@ def plot_calibration_curves_all(model_results_dict, n_bins=10,
         axes = np.array([axes])
     axes = axes.flatten()
 
+    n_plotted = 0
     for i, (name, results) in enumerate(model_results_dict.items()):
         plot_calibration_curve_single(
             results['y_true'], results['y_prob'], name,
             n_bins=n_bins, ax=axes[i]
         )
+        n_plotted = i + 1
 
-    # Hide unused subplots
-    for j in range(i + 1, len(axes)):
+    # Hide unused subplots (n_plotted stays 0 for an empty dict, which would
+    # otherwise leave `i` unbound and raise NameError).
+    for j in range(n_plotted, len(axes)):
         axes[j].set_visible(False)
 
     fig.suptitle('Calibration Curves - All Models', fontsize=16, fontweight='bold', y=1.01)
@@ -243,8 +247,9 @@ def plot_decision_curve(y_true, model_probs_dict, thresholds=None,
         _, nb_model, _ = compute_net_benefit_curve(y_true, best_prob, thresholds)
         utility_mask = nb_model > nb_treat_all
         if np.any(utility_mask):
-            util_start = thresholds[np.where(utility_mask)[0][0]]
-            util_end = thresholds[np.where(utility_mask)[0][-1]]
+            idx = np.where(utility_mask)[0]
+            util_start = float(thresholds[idx[0]])
+            util_end = float(thresholds[idx[-1]])
             ax.axvspan(util_start, util_end, alpha=0.06, color='#1baf7a')
             ax.annotate(
                 f'临床有用区域\nClinical Utility Zone\n({util_start:.2f} - {util_end:.2f})',
@@ -439,7 +444,11 @@ def create_calibration_summary(model_results_dict, n_bins=10,
         # Slope and intercept of calibration
         from scipy.stats import linregress
         if len(prob_true) >= 3:
-            slope, intercept, r_value, p_value, std_err = linregress(prob_pred, prob_true)
+            # linregress stubs type the result as a generic tuple; cast the two
+            # fields we need through numpy to get concrete floats.
+            res = np.asarray(linregress(prob_pred, prob_true), dtype=float)
+            slope, intercept = float(res[0]), float(res[1])
+            p_value = float(res[3])
         else:
             slope, intercept, p_value = np.nan, np.nan, np.nan
 
@@ -595,7 +604,7 @@ RISK_LOW = 0.3
 RISK_HIGH = 0.7
 
 
-def map_kdigo_stage(probability, scr_ratio=None, urine_output=None):
+def map_kdigo_stage(probability, scr_ratio=None, urine_output=None) -> Dict[str, Any]:
     """Map predicted AKI probability to a 3-band risk grade.
 
     A model probability is a *risk estimate*, not a KDIGO stage.  KDIGO
@@ -632,7 +641,7 @@ def map_kdigo_stage(probability, scr_ratio=None, urine_output=None):
     else:
         grade = 2
 
-    result = dict(RISK_GRADES[grade])
+    result: Dict[str, Any] = dict(RISK_GRADES[grade])
     result['stage'] = grade
     result['kdigo_note'] = (
         '风险分级基于模型预测概率，不能替代KDIGO分期；'

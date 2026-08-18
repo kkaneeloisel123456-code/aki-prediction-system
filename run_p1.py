@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """P1 实验 1-4（仓库根目录内执行：python run_p1.py）
 1) 临床基线对比：Thakar简化 / STS简化 / 临床LR(仅术前+术中) vs Voting，DeLong 检验（标准算法）
 2) Top8/Top12 精简模型（LR/Ridge）同一5折x10嵌套CV口径
@@ -23,7 +23,7 @@ from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedKFold, cr
 from sklearn.metrics import roc_auc_score
 from scipy import stats
 from src.config import TARGET, classify_feature_timing
-from src.data.prepare import prepare_training_data
+from src.data.prepare import prepare_raw_numeric, prepare_training_data
 
 OUT = os.path.join(BASE, 'outputs', 'p1')
 os.makedirs(OUT, exist_ok=True)
@@ -31,7 +31,10 @@ os.makedirs(OUT, exist_ok=True)
 # ---------- 数据 ----------
 df = pd.read_excel('data/raw/AKI数据.xlsx')
 prep = prepare_training_data(df)
-X = prep['X']; y = prep['y'].values
+# Use the raw (NaNs preserved) matrix so the per-fold imputer actually
+# imputes inside CV; the previously used prep['X'] was already full-data
+# median-filled, making every "honest" pipeline's imputer a no-op.
+X = prepare_raw_numeric(df); y = np.asarray(prep['y'])
 print('X:', X.shape, 'AKI:', int(y.sum()), '/', len(y))
 
 _cv_selector = RandomForestClassifier(n_estimators=200, class_weight='balanced', random_state=42, n_jobs=-1)
@@ -59,13 +62,13 @@ rskf = RepeatedStratifiedKFold(n_splits=5, n_repeats=10, random_state=42)
 
 # ---------- 1) 临床评分 ----------
 raw = df.reset_index(drop=True)
-age = raw['年龄'].astype(float).values
-sex_male = (raw['性别'].astype(str).str.strip() == '男').astype(float).values
-dm = raw['糖尿病'].astype(float).values
-htn = raw['高血压'].astype(float).values
-pre_scr = raw['术前Scr'].astype(float).values / 88.4  # mg/dL
-pre_egfr = raw['术前eGFR'].astype(float).values
-surg = raw['手术类型'].astype(str).values
+age = np.asarray(raw['年龄'].astype(float))
+sex_male = np.asarray((raw['性别'].astype(str).str.strip() == '男').astype(float))
+dm = np.asarray(raw['糖尿病'].astype(float))
+htn = np.asarray(raw['高血压'].astype(float))
+pre_scr = np.asarray(raw['术前Scr'].astype(float)) / 88.4  # mg/dL
+pre_egfr = np.asarray(raw['术前eGFR'].astype(float))
+surg = np.asarray(raw['手术类型'].astype(str))
 is_valve = np.array(['瓣' in s for s in surg], dtype=float)
 is_cabg = np.array([('搭桥' in s) or ('CABG' in s.upper()) for s in surg], dtype=float)
 is_combo = is_valve * is_cabg
@@ -148,37 +151,44 @@ pd.DataFrame(res1).to_csv(os.path.join(OUT, 'clinical_baseline_auc.csv'), index=
 res2 = []
 for name, p in [('Thakar简化', thakar_oof), ('STS简化', sts_oof), ('临床LR(术前+术中)', clin_lr_oof)]:
     a1, a2, z, pv, se = delong_test(y, p, voting_oof)
+    # delong_test return types are inferred as a wide numpy union; cast to float.
+    a1, a2, z, pv, se = float(a1), float(a2), float(z), float(pv), float(se)
     res2.append({'对比': f'{name} vs Voting全模型', 'AUC_1': round(a1, 4), 'AUC_2': round(a2, 4), 'DeLong_Z': round(z, 3), 'SE': round(se, 4), 'P': round(pv, 4)})
     print(f'DeLong {name} vs Voting: Z={z:.3f} P={pv:.4f}')
 pd.DataFrame(res2).to_csv(os.path.join(OUT, 'delong_comparison.csv'), index=False, encoding='utf-8-sig')
 
 # ---------- 2) Top8/Top12 精简模型 ----------
-rf_imp = RandomForestClassifier(n_estimators=200, class_weight='balanced', random_state=42, n_jobs=-1)
-X_imp_all = SimpleImputer(strategy='median').fit_transform(X)
-rf_imp.fit(StandardScaler().fit_transform(X_imp_all), y)
-top_names = [X.columns[i] for i in np.argsort(rf_imp.feature_importances_)[::-1]]
+# NOTE: feature ranking is now done INSIDE each CV fold (SelectFromModel),
+# fixing the previous selection leakage where RF importance was fit on the
+# full dataset before cross_val_score (reduced-model AUCs were inflated).
 
 def make_lr():
     return LogisticRegression(C=0.02, penalty='l2', class_weight='balanced', max_iter=5000, random_state=42, solver='saga')
 def make_ridge():
     from sklearn.linear_model import RidgeClassifier
     return RidgeClassifier(alpha=1.0, class_weight='balanced', random_state=42)
-def pipe_for(clf):
-    return Pipeline([('imp', SimpleImputer(strategy='median')), ('sc', StandardScaler()), ('clf', clf)])
+def pipe_topn(clf, n_feat):
+    sel = RandomForestClassifier(n_estimators=200, class_weight='balanced', random_state=42, n_jobs=-1)
+    return Pipeline([
+        ('imp', SimpleImputer(strategy='median')),
+        ('sc', StandardScaler()),
+        ('sel', SelectFromModel(sel, max_features=n_feat, threshold=-np.inf)),
+        ('clf', clf),
+    ])
 
 res3 = []
 for n_feat in [8, 12, 35]:
-    cols = top_names[:n_feat]
     for name, clf in [('LR', make_lr()), ('Ridge', make_ridge())]:
-        aucs = cross_val_score(pipe_for(clf), X[cols], y, cv=rskf, scoring='roc_auc', n_jobs=-1)
+        aucs = cross_val_score(pipe_topn(clf, n_feat), X, y, cv=rskf, scoring='roc_auc', n_jobs=-1)
         res3.append({'特征数': n_feat, '模型': name, '50次CV AUC均值': round(aucs.mean(), 4), '标准差': round(aucs.std(), 4)})
         print(f'Top{n_feat} {name}: {aucs.mean():.4f} ± {aucs.std():.4f}')
 pd.DataFrame(res3).to_csv(os.path.join(OUT, 'topN_reduced_models.csv'), index=False, encoding='utf-8-sig')
 
 # ---------- 3) DCA 阈值 + 成本效益 ----------
-from sklearn.calibration import IsotonicRegression
-iso = IsotonicRegression(out_of_bounds='clip')
-cal_oof = iso.fit(voting_oof, y).predict(voting_oof)
+# NOTE: use raw OOF predictions for threshold decisions. The previous
+# iso.fit(voting_oof,y).predict(voting_oof) self-fit leaked the outcome
+# and inflated DCA net benefit. Use cross-fitted calibration if needed.
+cal_oof = voting_oof
 prev = y.mean()
 res4 = []
 for t in np.arange(0.05, 0.55, 0.05):
@@ -200,18 +210,21 @@ print('DCA最优阈值:', best['阈值'], '净获益', best['净获益'])
 
 # ---------- 4) TabNet 诚实实验（5折x5次） ----------
 try:
-    import torch
-    from pytorch_tabnet.tab_model import TabNetClassifier
+    import torch  # type: ignore[import-not-found]
+    from pytorch_tabnet.tab_model import TabNetClassifier  # type: ignore[import-not-found]
     print('torch', torch.__version__, '| pytorch_tabnet OK')
-    imp = SimpleImputer(strategy='median'); sc = StandardScaler()
-    Xn = sc.fit_transform(imp.fit_transform(X)).astype(np.float32)
     rskf25 = RepeatedStratifiedKFold(n_splits=5, n_repeats=5, random_state=42)
     tab_aucs = []; vot_aucs25 = []
-    for k, (tr, te) in enumerate(rskf25.split(Xn, y), 1):
+    for k, (tr, te) in enumerate(rskf25.split(X, y), 1):
+        # Fold-contained preprocessing: fit imputer/scaler on the training fold
+        # only, so TabNet and Voting use the same leakage-free input.
+        imp = SimpleImputer(strategy='median'); sc = StandardScaler()
+        Xtr = np.asarray(sc.fit_transform(imp.fit_transform(X.iloc[tr]))).astype(np.float32)
+        Xte = np.asarray(sc.transform(imp.transform(X.iloc[te]))).astype(np.float32)
         clf = TabNetClassifier(n_d=8, n_a=8, n_steps=3, gamma=1.5, lambda_sparse=0,
                                verbose=0, seed=42, device_name='cpu')
-        clf.fit(Xn[tr], y[tr], eval_set=[(Xn[te], y[te])], max_epochs=100, patience=15, batch_size=32, drop_last=False)
-        tab_aucs.append(roc_auc_score(y[te], clf.predict_proba(Xn[te])[:, 1]))
+        clf.fit(Xtr, y[tr], eval_set=[(Xte, y[te])], max_epochs=100, patience=15, batch_size=32, drop_last=False)
+        tab_aucs.append(roc_auc_score(y[te], clf.predict_proba(Xte)[:, 1]))
         pipe = build_honest_pipeline(make_voting())
         pipe.fit(X.iloc[tr], y[tr])
         vot_aucs25.append(roc_auc_score(y[te], pipe.predict_proba(X.iloc[te])[:, 1]))

@@ -92,18 +92,31 @@ def health() -> HealthResponse:
 
 @app.post("/api/predict", response_model=PredictResponse)
 def predict_single(req: PredictRequest) -> PredictResponse:
-    result = predictor.predict(req.features, patient_id=req.patient_id)
+    # Tolerate stray whitespace in caller-supplied keys (copy-paste from
+    # spreadsheets) so features aren't silently median-filled.
+    feats = {str(k).strip(): v for k, v in req.features.items()}
+    result = predictor.predict(feats, patient_id=req.patient_id)
     return PredictResponse(**result)
+
+
+# Same cap as /api/predict/csv so a huge JSON payload can't starve the
+# threadpool workers (per-row predict is CPU-bound).
+_BATCH_MAX_ROWS = 5000
 
 
 @app.post("/api/predict/batch", response_model=BatchPredictResponse)
 def predict_batch(rows: List[Dict[str, Any]]) -> BatchPredictResponse:
     if not rows:
         raise HTTPException(status_code=400, detail="rows must not be empty")
+    if len(rows) > _BATCH_MAX_ROWS:
+        raise HTTPException(status_code=413,
+                            detail=f"单次最多 {_BATCH_MAX_ROWS} 行，当前 {len(rows)} 行")
     results = []
     for i, r in enumerate(rows):
         pid = r.get("ID") or r.get("patient_id") or i + 1
-        out = predictor.predict(r, patient_id=str(pid))
+        feats = {str(k).strip(): v for k, v in r.items() if k not in ("ID", "patient_id")}
+        # Batch callers don't render SHAP; skipping it keeps throughput sane.
+        out = predictor.predict(feats, patient_id=str(pid), explain=False)
         results.append(PredictResponse(**out))
     return BatchPredictResponse(count=len(results), results=results)
 
@@ -142,6 +155,8 @@ def report_pdf(req: PredictRequest) -> Response:
     if req.override_prob is not None:
         result["probability"] = req.override_prob
         result["risk_level"] = predictor.risk_band(req.override_prob)
+        result["prediction"] = int(req.override_prob >= 0.5)
+        result["calibrated"] = False
     pdf_bytes = generate_pdf(
         {"id": req.patient_id or "N/A", "age": req.features.get("年龄")},
         result,
@@ -166,16 +181,41 @@ def predict_csv(file: UploadFile = File(...)) -> StreamingResponse:
     """
     try:
         raw = file.file.read()
+        if len(raw) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="CSV 文件过大（上限 10MB）")
         # utf-8-sig transparently strips a BOM so the first column name is
-        # not mangled when Excel exports a UTF-8 CSV.
-        df = pd.read_csv(io.BytesIO(raw), encoding="utf-8-sig")
+        # not mangled when Excel exports a UTF-8 CSV. Fall back to GBK for
+        # Excel's default CSV export on Chinese Windows.
+        try:
+            df = pd.read_csv(io.BytesIO(raw), encoding="utf-8-sig")
+        except UnicodeDecodeError:
+            df = pd.read_csv(io.BytesIO(raw), encoding="gbk")
+        if len(df) > 5000:
+            raise HTTPException(status_code=413, detail=f"单次最多 5000 行，当前 {len(df)} 行")
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"CSV parse failed: {exc}")
 
+    # Normalize header whitespace so the match-check below and the per-row
+    # key lookups in the predictor agree; otherwise a padded header passes
+    # validation but the column is silently median-filled.
+    df.columns = [str(c).strip() for c in df.columns]
+
     rows = df.to_dict(orient="records")
+    assets = load_assets()
+    model_feats = set(assets["features"])
+    matched = [str(c).strip() for c in df.columns if str(c).strip() in model_feats]
+    if not matched:
+        raise HTTPException(status_code=400,
+            detail="CSV 列名与模型特征完全不匹配。请使用模板的 35 个特征列名（列名需完全一致，可含 ID 列）。")
     results = []
     for i, row in enumerate(rows):
         pid = row.get("ID", row.get("patient_id", i + 1))
+        # Empty ID cells read back as NaN; fall back to the row number instead
+        # of echoing "nan" into the results file.
+        if pid is None or (isinstance(pid, float) and math.isnan(pid)) or str(pid).strip().lower() == "nan":
+            pid = i + 1
         clean: Dict[str, Optional[float]] = {}
         for k, v in row.items():
             if not isinstance(k, str) or k in ("ID", "patient_id"):
@@ -209,9 +249,20 @@ def predict_csv(file: UploadFile = File(...)) -> StreamingResponse:
 
 
 def _read_csv_records(path: Path) -> List[Dict[str, Any]]:
-    """Read a CSV and return records with NaN replaced by None (JSON-safe)."""
+    """Read a CSV into JSON-safe records (NaN -> None, numpy scalars -> Python)."""
     df = pd.read_csv(path)
-    return df.where(pd.notna(df), None).to_dict(orient="records")
+    records = []
+    for row in df.to_dict(orient="records"):
+        clean = {}
+        for k, v in row.items():
+            if v is None or (isinstance(v, float) and math.isnan(v)):
+                clean[k] = None
+            elif hasattr(v, "item"):  # numpy scalar -> Python scalar
+                clean[k] = v.item()
+            else:
+                clean[k] = v
+        records.append(clean)
+    return records
 
 
 @app.get("/api/performance")
@@ -284,14 +335,16 @@ def get_table(name: str) -> Response:
     candidate = _safe_join(_TAB_DIR, name)
     if not candidate.is_file():
         raise HTTPException(status_code=404, detail=f"Table {name} not found")
-    if name.endswith(".csv"):
+    if name.lower().endswith(".csv"):
         df = pd.read_csv(candidate)
-        # na_rep="null" keeps the output valid JSON when cells are empty.
-        body = df.to_json(orient="records", force_ascii=False, na_rep="null")
+        # pandas 3.0 emits null for NaN by default; the na_rep kwarg was removed.
+        df = df.where(pd.notna(df), None)
+        body = df.to_json(orient="records", force_ascii=False)
         return Response(body, media_type="application/json")
     if name.endswith(".json"):
         return FileResponse(str(candidate), media_type="application/json")
-    return Response(candidate.read_text(encoding="utf-8"), media_type="text/plain")
+    # errors="replace" keeps a stray non-UTF-8 file from turning into a 500.
+    return Response(candidate.read_text(encoding="utf-8", errors="replace"), media_type="text/plain")
 
 
 @app.get("/api/template.csv")
@@ -330,7 +383,7 @@ def app_meta() -> Dict[str, Any]:
                 best_auc = float(value)
     return {
         "n_features": len(assets["features"]),
-        "n_models": 5,
+        "n_models": 4,
         "best_auc": best_auc,
         "risk_low": RISK_LOW,
         "risk_high": RISK_HIGH,
@@ -450,6 +503,9 @@ def _data_types() -> dict:
             type_col = next((c for c in ddf.columns if "类型" in c), None)
             if type_col:
                 for t in ddf[type_col].astype(str):
+                    t = t.strip()
+                    if not t or t.lower() == "nan":
+                        continue  # skip blank/trailing rows
                     if "int" in t: counts["int64"] += 1
                     elif "float" in t or "数值" in t: counts["float64"] += 1
                     else: counts["object"] += 1
@@ -466,7 +522,6 @@ def data_quality_dashboard() -> Dict[str, Any]:
     n_features = len(assets["features"])
     # Real stats from the training cohort (420 patients, 125 AKI / 295 non-AKI)
     missing_rates: list = []
-    missing_counts: list = []
     total_missing_cells = 0
     if _TAB_DIR.exists():
         dd = _TAB_DIR / "data_dictionary.csv"
@@ -478,17 +533,16 @@ def data_quality_dashboard() -> Dict[str, Any]:
                 if miss_col:
                     for _, r in ddf.iterrows():
                         try:
-                            v = float(str(r[miss_col]).replace("%", ""))
-                            if v > 0:
-                                missing_counts.append((str(r[name_col]), v))
+                            cnt = float(str(r[miss_col]).replace("%", ""))
+                            if cnt > 0:
+                                # 缺失列存的是单元格数量；转换为百分比 (cnt/420*100)
+                                pct = round(cnt / 420 * 100, 2)
+                                missing_rates.append({"feature": str(r[name_col]), "rate": pct})
                         except (ValueError, TypeError):
                             pass
-                    missing_counts.sort(key=lambda x: -x[1])
-                    total_missing_cells = sum(c for _, c in missing_counts)
-                    missing_rates = [
-                        {"feature": name, "rate": round(count / 420 * 100, 1)}
-                        for name, count in missing_counts[:6]
-                    ]
+                    missing_rates.sort(key=lambda x: -x["rate"])
+                    total_missing_cells = sum(x["rate"] * 420 / 100 for x in missing_rates)
+                    missing_rates = missing_rates[:6]
             except Exception:
                 pass
     completeness_rates = [
@@ -501,7 +555,7 @@ def data_quality_dashboard() -> Dict[str, Any]:
         "stats": {
             "samples": 420,
             "features": n_features,
-            "missingRate": f"{round(total_missing_cells / max(total_cells, 1) * 100, 1)}%",
+            "missingRate": f"{round(total_missing_cells / max(420 * n_features,1) * 100, 1)}%",
             "completeness": f"{completeness_pct}%",
             "duplicates": 0
         },
@@ -528,4 +582,10 @@ if _FRONTEND_DIST.exists():
             raise HTTPException(status_code=404, detail="Not Found")
         if full_path and candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(_FRONTEND_DIST / "index.html")
+        # index.html references hashed asset filenames; it must never be
+        # cached, otherwise browsers keep loading a stale entry page after
+        # each frontend rebuild. Hashed assets themselves stay cacheable.
+        return FileResponse(
+            _FRONTEND_DIST / "index.html",
+            headers={"Cache-Control": "no-cache, must-revalidate"},
+        )

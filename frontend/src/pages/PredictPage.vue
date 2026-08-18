@@ -28,10 +28,12 @@ onMounted(async () => {
   try {
     const f = await api.features()
     meta.value = f
-    const init: Record<string, number> = {}
+    const init: Record<string, number | string> = {}
     const prefilled = selectedPatient.value?.features ?? {}
     f.metas.forEach((m: any) => {
-      let val = m.median
+      // 未录入字段保持为空（placeholder 展示中位数），提交时不发送，
+      // 后端才能正确识别并用中位数填充、回传 missing_filled。
+      let val: number | string = ''
       if (prefilled[m.name] !== undefined) {
         val = Number(prefilled[m.name])
       } else if (route.query[m.name] !== undefined) {
@@ -104,6 +106,14 @@ const maxShap = computed(() =>
   Math.max(0.001, ...topShap.value.map((s: any) => Math.abs(s.shap)))
 )
 
+// 缺失字段默认只展示前几个，避免大量中位数填充标签把页面撑得过长
+const MISSING_PREVIEW = 8
+const showAllMissing = ref(false)
+const visibleMissing = computed(() => {
+  const list = result.value?.missing_filled ?? []
+  return showAllMissing.value ? list : list.slice(0, MISSING_PREVIEW)
+})
+
 // ── 操作 ──────────────────────────────────────────────────────
 function collectNumeric(): Record<string, number> | null {
   const numeric: Record<string, number> = {}
@@ -123,6 +133,7 @@ function collectNumeric(): Record<string, number> | null {
 async function run() {
   loading.value = true
   error.value = null
+  showAllMissing.value = false
   try {
     const numeric = collectNumeric()
     if (!numeric) return
@@ -146,8 +157,9 @@ const interpretation = computed(() => {
 
 function reset() {
   if (!meta.value) return
-  const init: Record<string, number> = {}
-  meta.value.metas.forEach((m: any) => (init[m.name] = m.median))
+  // 清空为空值（placeholder 仍显示中位数），而不是回填中位数
+  const init: Record<string, number | string> = {}
+  meta.value.metas.forEach((m: any) => (init[m.name] = ''))
   values.value = init; result.value = null
   error.value = null
 }
@@ -172,19 +184,19 @@ async function downloadPdf() {
   <h2 class="page-title">AKI 风险预测</h2>
   <p class="page-subtitle">输入患者临床信息，获取实时风险预测、可解释分析与个体化建议</p>
 
-  <div class="grid-2-1">
+  <div class="grid-2-1" style="align-items: stretch;">
     <!-- ── 左列：Tab 输入表单 ── -->
-    <div class="card">
+    <div class="card" style="display:flex;flex-direction:column;margin-bottom:0">
       <div class="card-header">
         <span class="card-title">患者信息录入</span>
-        <div style="display: flex; gap: 8px;">
-          <button class="btn btn-secondary btn-sm" @click="reset" title="重置为临床中位数">重置</button>
-          <button class="btn btn-primary btn-sm" @click="run" :disabled="loading">
+        <div style="display: flex; align-items: flex-end; gap: 8px;">
+          <button class="btn btn-secondary btn-sm" @click="reset" title="清空已录入的值（未填写项预测时按临床中位数处理）">重置</button>
+          <button class="btn btn-primary btn-sm" style="border:1px solid transparent" @click="run" :disabled="loading">
             {{ loading ? '预测中…' : '开始预测' }}
           </button>
         </div>
       </div>
-      <div class="card-body">
+      <div class="card-body" style="flex:1;display:flex;flex-direction:column">
         <!-- Tab 导航 -->
         <div class="tabs">
           <button
@@ -204,16 +216,19 @@ async function downloadPdf() {
           </div>
         </div>
 
-        <p style="font-size:10px;color:var(--text-dim);margin-top:10px;text-align:center">
-          未填写的后续阶段数据，将默认使用临床中位数进行预测。
-        </p>
-        <p v-if="error" class="error" style="margin-top:8px">{{ error }}</p>
-        <div v-if="interpretation" class="note" style="margin-top:10px">{{ interpretation }}</div>
+        <!-- 底部说明/错误/解释：margin-top:auto 贴卡片底边，消除拉伸产生的空白 -->
+        <div style="margin-top:auto;padding-top:12px">
+          <p style="font-size:10px;color:var(--text-dim);text-align:center">
+            未填写的后续阶段数据，将默认使用临床中位数进行预测。
+          </p>
+          <p v-if="error" class="error" style="margin-top:8px">{{ error }}</p>
+          <div v-if="interpretation" class="note" style="margin-top:10px">{{ interpretation }}</div>
+        </div>
       </div>
     </div>
 
     <!-- ── 右列：结果 ── -->
-    <div>
+    <div style="display:flex;flex-direction:column">
       <!-- 3/4 弧仪表盘 -->
       <div class="card" style="text-align:center">
         <div class="card-header">
@@ -276,11 +291,16 @@ async function downloadPdf() {
             以下字段未录入，系统自动使用训练集中位数替代。建议补充实际测量值以提高预测精度：
           </p>
           <div style="display:flex;flex-wrap:wrap;gap:4px">
-            <span v-for="f in result.missing_filled" :key="f"
+            <span v-for="f in visibleMissing" :key="f"
                   style="font-size:10px;padding:2px 8px;border-radius:4px;background:rgba(251,191,36,.12);color:var(--yellow);border:1px solid rgba(251,191,36,.25)">
               {{ f }}
             </span>
           </div>
+          <button v-if="result.missing_filled.length > MISSING_PREVIEW"
+                  class="btn btn-secondary btn-sm" style="margin-top:8px"
+                  @click="showAllMissing = !showAllMissing">
+            {{ showAllMissing ? '收起' : `展开其余 ${result.missing_filled.length - MISSING_PREVIEW} 项` }}
+          </button>
         </div>
       </div>
 
@@ -328,7 +348,7 @@ async function downloadPdf() {
 
       <button
         class="btn btn-primary"
-        style="width:100%;justify-content:center;padding:10px"
+        style="width:100%;justify-content:center;padding:10px;margin-top:auto"
         @click="downloadPdf" :disabled="!result"
       >下载 PDF 报告</button>
     </div>

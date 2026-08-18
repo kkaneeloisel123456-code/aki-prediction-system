@@ -3,7 +3,8 @@ import { ref, onMounted, computed } from 'vue'
 import { api } from '../api/client'
 import type { DashboardDemo } from '../api/types'
 const data = ref<DashboardDemo | null>(null)
-onMounted(() => { api.dashboard().then((d: import('../api/types').DashboardDemo) => { data.value = d }).catch(() => {}) })
+const loadErr = ref('')
+onMounted(() => { api.dashboard().then((d: import('../api/types').DashboardDemo) => { data.value = d }).catch(() => { loadErr.value = '数据加载失败' }) })
 const maxCases = computed(() => data.value ? Math.max(...data.value.trend.totalCases) : 1)
 const COLORS = ['#38bdf8', '#4ade80', '#fbbf24', '#a78bfa', '#f87171']
 const totalDeptCases = computed(() => data.value ? data.value.departments.reduce((s, d) => s + d.cases, 0) : 1)
@@ -17,6 +18,7 @@ const totalDeptCases = computed(() => data.value ? data.value.departments.reduce
     <div class="kpi-card kpi-card-green"><div class="kpi-label">模型 AUC</div><div class="kpi-value">0.810</div><div class="kpi-delta neutral">50次嵌套CV</div></div>
     <div class="kpi-card kpi-card-blue"><div class="kpi-label">在线服务</div><div class="kpi-value" style="font-size:18px">Active</div><div class="kpi-delta neutral">演示</div></div>
   </div>
+  <div v-if="loadErr" class="error">{{ loadErr }}</div>
   <div class="grid-2" v-if="data">
     <div class="card">
       <div class="card-header"><span class="card-title">AKI 发生率趋势</span></div>

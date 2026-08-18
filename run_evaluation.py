@@ -95,7 +95,7 @@ missing = [f for f in top_features if f not in X.columns]
 if missing:
     raise SystemExit(f'selected_features.txt 与数据列不匹配: {missing}')
 
-top_indices = [X.columns.get_loc(f) for f in top_features]
+top_indices = np.array([X.columns.get_loc(f) for f in top_features], dtype=int)
 X_selected = X_scaled[:, top_indices]
 print(f'    样本 {len(y)} 例, 特征 {len(top_features)} 个, AKI 发生率 {y.mean():.1%}')
 
@@ -184,8 +184,8 @@ ax.set_xlabel('False Positive Rate (1 - Specificity)', fontsize=13)
 ax.set_ylabel('True Positive Rate (Sensitivity)', fontsize=13)
 ax.set_title('ROC Curves — 5-Fold CV OOF Predictions', fontsize=14, fontweight='bold')
 ax.legend(loc='lower right', fontsize=10, framealpha=0.85, edgecolor='#CCCCCC')
-ax.set_xlim([-0.02, 1.02])
-ax.set_ylim([-0.02, 1.02])
+ax.set_xlim((-0.02, 1.02))
+ax.set_ylim((-0.02, 1.02))
 ax.grid(True, alpha=0.3, linewidth=0.5, color='#CCCCCC')
 ax.spines['top'].set_visible(False)
 ax.spines['right'].set_visible(False)
@@ -214,8 +214,8 @@ ax.set_xlabel('Recall (Sensitivity)', fontsize=13)
 ax.set_ylabel('Precision (Positive Predictive Value)', fontsize=13)
 ax.set_title('Precision-Recall Curves — 5-Fold CV OOF Predictions', fontsize=14, fontweight='bold')
 ax.legend(loc='lower left', fontsize=10, framealpha=0.85, edgecolor='#CCCCCC')
-ax.set_xlim([-0.02, 1.02])
-ax.set_ylim([-0.02, 1.02])
+ax.set_xlim((-0.02, 1.02))
+ax.set_ylim((-0.02, 1.02))
 ax.grid(True, alpha=0.3, linewidth=0.5, color='#CCCCCC')
 ax.spines['top'].set_visible(False)
 ax.spines['right'].set_visible(False)
@@ -245,8 +245,8 @@ ax.set_xlabel('Predicted Probability', fontsize=13)
 ax.set_ylabel('Observed Proportion', fontsize=13)
 ax.set_title('Calibration Curves — 5-Fold CV OOF Predictions', fontsize=14, fontweight='bold')
 ax.legend(loc='lower right', fontsize=9, framealpha=0.85, edgecolor='#CCCCCC')
-ax.set_xlim([-0.02, 1.02])
-ax.set_ylim([-0.02, 1.02])
+ax.set_xlim((-0.02, 1.02))
+ax.set_ylim((-0.02, 1.02))
 ax.grid(True, alpha=0.3, linewidth=0.5, color='#CCCCCC')
 ax.spines['top'].set_visible(False)
 ax.spines['right'].set_visible(False)
@@ -275,7 +275,7 @@ def net_benefit(y_true, y_prob, threshold):
 
 
 thresholds = np.linspace(0.01, 0.99, 99)
-y_vals = y.values
+y_vals = np.asarray(y)
 y_prob_v = y_prob_oof['Voting Ensemble']
 
 n_boot = 500
@@ -291,7 +291,8 @@ for b in range(n_boot):
 nb_lower = np.percentile(nb_boot, 2.5, axis=0)
 nb_upper = np.percentile(nb_boot, 97.5, axis=0)
 nb_mean = np.array([net_benefit(y_vals, y_prob_v, t) for t in thresholds])
-nb_treat_all = np.array([y_vals.mean() - (1 - y_vals.mean()) * t / (1 - t) for t in thresholds])
+prevalence = float(np.mean(y_vals))
+nb_treat_all = np.array([prevalence - (1 - prevalence) * t / (1 - t) for t in thresholds])
 
 fig, ax = plt.subplots(figsize=(10, 8))
 fig.patch.set_facecolor(BG)
@@ -306,8 +307,8 @@ ax.set_xlabel('Threshold Probability', fontsize=13)
 ax.set_ylabel('Net Benefit', fontsize=13)
 ax.set_title('Decision Curve Analysis — Voting Ensemble with 95% CI', fontsize=14, fontweight='bold')
 ax.legend(loc='upper right', fontsize=10, framealpha=0.85, edgecolor='#CCCCCC')
-ax.set_xlim([0, 1])
-ax.set_ylim([-0.05, None])
+ax.set_xlim((0, 1))
+ax.set_ylim(bottom=-0.05)  # top auto; tuple form rejects None in stubs
 ax.grid(True, alpha=0.3, linewidth=0.5, color='#CCCCCC')
 ax.spines['top'].set_visible(False)
 ax.spines['right'].set_visible(False)

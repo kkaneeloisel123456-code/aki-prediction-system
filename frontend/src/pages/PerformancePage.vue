@@ -26,14 +26,18 @@ const FIG_LABELS: Record<string, string> = {
 }
 const figLabel = (f: string) => FIG_LABELS[f] ?? f.replace('.png', '')
 const has = (n: string) => figures.value.includes(n)
+const offline = ref(false)
 onMounted(() => {
-  api.performance().then(p => perf.value = p).catch(() => {})
-  api.figures().then((f: string[]) => { figures.value = f }).catch(() => {})
+  api.performance().then(p => perf.value = p).catch(() => { offline.value = true })
+  api.figures().then((f: string[]) => { figures.value = f }).catch(() => { offline.value = true })
 })
 </script>
 <template>
   <h2 class="page-title">模型性能评估</h2>
   <p class="page-subtitle">五折 × 十次 = 五十次嵌套交叉验证 · 模型对比与可解释性分析</p>
+  <div v-if="offline" class="warning-box">
+    ⚠ 无法连接后端或评估产物缺失：请确认服务已启动，且已在受控环境运行过 python run_clean.py 生成 outputs/ 图表。
+  </div>
   <div class="tabs">
     <button v-for="t in tabs" :key="t.id" class="tab" :class="{ active: tab === t.id }" @click="tab = t.id">{{ t.label }}</button>
   </div>

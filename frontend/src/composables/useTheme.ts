@@ -5,8 +5,10 @@ export type Theme = 'dark' | 'light'
 const STORAGE_KEY = 'aki-theme'
 
 function getInitial(): Theme {
-  const saved = localStorage.getItem(STORAGE_KEY)
-  if (saved === 'light' || saved === 'dark') return saved
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY)
+    if (saved === 'light' || saved === 'dark') return saved
+  } catch { /* storage blocked (private mode) — fall back to dark */ }
   return 'dark'
 }
 
@@ -19,7 +21,7 @@ apply(theme.value)
 
 watch(theme, (v) => {
   apply(v)
-  localStorage.setItem(STORAGE_KEY, v)
+  try { localStorage.setItem(STORAGE_KEY, v) } catch { /* ignore */ }
 })
 
 export function useTheme() {
