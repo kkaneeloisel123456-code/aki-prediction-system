@@ -1,5 +1,7 @@
 # AKI 急性肾损伤智能预测系统
 
+> **在线体验**：[https://aki-prediction-system.onrender.com/](https://aki-prediction-system.onrender.com/)（免费实例冷启动可能需要几十秒）
+
 ## 项目简介
 
 基于广西某三甲医院临床数据（420例），利用多种机器学习算法构建急性肾损伤（AKI）预测模型。通过 SHAP 可解释性分析 + DCA 决策曲线 + 嵌套式交叉验证 + Bootstrap 内部验证，为临床决策提供透明、可信的个体化风险评估。最终部署为 FastAPI + Vue 3 的在线临床决策支持系统。
