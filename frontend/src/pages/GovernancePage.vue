@@ -11,6 +11,14 @@ const tabs = [
 ]
 const has = (n: string) => figures.value.includes(n)
 
+// 特征筛选漏斗轮播：数据 / 建模 / Web系统概览
+const funnelSlides = [
+  { key: 'funnel_data.png',     label: '数据' },
+  { key: 'funnel_modeling.png', label: '建模' },
+  { key: 'funnel_web.png',      label: 'Web系统概览' },
+]
+const funnelIdx = ref(0)
+
 // 缺失值 / 填充中位数 查询
 type ImpRow = { feature: string; median: number | null }
 const impRows   = ref<ImpRow[]>([])
@@ -74,9 +82,29 @@ onMounted(() => {
     <div class="card">
       <div class="card-header"><span class="card-title">特征筛选漏斗</span></div>
       <div class="card-body" style="text-align:center">
-        <img v-if="has('feature_selection_funnel.png')" :src="api.figureUrl('feature_selection_funnel.png')"
-             style="max-height:480px;object-fit:contain;max-width:100%" />
-        <p v-else class="muted">图未生成</p>
+        <!-- 三图轮播：数据 / 建模 / Web系统概览 -->
+        <div style="display:flex;justify-content:center;gap:8px;margin-bottom:14px">
+          <button
+            v-for="(slide, i) in funnelSlides" :key="slide.key"
+            @click="funnelIdx = i"
+            :style="{
+              padding:'5px 18px', borderRadius:'20px', fontSize:'12px',
+              border: funnelIdx === i ? 'none' : '1px solid var(--border)',
+              background: funnelIdx === i ? 'var(--primary)' : 'transparent',
+              color: funnelIdx === i ? '#fff' : 'var(--text-muted)',
+              cursor:'pointer', transition:'all .2s'
+            }">{{ slide.label }}</button>
+        </div>
+        <div style="position:relative;display:inline-block;width:100%">
+          <img
+            :src="api.figureUrl(funnelSlides[funnelIdx].key)"
+            style="max-height:600px;width:100%;object-fit:contain;border-radius:8px;transition:opacity .3s" />
+          <button @click="funnelIdx = (funnelIdx - 1 + funnelSlides.length) % funnelSlides.length"
+                  style="position:absolute;left:8px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.35);border:none;color:#fff;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center">&#8249;</button>
+          <button @click="funnelIdx = (funnelIdx + 1) % funnelSlides.length"
+                  style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.35);border:none;color:#fff;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center">&#8250;</button>
+        </div>
+        <div style="margin-top:8px;font-size:11px;color:var(--text-muted)">{{ funnelIdx + 1 }} / {{ funnelSlides.length }}</div>
       </div>
     </div>
   </div>

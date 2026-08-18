@@ -94,7 +94,7 @@ def health() -> HealthResponse:
 def predict_single(req: PredictRequest) -> PredictResponse:
     # Tolerate stray whitespace in caller-supplied keys (copy-paste from
     # spreadsheets) so features aren't silently median-filled.
-    feats = {str(k).strip(): v for k, v in req.features.items()}
+    feats = {k.strip(): v for k, v in req.features.items()}
     result = predictor.predict(feats, patient_id=req.patient_id)
     return PredictResponse(**result)
 
@@ -114,7 +114,7 @@ def predict_batch(rows: List[Dict[str, Any]]) -> BatchPredictResponse:
     results = []
     for i, r in enumerate(rows):
         pid = r.get("ID") or r.get("patient_id") or i + 1
-        feats = {str(k).strip(): v for k, v in r.items() if k not in ("ID", "patient_id")}
+        feats = {k.strip(): v for k, v in r.items() if k not in ("ID", "patient_id")}
         # Batch callers don't render SHAP; skipping it keeps throughput sane.
         out = predictor.predict(feats, patient_id=str(pid), explain=False)
         results.append(PredictResponse(**out))
@@ -200,12 +200,12 @@ def predict_csv(file: UploadFile = File(...)) -> StreamingResponse:
     # Normalize header whitespace so the match-check below and the per-row
     # key lookups in the predictor agree; otherwise a padded header passes
     # validation but the column is silently median-filled.
-    df.columns = [str(c).strip() for c in df.columns]
+    df.columns = [c.strip() for c in df.columns]
 
     rows = df.to_dict(orient="records")
     assets = load_assets()
     model_feats = set(assets["features"])
-    matched = [str(c).strip() for c in df.columns if str(c).strip() in model_feats]
+    matched = [c.strip() for c in df.columns if c.strip() in model_feats]
     if not matched:
         raise HTTPException(status_code=400,
             detail="CSV 列名与模型特征完全不匹配。请使用模板的 35 个特征列名（列名需完全一致，可含 ID 列）。")
@@ -338,7 +338,7 @@ def get_table(name: str) -> Response:
     if name.lower().endswith(".csv"):
         df = pd.read_csv(candidate)
         # pandas 3.0 emits null for NaN by default; the na_rep kwarg was removed.
-        df = df.where(pd.notna(df), None)
+        df = df.where(pd.notna(df), other=float("nan"))
         body = df.to_json(orient="records", force_ascii=False)
         return Response(body, media_type="application/json")
     if name.endswith(".json"):
