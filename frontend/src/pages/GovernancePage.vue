@@ -11,11 +11,11 @@ const tabs = [
 ]
 const has = (n: string) => figures.value.includes(n)
 
-// 特征筛选漏斗轮播：数据 / 建模 / Web系统概览
+// 特征筛选漏斗轮播：数据 / 建模 / Web系统概览（webp 压缩版，原图 30MB+）
 const funnelSlides = [
-  { key: 'funnel_data.png',     label: '数据' },
-  { key: 'funnel_modeling.png', label: '建模' },
-  { key: 'funnel_web.png',      label: 'Web系统概览' },
+  { key: 'funnel_data.webp',     label: '数据' },
+  { key: 'funnel_modeling.webp', label: '建模' },
+  { key: 'funnel_web.webp',      label: 'Web系统概览' },
 ]
 const funnelIdx = ref(0)
 
@@ -74,7 +74,7 @@ onMounted(() => {
     <div class="card" style="margin-bottom:16px">
       <div class="card-header"><span class="card-title">AKI系统核心模块总览</span></div>
       <div class="card-body" style="text-align:center">
-        <img v-if="has('aki_core_modules.png')" :src="api.figureUrl('aki_core_modules.png')"
+        <img v-if="has('aki_core_modules.webp')" :src="api.figureUrl('aki_core_modules.webp')"
              style="max-height:1100px;width:100%;object-fit:contain" />
         <p v-else class="muted">图未生成</p>
       </div>
@@ -82,7 +82,7 @@ onMounted(() => {
     <div class="card">
       <div class="card-header"><span class="card-title">特征筛选漏斗</span></div>
       <div class="card-body" style="text-align:center">
-        <!-- 三图轮播：数据 / 建模 / Web系统概览 -->
+        <!-- 三图轮播；无图时给出与其他页一致的兜底 -->
         <div style="display:flex;justify-content:center;gap:8px;margin-bottom:14px">
           <button
             v-for="(slide, i) in funnelSlides" :key="slide.key"
@@ -95,7 +95,7 @@ onMounted(() => {
               cursor:'pointer', transition:'all .2s'
             }">{{ slide.label }}</button>
         </div>
-        <div style="position:relative;display:inline-block;width:100%">
+        <div v-if="has(funnelSlides[funnelIdx].key)" style="position:relative;display:inline-block;width:100%">
           <img
             :src="api.figureUrl(funnelSlides[funnelIdx].key)"
             style="max-height:600px;width:100%;object-fit:contain;border-radius:8px;transition:opacity .3s" />
@@ -104,6 +104,7 @@ onMounted(() => {
           <button @click="funnelIdx = (funnelIdx + 1) % funnelSlides.length"
                   style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.35);border:none;color:#fff;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center">&#8250;</button>
         </div>
+        <p v-else class="muted">图未生成</p>
         <div style="margin-top:8px;font-size:11px;color:var(--text-muted)">{{ funnelIdx + 1 }} / {{ funnelSlides.length }}</div>
       </div>
     </div>
@@ -150,12 +151,12 @@ onMounted(() => {
               <td style="color:var(--text-dim)">{{ i + 1 }}</td>
               <td>{{ row.feature }}</td>
               <td style="text-align:right;font-variant-numeric:tabular-nums">
-                {{ row.median !== null ? Number(row.median).toFixed(4) : '—' }}
+                {{ row.median !== null ? Number(row.median).toFixed(4) : '-' }}
               </td>
               <td style="text-align:center">
                 <span style="font-size:10px;padding:2px 7px;border-radius:4px"
                       :style="row.median !== null
-                        ? 'background:rgba(34,197,94,.1);color:#22c55e;border:1px solid rgba(34,197,94,.2)'
+                        ? 'background:rgba(34,197,94,.1);color:var(--green);border:1px solid rgba(34,197,94,.2)'
                         : 'background:rgba(239,68,68,.08);color:var(--red);border:1px solid rgba(239,68,68,.2)'">
                   {{ row.median !== null ? '有填充值' : '无' }}
                 </span>
@@ -175,8 +176,8 @@ onMounted(() => {
     <div v-if="dashboardError" class="error" style="margin-bottom:12px">{{ dashboardError }}</div>
     <div v-if="dashboardLoading" style="text-align:center;padding:40px;color:var(--text-dim)">数据加载中...</div>
     <div v-else-if="dashboardData" style="display:flex;flex-direction:column;gap:16px;">
-      <!-- Key Stats -->
-      <div class="grid" style="grid-template-columns: repeat(4, 1fr);">
+      <!-- Key Stats（窄屏自动折叠为 2 列） -->
+      <div class="gov-stats-grid">
         <div class="card" style="padding:16px;text-align:center;">
           <div style="font-size:24px;font-weight:600;color:var(--primary)">{{ dashboardData.stats.samples }}</div>
           <div style="font-size:12px;color:var(--text-dim);margin-top:4px">总样本量</div>
@@ -194,7 +195,7 @@ onMounted(() => {
           <div style="font-size:12px;color:var(--text-dim);margin-top:4px">重复记录数</div>
         </div>
       </div>
-      
+
       <div style="display: flex; flex-wrap: wrap; gap: 16px;">
         <!-- Missing Rates Bar Chart (CSS) -->
         <div class="card" style="flex: 2; min-width: 320px;">
@@ -234,7 +235,7 @@ onMounted(() => {
                </div>
             </div>
           </div>
-          
+
           <!-- Data Types -->
           <div class="card">
             <div class="card-header"><span class="card-title">特征数据类型分布</span></div>
@@ -265,3 +266,15 @@ onMounted(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Key Stats 栅格：内联 style 写死 4 列不受页面断点约束，改用可折叠类 */
+.gov-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+@media (max-width: 900px) {
+  .gov-stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+</style>

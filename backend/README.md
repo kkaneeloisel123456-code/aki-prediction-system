@@ -69,7 +69,7 @@ SHAP 使用从 Voting Ensemble 中取出的 XGBoost 子估计器，因此即使 
   ```
 
   前后端同源部署时（后端直接托管 `frontend/dist`）不需要设置。
-- **PDF 中文字体**：按 `backend/assets/fonts/` → `C:/Windows/Fonts/` 的顺序查找 TTF；找不到 TTF 时回退 Helvetica（中文会无法显示）。
+- **PDF 中文字体**：按 `backend/assets/fonts/` → `C:/Windows/Fonts/` 的顺序查找 TTF；找不到 TTF 时抛出 RuntimeError（无法生成中文 PDF）（中文会无法显示）。
 
 ## 安全说明
 

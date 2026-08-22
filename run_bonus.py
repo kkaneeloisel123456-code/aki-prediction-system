@@ -24,6 +24,17 @@ y = prep['y']
 
 import joblib
 
+def _check_lfs(path):
+    import sys
+    if path.exists() and path.stat().st_size < 300:
+        head = path.read_bytes()[:40]
+        if head.startswith(b"version https://git-lfs"):
+            sys.exit(
+                f"Error: {path.name} is a Git LFS pointer ({path.stat().st_size} bytes). "
+                "Run 'git lfs pull' or 'python run_clean.py' first."
+            )
+
+
 # 统一使用 run_clean.py 的最终特征与 scaler，避免重复筛选导致口径漂移
 with open('models/selected_features.txt', 'r', encoding='utf-8') as f:
     n35 = [line.strip() for line in f if line.strip()]
@@ -241,6 +252,11 @@ print("  [OK] PDP")
 from sklearn.ensemble import ExtraTreesClassifier, VotingClassifier
 
 import joblib
+
+import os as _os
+from pathlib import Path as _Path
+# 无论从哪个目录执行，产物都落到仓库根目录
+_os.chdir(_Path(__file__).resolve().parent)
 voting_path = 'models/final_voting_model.pkl'
 if os.path.exists(voting_path):
     voting = joblib.load(voting_path)

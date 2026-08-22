@@ -18,8 +18,9 @@ from src.data.prepare import (
     normalize_columns,
     prepare_training_data,
 )
-from src.models.calibration import RISK_HIGH as CAL_RISK_HIGH
-from src.models.calibration import RISK_LOW as CAL_RISK_LOW
+# calibration.py 的阈值常量随死代码一并移除；单一事实源是 src.config
+from src.config import RISK_HIGH as CAL_RISK_HIGH
+from src.config import RISK_LOW as CAL_RISK_LOW
 from src.web_inputs import MODEL_FEATURE_INPUT_KEYS, OUTCOME_INPUT_KEYS
 
 
@@ -155,3 +156,10 @@ class RepoConsistencyTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class BackendThresholdConsistencyTest(unittest.TestCase):
+    def test_backend_thresholds_match_src(self):
+        from src.config import RISK_LOW as SRC_LOW, RISK_HIGH as SRC_HIGH
+        from backend.app.config import RISK_LOW as B_LOW, RISK_HIGH as B_HIGH
+        self.assertEqual(SRC_LOW, B_LOW)
+        self.assertEqual(SRC_HIGH, B_HIGH)

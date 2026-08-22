@@ -16,6 +16,17 @@ import warnings
 warnings.filterwarnings('ignore')
 
 import joblib
+
+def _check_lfs(path):
+    import sys
+    if path.exists() and path.stat().st_size < 300:
+        head = path.read_bytes()[:40]
+        if head.startswith(b"version https://git-lfs"):
+            sys.exit(
+                f"Error: {path.name} is a Git LFS pointer ({path.stat().st_size} bytes). "
+                "Run 'git lfs pull' or 'python run_clean.py' first."
+            )
+
 import numpy as np
 import pandas as pd
 
@@ -46,6 +57,11 @@ from sklearn.ensemble import RandomForestClassifier
 
 from src.config import TARGET, is_leakage
 from src.data.prepare import prepare_raw_numeric, prepare_training_data
+
+import os as _os
+from pathlib import Path as _Path
+# 无论从哪个目录执行，产物都落到仓库根目录
+_os.chdir(_Path(__file__).resolve().parent)
 
 os.makedirs('outputs/figures', exist_ok=True)
 os.makedirs('outputs/tables', exist_ok=True)

@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onActivated } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '../api/client'
 import { useSelectedPatient } from '../composables/usePatient'
 import type { FeaturesResponse, PredictResponse } from '../api/types'
+
+// keep-alive（App.vue）按组件名缓存本页，防止切页丢失已录入的表单。
+defineOptions({ name: 'PredictPage' })
 
 const meta      = ref<FeaturesResponse | null>(null)
 const values    = ref<Record<string, number | string>>({})
@@ -12,6 +15,11 @@ const loading   = ref(false)
 const error     = ref<string | null>(null)
 const activeTab = ref('preop')
 const selectedPatientId = ref<string | null>(null)
+// 最近一次成功预测提交的载荷：PDF 下载复用它，保证报告与屏幕结果一致
+// （用户改了表单但未重新预测时，PDF 不会悄悄按新值生成）。
+let lastPayload: { features: Record<string, number>; patientId?: string } | null = null
+// 已应用到表单的患者 id；keep-alive 下 onActivated 据此判断工作台是否换了人。
+let appliedPatientId: string | null = null
 
 const TIMING: Record<string, string> = {
   preop:   '术前指标',
@@ -24,26 +32,44 @@ const TIMING_ORDER = ['preop', 'intraop', 'icu', 'postop']
 const route = useRoute()
 const { selectedPatient, clear: clearSelectedPatient } = useSelectedPatient()
 
+function initValues(prefilled: Record<string, number>) {
+  const init: Record<string, number | string> = {}
+  ;((meta.value?.metas ?? []) as any[]).forEach((m: any) => {
+    // 未录入字段保持为空（placeholder 展示中位数），提交时不发送，
+    // 后端才能正确识别并用中位数填充、回传 missing_filled。
+    let val: number | string = ''
+    if (prefilled[m.name] !== undefined) {
+      val = Number(prefilled[m.name])
+    } else {
+      const q = route.query[m.name]
+      // 裸 query 参数（如 ?术后β2MG&auto=1）解析为 null / ''，
+      // Number() 会得到 0 而不是 NaN，必须先排除再转换。
+      if (typeof q === 'string' && q.trim() !== '') {
+        const parsed = Number(q)
+        if (!Number.isNaN(parsed)) val = parsed
+      }
+    }
+    init[m.name] = val
+  })
+  values.value = init
+}
+
+function applyPatient(id: string, features: Record<string, number>) {
+  initValues(features)
+  selectedPatientId.value = id
+  appliedPatientId = id
+  result.value = null
+  error.value = null
+  lastPayload = null
+}
+
 onMounted(async () => {
   try {
     const f = await api.features()
     meta.value = f
-    const init: Record<string, number | string> = {}
-    const prefilled = selectedPatient.value?.features ?? {}
-    f.metas.forEach((m: any) => {
-      // 未录入字段保持为空（placeholder 展示中位数），提交时不发送，
-      // 后端才能正确识别并用中位数填充、回传 missing_filled。
-      let val: number | string = ''
-      if (prefilled[m.name] !== undefined) {
-        val = Number(prefilled[m.name])
-      } else if (route.query[m.name] !== undefined) {
-        const parsed = Number(route.query[m.name])
-        if (!Number.isNaN(parsed)) val = parsed
-      }
-      init[m.name] = val
-    })
-    values.value = init
-    if (selectedPatient.value) selectedPatientId.value = selectedPatient.value.id
+    const p = selectedPatient.value
+    if (p) applyPatient(p.id, p.features)
+    else initValues({})
     const first = TIMING_ORDER.find(t => f.metas.some((m: any) => m.timing === t))
     if (first) activeTab.value = first
 
@@ -55,8 +81,14 @@ onMounted(async () => {
   }
 })
 
-onBeforeUnmount(() => {
-  clearSelectedPatient()
+// 本页被 keep-alive 缓存：从工作台点击“查看”另一患者回到这里时，
+// onMounted 不会再触发，改在激活时检测患者是否变化。
+onActivated(() => {
+  const p = selectedPatient.value
+  if (p && p.id !== appliedPatientId && meta.value) {
+    applyPatient(p.id, p.features)
+    setTimeout(() => { run() }, 50)
+  }
 })
 
 const availableTabs = computed(() =>
@@ -67,6 +99,15 @@ const availableTabs = computed(() =>
 const currentItems = computed(() =>
   meta.value ? (meta.value.metas as any[]).filter((m: any) => m.timing === activeTab.value) : []
 )
+// Tab 上显示“已填 n/N”，医生一眼看出哪个时段还没录。
+function filledCount(t: string): number {
+  return ((meta.value?.metas ?? []) as any[]).filter(
+    (m: any) => m.timing === t && String(values.value[m.name] ?? '').trim() !== ''
+  ).length
+}
+function tabTotal(t: string): number {
+  return ((meta.value?.metas ?? []) as any[]).filter((m: any) => m.timing === t).length
+}
 
 // Backend returns Chinese 高/中/低; normalize to CSS class keys.
 const riskClass = computed((): string => {
@@ -79,6 +120,14 @@ const riskLevelText = computed(() => {
   if (!result.value) return '等待预测'
   return riskClass.value === 'high' ? '高风险' : riskClass.value === 'medium' ? '中风险' : '低风险'
 })
+// 仪表盘下方的分级阈值说明（此前只存在于 PDF 里）。
+const thresholdNote = computed(() => {
+  const lo = meta.value?.risk_low ?? 0.3
+  const hi = meta.value?.risk_high ?? 0.7
+  const l = (lo * 100).toFixed(0)
+  const h = (hi * 100).toFixed(0)
+  return `风险分级：低 < ${l}% · 中 ${l}–${h}% · 高 ≥ ${h}%（校准后概率）`
+})
 
 // ── 3/4 弧仪表盘 ──────────────────────────────────────────────
 // pathLength=100, 3/4 圆弧=75, rotate(135)把缺口置于正下方
@@ -90,7 +139,7 @@ const gaugeColor = computed(() => {
 })
 const gaugeDisplay = computed(() => {
   const p = result.value?.probability
-  if (p == null || !Number.isFinite(p)) return '—'
+  if (p == null || !Number.isFinite(p)) return '-'
   return (Math.min(1, Math.max(0, p)) * 100).toFixed(1) + '%'
 })
 // 进度弧长 = probability × 75（最大填满3/4圆）
@@ -105,6 +154,10 @@ const topShap = computed(() => result.value?.shap_values.slice(0, 6) ?? [])
 const maxShap = computed(() =>
   Math.max(0.001, ...topShap.value.map((s: any) => Math.abs(s.shap)))
 )
+// SHAP 图中间显示医生看得懂的中文标签，原始特征名放 title。
+function shapLabel(name: string): string {
+  return ((meta.value?.metas ?? []) as any[]).find((m: any) => m.name === name)?.label || name
+}
 
 // 缺失字段默认只展示前几个，避免大量中位数填充标签把页面撑得过长
 const MISSING_PREVIEW = 8
@@ -130,14 +183,39 @@ function collectNumeric(): Record<string, number> | null {
   return numeric
 }
 
+// 与训练端一致的“临床合理范围”校验：超界值在训练时即按缺失处理，
+// 这里直接拦下并给出范围提示，避免误输的极端值悄悄影响预测。
+function checkRanges(numeric: Record<string, number>): string | null {
+  const bad: string[] = []
+  for (const m of ((meta.value?.metas ?? []) as any[])) {
+    const v = numeric[m.name]
+    if (v === undefined || m.lo == null || m.hi == null) continue
+    if (v < m.lo || v > m.hi) {
+      bad.push(`${m.label || m.name}（合理范围 ${m.lo}–${m.hi}，当前 ${v}）`)
+    }
+  }
+  if (!bad.length) return null
+  const shown = bad.slice(0, 4).join('；')
+  return `以下字段超出临床合理范围，请核对后重试：${shown}${bad.length > 4 ? ` 等 ${bad.length} 项` : ''}`
+}
+
 async function run() {
+  // 后端冷启动加载特征定义的窗口内不允许提交，否则会得到
+  // “全中位数患者”的预测却毫无提示。
+  if (!meta.value) return
+  // 自动预测（setTimeout）与手动点击可能重叠，只放行一次。
+  if (loading.value) return
   loading.value = true
   error.value = null
   showAllMissing.value = false
   try {
     const numeric = collectNumeric()
     if (!numeric) return
-    result.value = await api.predict(numeric, selectedPatientId.value ?? undefined)
+    const rangeError = checkRanges(numeric)
+    if (rangeError) { error.value = rangeError; return }
+    const pid = selectedPatientId.value ?? undefined
+    result.value = await api.predict(numeric, pid)
+    lastPayload = { features: numeric, patientId: pid }
   } catch (e: any) {
     result.value = null
     const msg = e?.message || ''
@@ -150,29 +228,37 @@ const interpretation = computed(() => {
   if (!result.value?.shap_values?.length) return ''
   const top = [...result.value.shap_values].sort((a:any,b:any)=>Math.abs(b.shap)-Math.abs(a.shap)).slice(0,3)
   return '主要影响因素：' + top.map((s:any)=>{
-    const label = (meta.value?.metas as any[])?.find((m:any)=>m.name===s.feature)?.label || s.feature
+    const label = shapLabel(s.feature)
     return label + (s.direction==='risk' ? ' 升高' : ' 降低')
   }).join('、') + '。'
 })
 
 function reset() {
   if (!meta.value) return
-  // 清空为空值（placeholder 仍显示中位数），而不是回填中位数
-  const init: Record<string, number | string> = {}
-  meta.value.metas.forEach((m: any) => (init[m.name] = ''))
-  values.value = init; result.value = null
+  // 清空为空值（placeholder 仍显示中位数），而不是回填中位数；
+  // 同时解除患者归属，避免重置后的预测/PDF 仍挂在旧患者名下。
+  initValues({})
+  result.value = null
   error.value = null
+  lastPayload = null
+  selectedPatientId.value = null
+  appliedPatientId = null
+  clearSelectedPatient()
 }
 
 async function downloadPdf() {
   if (!result.value) return
-  const numeric = collectNumeric()
-  if (!numeric) return
+  // 复用产生当前屏幕结果的输入，保证 PDF 与页面显示一致。
+  const payload = lastPayload
+  if (!payload) { error.value = '请先完成一次预测，再下载报告'; return }
   try {
-    const blob = await api.reportPdf(numeric, selectedPatientId.value ?? undefined)
+    const blob = await api.reportPdf(payload.features, payload.patientId)
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url; a.download = 'AKI_Report.pdf'; a.click()
+    const pidPart = payload.patientId
+      ? String(payload.patientId).replace(/[\\/:*?"<>|#%]/g, '_').slice(0, 32)
+      : 'report'
+    a.href = url; a.download = `AKI_Report_${pidPart}.pdf`; a.click()
     URL.revokeObjectURL(url)
   } catch (e: any) {
     error.value = 'PDF 下载失败：' + (e?.message || e)
@@ -191,7 +277,7 @@ async function downloadPdf() {
         <span class="card-title">患者信息录入</span>
         <div style="display: flex; align-items: flex-end; gap: 8px;">
           <button class="btn btn-secondary btn-sm" @click="reset" title="清空已录入的值（未填写项预测时按临床中位数处理）">重置</button>
-          <button class="btn btn-primary btn-sm" style="border:1px solid transparent" @click="run" :disabled="loading">
+          <button class="btn btn-primary btn-sm" style="border:1px solid transparent" @click="run" :disabled="loading || !meta">
             {{ loading ? '预测中…' : '开始预测' }}
           </button>
         </div>
@@ -203,7 +289,7 @@ async function downloadPdf() {
             v-for="t in availableTabs" :key="t"
             class="tab" :class="{ active: activeTab === t }"
             @click="activeTab = t"
-          >{{ TIMING[t] }}</button>
+          >{{ TIMING[t] }} <span style="font-size:9px;opacity:.65">{{ filledCount(t) }}/{{ tabTotal(t) }}</span></button>
         </div>
 
         <!-- 当前 Tab 字段 -->
@@ -219,7 +305,7 @@ async function downloadPdf() {
         <!-- 底部说明/错误/解释：margin-top:auto 贴卡片底边，消除拉伸产生的空白 -->
         <div style="margin-top:auto;padding-top:12px">
           <p style="font-size:10px;color:var(--text-dim);text-align:center">
-            未填写的后续阶段数据，将默认使用临床中位数进行预测。
+            未填写的字段将自动使用训练集中位数填充（预测结果中会标注）。
           </p>
           <p v-if="error" class="error" style="margin-top:8px">{{ error }}</p>
           <div v-if="interpretation" class="note" style="margin-top:10px">{{ interpretation }}</div>
@@ -233,13 +319,14 @@ async function downloadPdf() {
       <div class="card" style="text-align:center">
         <div class="card-header">
           <span class="card-title">风险评估结果</span>
+          <span v-if="selectedPatientId" style="font-size:10px;color:var(--text-dim)" title="表单值来自医生工作台的演示队列">已载入患者 {{ selectedPatientId }}</span>
           <span v-if="result" class="tag" :class="'tag-' + riskClass">{{ riskLevelText }}</span>
           <span v-else class="muted" style="font-size:10px">预测后显示</span>
         </div>
         <div class="card-body" style="padding-top:6px;padding-bottom:14px">
           <!--
-            circle r=80, cx=cy=100 → circumference ≈ 502
-            pathLength=100 → 3/4弧=75, 缺口=25
+            circle r=80, cx=cy=100 -> circumference ≈ 502
+            pathLength=100 -> 3/4弧=75, 缺口=25
             rotate(135, 100, 100) 把默认起点(3点钟)旋转到(SE),
             使 25% 的缺口落在正下方
           -->
@@ -271,6 +358,7 @@ async function downloadPdf() {
               AKI 发生概率
             </text>
           </svg>
+          <p style="font-size:10px;color:var(--text-dim);margin-top:2px">{{ thresholdNote }}</p>
         </div>
       </div>
 
@@ -311,7 +399,7 @@ async function downloadPdf() {
             <div class="shap-bidir-header">
               <span style="color:var(--green)">← 降低风险</span>
               <span></span>
-              <span style="color:var(--red);text-align:right">增加风险 →</span>
+              <span style="color:var(--red);text-align:right">增加风险 -></span>
             </div>
             <div v-for="s in topShap" :key="s.feature" class="shap-bidir-row">
               <div class="shap-bar-left">
@@ -321,7 +409,7 @@ async function downloadPdf() {
                   :style="{ width: (Math.abs(s.shap) / maxShap * 100) + '%' }"
                 />
               </div>
-              <div class="shap-center-label" :title="s.feature">{{ s.feature }}</div>
+              <div class="shap-center-label" :title="s.feature">{{ shapLabel(s.feature) }}</div>
               <div class="shap-bar-right">
                 <div
                   v-if="s.direction === 'risk'"

@@ -1,19 +1,66 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { api } from '../api/client'
 
 const meta = ref<any>(null)
 const offline = ref(false)
-onMounted(() => api.meta().then((m: any) => { meta.value = m }).catch(() => { offline.value = true }))
+const cvRows = ref<Record<string, unknown>[]>([])
+// 数据未就绪时条形图区域显示占位，只渲染一次，避免
+// “兜底值→真实值”切换引发的宽度过渡/元素重建（Voting 行“卡一下”）。
+const perfLoaded = ref(false)
 
-// 模型 AUC 对比数据（训练阶段固定值）
-const MODEL_PERF = [
-  { name: 'LR',     auc: 0.774, color: '#a78bfa' },
-  { name: 'RF',     auc: 0.789, color: '#38bdf8' },
-  { name: 'XGB',    auc: 0.782, color: '#fb923c' },
-  { name: 'ET',     auc: 0.790, color: '#4ade80' },
-  { name: 'Voting', auc: 0.810, color: '#38bdf8', highlight: true },
+onMounted(() => {
+  api.meta().then((m: any) => { meta.value = m }).catch(() => { offline.value = true })
+  // 首页条形图必须与“模型性能”页同源：在线时直接用 /api/performance
+  // 的 CV 结果渲染，杜绝两页数字打架。
+  api.performance()
+    .then((p) => { cvRows.value = p.cv ?? [] })
+    .catch(() => { /* 离线兜底 */ })
+    .finally(() => { perfLoaded.value = true })
+})
+
+// 离线兜底值与 outputs/tables/final_cv_results.csv 逐项同步（50次CV口径）。
+// 注意：final_cv_results.csv 中 Voting 的模型名是 'Voting Ensemble'（带空格），
+// 兜底表的 key 必须与之完全一致，否则真实数据到达时该行 key 变化、
+// 被 Vue 重建并失去高亮（表现为"卡一下才出现"）。
+const FALLBACK_PERF = [
+  { key: 'LogisticRegression', name: 'LR',     auc: 0.7939, std: 0.0432, color: '#a78bfa' },
+  { key: 'RandomForest',       name: 'RF',     auc: 0.8073, std: 0.0409, color: '#38bdf8' },
+  { key: 'XGBoost',            name: 'XGB',    auc: 0.8056, std: 0.0435, color: '#fb923c' },
+  { key: 'ExtraTrees',         name: 'ET',     auc: 0.7935, std: 0.0430, color: '#4ade80' },
+  { key: 'Voting Ensemble',    name: 'Voting', auc: 0.8096, std: 0.0428, color: '#38bdf8', highlight: true },
 ]
+const NAME_MAP: Record<string, string> = {
+  LogisticRegression: 'LR', RandomForest: 'RF', XGBoost: 'XGB',
+  ExtraTrees: 'ET', 'Voting Ensemble': 'Voting',
+}
+
+const MODEL_PERF = computed(() => {
+  if (!perfLoaded.value) return []
+  if (!cvRows.value.length) return FALLBACK_PERF
+  const byKey = Object.fromEntries(FALLBACK_PERF.map(f => [f.key, f]))
+  const rows = cvRows.value.map((r: any) => {
+    const key = String(r['模型'] ?? '')
+    return {
+      key,
+      name: NAME_MAP[key] ?? key,
+      auc: Number(r['50次CV AUC均值'] ?? 0) || 0,
+      std: Number(r['标准差'] ?? 0) || 0,
+    }
+  })
+  return rows
+    .filter(r => r.auc > 0)
+    .map(r => ({
+      ...r,
+      color: byKey[r.key]?.color ?? 'var(--primary)',
+      highlight: r.key === 'Voting Ensemble',
+    }))
+})
+const votingStd = computed(() => {
+  const v = MODEL_PERF.value.find(m => m.name === 'Voting')
+  return v && v.std ? `均值 ± ${v.std.toFixed(3)}` : '均值 ± 0.043'
+})
+
 // bar 宽度百分比（基准 0.72, 上限 0.86）
 const barPct = (auc: number) =>
   Math.max(2, ((auc - 0.72) / (0.86 - 0.72) * 100)).toFixed(1) + '%'
@@ -71,7 +118,7 @@ const barPct = (auc: number) =>
     <div class="kpi-card kpi-card-blue">
       <div class="kpi-label">50次嵌套 CV AUC</div>
       <div class="kpi-value">{{ meta?.best_auc ? meta.best_auc.toFixed(3) : '0.810' }}</div>
-      <div class="kpi-delta positive">均值 ± 0.045</div>
+      <div class="kpi-delta positive">{{ votingStd }}</div>
     </div>
     <div class="kpi-card kpi-card-green">
       <div class="kpi-label">集成策略</div>
@@ -94,6 +141,8 @@ const barPct = (auc: number) =>
         <span class="badge badge-info">5折×10次嵌套CV</span>
       </div>
       <div class="card-body">
+        <p v-if="!perfLoaded" class="muted" style="text-align:center;padding:14px 0">加载中…</p>
+        <template v-else>
         <div
           v-for="m in MODEL_PERF" :key="m.name"
           class="perf-bar-row" :class="{ highlight: m.highlight }"
@@ -104,6 +153,7 @@ const barPct = (auc: number) =>
           </div>
           <div class="perf-bar-val">{{ m.auc.toFixed(3) }}</div>
         </div>
+        </template>
         <p style="font-size:10px;color:var(--text-dim);margin-top:12px">
           ▪ 基准线 0.72 &nbsp;·&nbsp; Voting Ensemble 最优
         </p>
@@ -120,7 +170,7 @@ const barPct = (auc: number) =>
           嵌套式交叉验证与 Bootstrap 内部验证，为临床决策提供透明、可信的个体化风险评估。
         </p>
         <div class="info-box" style="margin-bottom:0">
-          核心能力：在线预测 → 风险分层 → 危险因素解析 → 干预建议 → PDF 报告
+          核心能力：在线预测 -> 风险分层 -> 危险因素解析 -> 干预建议 -> PDF 报告
         </div>
       </div>
     </div>

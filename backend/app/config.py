@@ -23,6 +23,35 @@ IMPUTE_VALUES = APP_DATA / "impute_values.json"
 RISK_LOW = 0.30
 RISK_HIGH = 0.70
 
+# Clinical plausibility ranges for the model features, ported verbatim from
+# src/data/prepare.py CLINICAL_RANGES (the training pipeline flagged values
+# outside these as missing). The inference path applies the same rule so that
+# a typo like SBP=1200 is median-filled here exactly like it was in training,
+# instead of driving the prediction.
+FEATURE_RANGES: dict[str, tuple[float, float]] = {
+    "APACHEII": (0, 50),
+    "手术时间": (30, 1440),
+    "术中失血量": (0, 5000),
+    "术中晶体液量": (0, 10000),
+    "术前SBP": (60, 250),
+    "术前PaO2": (30, 600),
+    "术后PaO2": (30, 600),
+    "术后BE": (-20, 20),
+    "术后Lactate": (0, 20),
+    "术后CRP": (0, 300),
+    "术前WBC": (1, 50),
+    "术后PLT": (20, 800),
+    "术前PLT": (20, 800),
+    "术前Scr": (20, 500),
+    "ICUAdmSCr": (20, 500),
+    "术前eGFR": (5, 200),
+    "ICUAdmeGFR": (5, 200),
+    "术后Urea": (1, 40),
+    "术后UA": (50, 1000),
+    "术前BNP": (0, 50000),
+    "术后BNP": (0, 50000),
+}
+
 # CORS: defaults cover the Vite dev server. Set CORS_ORIGINS to a comma-separated
 # list of additional origins for production deployments behind a different host.
 _default_origins = [

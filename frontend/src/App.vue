@@ -1,21 +1,35 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useTheme } from './composables/useTheme'
+import { api } from './api/client'
 
 const route = useRoute()
 const { theme, toggle } = useTheme()
 const online = ref(false)
-const bestAuc = ref('—')
-import { api } from './api/client'
-onMounted(async () => {
+const bestAuc = ref('-')
+
+async function refreshHealth() {
   try {
     const h = await api.health()
     online.value = h.model_loaded
+  } catch { online.value = false }
+}
+
+// 后端晚于前端启动、或中途崩溃时，徽标要能自己恢复/更新。
+let healthTimer: ReturnType<typeof setInterval> | undefined
+
+onMounted(async () => {
+  await refreshHealth()
+  healthTimer = setInterval(refreshHealth, 30_000)
+  // meta 与 health 分开处理：表格读取失败不应把已确认在线的模型误标为离线。
+  try {
     const m = await api.meta()
     if (m.best_auc != null) bestAuc.value = m.best_auc.toFixed(3)
-  } catch { online.value = false }
+  } catch { /* 顶栏 AUC 保持 '-' */ }
 })
+onUnmounted(() => { if (healthTimer) clearInterval(healthTimer) })
+
 const title = computed(() => (route.meta?.title as string) ?? '')
 
 const nav = [
@@ -117,7 +131,12 @@ const nav = [
         </div>
       </header>
       <div class="content">
-        <RouterView />
+        <!-- 只缓存预测页：35 字段表单切页即丢是最痛的堵点；其余页面保持即进即取。 -->
+        <RouterView v-slot="{ Component }">
+          <KeepAlive include="PredictPage">
+            <component :is="Component" />
+          </KeepAlive>
+        </RouterView>
       </div>
     </div>
   </div>

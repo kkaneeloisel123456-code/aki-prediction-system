@@ -45,7 +45,8 @@ async function processFile(file: File) {
     const blob = await api.csvUpload(file)
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url; a.download = 'AKI_batch.csv'; a.click()
+    // 与后端 Content-Disposition 的文件名保持一致，两页不再各叫各的。
+    a.href = url; a.download = 'AKI_predictions.csv'; a.click()
     URL.revokeObjectURL(url)
     csvResult.value = `✓ 已完成预测：${file.name}`
   } catch (err: any) {
@@ -70,7 +71,7 @@ function triggerInput() { if (!busy.value) fileInput.value?.click() }
 
 <template>
   <h2 class="page-title">医生工作台</h2>
-  <p class="page-subtitle">患者风险列表与批量评估 <span style="background:rgba(251,191,36,.15);color:#fbbf24;padding:1px 7px;border-radius:8px;font-size:9px;font-weight:700;margin-left:4px">演示数据</span> · 预测使用真实模型</p>
+  <p class="page-subtitle">患者风险列表与批量评估 <span style="background:rgba(251,191,36,.15);color:var(--yellow);padding:1px 7px;border-radius:8px;font-size:9px;font-weight:700;margin-left:4px">演示数据</span> · 预测使用真实模型</p>
 
   <!-- 风险汇总 KPI -->
   <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);max-width:500px;margin-bottom:18px">
@@ -152,7 +153,7 @@ function triggerInput() { if (!busy.value) fileInput.value?.click() }
           <div class="info-box" style="margin-bottom:12px">
             上传包含患者特征的 CSV，系统逐行预测并下载结果文件。
             <a href="/api/template.csv" download style="color:var(--primary);font-weight:600">下载模板 CSV ↓</a>
-            （35 个特征列名需与模板一致，可含 ID 列）
+            （35 个特征列名需与模板一致，可含 ID 列；结果文件会标注被中位数替换的无效值）
           </div>
           <div
             class="upload-zone"
@@ -213,7 +214,7 @@ function triggerInput() { if (!busy.value) fileInput.value?.click() }
 
 <style scoped>
 /* 左侧表格卡高度由右列内容决定：外层占位容器跟随网格拉伸，
-   卡片绝对定位填满，表格在有限区域内滚动 → 底边与“风险分布”对齐 */
+   卡片绝对定位填满，表格在有限区域内滚动 -> 底边与“风险分布”对齐 */
 .ws-left { position: relative; }
 .ws-left .card {
   position: absolute; inset: 0;

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
@@ -98,6 +99,9 @@ def generate_pdf(patient: Dict[str, Any], result: Dict[str, Any]) -> bytes:
     band: str = result["risk_level"]
     r, g, b = _risk_color(band)
     pid: str = str(patient.get("id") or patient.get("patient_id") or "N/A")
+    # Keep the in-body patient ID on one line: strip control characters and
+    # cap the length so a long / messy ID can't break the centered header.
+    pid = re.sub(r"[\x00-\x1f\x7f]", "", pid)[:32] or "N/A"
     now: str = datetime.now().strftime("%Y-%m-%d %H:%M")
     calibrated: bool = bool(result.get("calibrated", False))
 
@@ -134,7 +138,21 @@ def generate_pdf(patient: Dict[str, Any], result: Dict[str, Any]) -> bytes:
     pdf.cell(W, 5,
              f"风险分层阈值：低 < 0.30  /  中 0.30-0.70  /  高 >= 0.70   {note}",
              align="C", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(8)
+    pdf.ln(4)
+
+    # When the caller forced a demo probability (override_prob), the banner /
+    # risk band / clinical advice no longer reflect the model output, so the
+    # report must say so prominently - it must never pass as a real prediction.
+    if result.get("probability_overridden"):
+        pdf.set_fill_color(255, 243, 205)
+        pdf.set_draw_color(180, 140, 20)
+        pdf.set_text_color(140, 90, 0)
+        pdf.set_font(font, "B", 10)
+        pdf.cell(W, 8,
+                 "演示数据：本报告概率为人工指定的演示值（override_prob），非模型计算结果",
+                 align="C", border=True, fill=True, new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(4)
+    pdf.ln(4)
 
     # -----------------------------------------------------------------------
     # Progress bar (visual probability gauge)

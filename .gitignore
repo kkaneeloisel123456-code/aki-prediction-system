@@ -76,3 +76,7 @@ frontend-v2/
 runtime.txt
 __pycache__/
 *.pyc
+
+app_data_staging/
+
+app_data_backup/

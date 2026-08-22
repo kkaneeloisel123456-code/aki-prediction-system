@@ -265,3 +265,8 @@ def save_app_data(
         raise
     if backup.exists():
         shutil.rmtree(backup)
+
+def require_raw_data(path: str = 'data/raw/AKI数据.xlsx') -> None:
+    import sys
+    if not Path(path).exists():
+        sys.exit(f"Data file {path} not found. Place AKI数据.xlsx in data/raw/ and retry.")

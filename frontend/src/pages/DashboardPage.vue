@@ -4,18 +4,21 @@ import { api } from '../api/client'
 import type { DashboardDemo } from '../api/types'
 const data = ref<DashboardDemo | null>(null)
 const loadErr = ref('')
-onMounted(() => { api.dashboard().then((d: import('../api/types').DashboardDemo) => { data.value = d }).catch(() => { loadErr.value = '数据加载失败' }) })
-const maxCases = computed(() => data.value ? Math.max(...data.value.trend.totalCases) : 1)
+const auc = ref('0.810')
+onMounted(() => {
+  api.dashboard().then((d: import('../api/types').DashboardDemo) => { data.value = d }).catch(() => { loadErr.value = '数据加载失败' })
+  api.meta().then(m => { if (m.best_auc != null) auc.value = m.best_auc.toFixed(3) }).catch(() => { /* 保持兜底值 */ })
+})
 const COLORS = ['#38bdf8', '#4ade80', '#fbbf24', '#a78bfa', '#f87171']
 const totalDeptCases = computed(() => data.value ? data.value.departments.reduce((s, d) => s + d.cases, 0) : 1)
 </script>
 <template>
   <h2 class="page-title">管理仪表盘</h2>
-  <p class="page-subtitle">医院管理视角：AKI 发生率趋势、科室分布 <span style="background:rgba(251,191,36,.15);color:#fbbf24;padding:1px 7px;border-radius:8px;font-size:9px;font-weight:700;margin-left:4px">演示数据</span></p>
+  <p class="page-subtitle">医院管理视角：AKI 发生率趋势、科室分布 <span style="background:rgba(251,191,36,.15);color:var(--yellow);padding:1px 7px;border-radius:8px;font-size:9px;font-weight:700;margin-left:4px">演示数据</span></p>
   <div class="kpi-grid" v-if="data">
     <div class="kpi-card kpi-card-blue"><div class="kpi-label">本月病例数</div><div class="kpi-value">{{ data!.trend.totalCases[data!.trend.months.length-1] }}</div><div class="kpi-delta positive">↑ 示例</div></div>
     <div class="kpi-card kpi-card-orange"><div class="kpi-label">本月 AKI 发生率</div><div class="kpi-value">{{ data.akiRate }}%</div><div class="kpi-delta neutral">125 / 420</div></div>
-    <div class="kpi-card kpi-card-green"><div class="kpi-label">模型 AUC</div><div class="kpi-value">0.810</div><div class="kpi-delta neutral">50次嵌套CV</div></div>
+    <div class="kpi-card kpi-card-green"><div class="kpi-label">模型 AUC</div><div class="kpi-value">{{ auc }}</div><div class="kpi-delta neutral">50次嵌套CV</div></div>
     <div class="kpi-card kpi-card-blue"><div class="kpi-label">在线服务</div><div class="kpi-value" style="font-size:18px">Active</div><div class="kpi-delta neutral">演示</div></div>
   </div>
   <div v-if="loadErr" class="error">{{ loadErr }}</div>
@@ -24,8 +27,8 @@ const totalDeptCases = computed(() => data.value ? data.value.departments.reduce
       <div class="card-header"><span class="card-title">AKI 发生率趋势</span></div>
       <div class="card-body">
         <svg viewBox="0 0 500 220" style="width:100%;height:auto">
-          <polyline :points="data!.trend.months.map((_: string, i: number)=>`${30+i*49},${190-data!.trend.akiRates[i]*4}`).join(' ')" fill="none" stroke="#38bdf8" stroke-width="2.5" />
-          <g fill="#38bdf8"><circle v-for="(m,i) in data!.trend.months" :key="i" :cx="30+i*49" :cy="190-data!.trend.akiRates[i]*4" r="4" /></g>
+          <polyline :points="data!.trend.months.map((_: string, i: number)=>`${30+i*49},${190-data!.trend.akiRates[i]*4}`).join(' ')" fill="none" stroke="var(--primary)" stroke-width="2.5" />
+          <g fill="var(--primary)"><circle v-for="(m,i) in data!.trend.months" :key="i" :cx="30+i*49" :cy="190-data!.trend.akiRates[i]*4" r="4" /></g>
           <g class="axis-labels" font-size="9"><text v-for="(m,i) in data!.trend.months" :key="i" :x="30+i*49" :y="212" text-anchor="middle">{{ m.slice(5) }}</text></g>
         </svg>
       </div>

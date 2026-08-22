@@ -421,3 +421,21 @@ tr:hover td { background: var(--bg-hover); }
 .mini-risk-fill  { height: 100%; border-radius: 3px; transition: width .5s ease; }
 .mini-risk-val   { font-size: 11px; font-weight: 600; color: var(--text); }
 .badge-warn { background: rgba(251,191,36,.12); color: var(--yellow); border: 1px solid rgba(251,191,36,.2); }
+
+/* ── Responsive ──────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .sidebar { width: 56px; }
+  .sidebar .sidebar-label,
+  .sidebar .sidebar-brand-text,
+  .sidebar .sidebar-subtitle,
+  .sidebar .sidebar-title { display: none; }
+  .sidebar-brand { padding: 0 10px; justify-content: center; height: 50px; }
+  .sidebar-nav { padding: 8px 0; }
+  .sidebar-link { padding: 10px 0; justify-content: center; }
+  .sidebar-footer { padding: 8px 0; }
+  .main { margin-left: 56px; }
+  .form-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 650px) {
+  .form-grid { grid-template-columns: 1fr; }
+}

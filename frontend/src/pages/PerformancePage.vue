@@ -31,6 +31,21 @@ onMounted(() => {
   api.performance().then(p => perf.value = p).catch(() => { offline.value = true })
   api.figures().then((f: string[]) => { figures.value = f }).catch(() => { offline.value = true })
 })
+
+// 表格显示：模型列用中文名，数值列取 4 位小数（CSV 原值是 16 位浮点）。
+const MODEL_CN: Record<string, string> = {
+  LogisticRegression: '逻辑回归 LR',
+  RandomForest: '随机森林 RF',
+  XGBoost: 'XGBoost',
+  ExtraTrees: '极端随机树 ET',
+  'Voting Ensemble': '投票集成 Voting',
+}
+function fmtCell(k: string, v: unknown): string {
+  if (v == null || v === '') return '-'
+  if (typeof v === 'number') return v.toFixed(4)
+  if (k === '模型') return MODEL_CN[String(v)] ?? String(v)
+  return String(v)
+}
 </script>
 <template>
   <h2 class="page-title">模型性能评估</h2>
@@ -49,7 +64,7 @@ onMounted(() => {
       <div class="card-body">
         <table v-if="perf?.cv?.length">
           <thead><tr><th v-for="k in Object.keys(perf.cv[0])" :key="k">{{ k }}</th></tr></thead>
-          <tbody><tr v-for="(row,i) in perf.cv" :key="i"><td v-for="(v,k) in row" :key="k">{{ String(v) }}</td></tr></tbody>
+          <tbody><tr v-for="(row,i) in perf.cv" :key="i"><td v-for="(v,k) in row" :key="k">{{ fmtCell(String(k), v) }}</td></tr></tbody>
         </table>
         <p v-else class="muted">未找到评估结果。</p>
       </div>
@@ -58,14 +73,16 @@ onMounted(() => {
     <!-- 混淆矩阵独立展示 -->
     <div class="card">
       <div class="card-header">
-        <span class="card-title">混淆矩阵 — 5 折 CV OOF 预测结果</span>
+        <span class="card-title">混淆矩阵 - 5 折 CV OOF 预测结果</span>
         <span class="muted" style="font-size:10px">各模型在 Out-of-Fold 样本上的分类结果</span>
       </div>
       <div class="card-body" style="text-align:center">
         <img
+             v-if="has('confusion_matrices_cv_oof.jpg')"
              :src="api.figureUrl('confusion_matrices_cv_oof.jpg')"
              alt="混淆矩阵"
              style="max-width:100%;max-height:520px;object-fit:contain;border-radius:4px" />
+        <p v-else class="muted">图未生成</p>
       </div>
     </div>
   </div>
@@ -82,13 +99,52 @@ onMounted(() => {
     </div>
   </div>
 
-  <div v-if="tab === 'calibration'" class="grid">
-    <div class="card" v-for="fig in ['calibration_curves.png','decision_curve.png','clinical_impact_curve.png','shap_summary.png']" :key="fig">
-      <div class="card-header"><span class="card-title">{{ figLabel(fig) }}</span></div>
-      <div class="card-body">
-        <img v-if="has(fig)" :src="api.figureUrl(fig)" :alt="figLabel(fig)"
-             style="max-height:360px;object-fit:contain;width:100%" />
-        <p v-else class="muted">图未生成</p>
+  <div v-if="tab === 'calibration'">
+    <div class="grid">
+      <div class="card" v-for="fig in ['calibration_curves.png','decision_curve.png','clinical_impact_curve.png','shap_summary.png']" :key="fig">
+        <div class="card-header"><span class="card-title">{{ figLabel(fig) }}</span></div>
+        <div class="card-body">
+          <img v-if="has(fig)" :src="api.figureUrl(fig)" :alt="figLabel(fig)"
+               style="max-height:360px;object-fit:contain;width:100%" />
+          <p v-else class="muted">图未生成</p>
+        </div>
+      </div>
+    </div>
+    <div class="grid grid-2" style="margin-top:16px">
+      <!-- 后端早已返回这两张表，此前前端没有消费 -->
+      <div class="card">
+        <div class="card-header"><span class="card-title">校准指标（5 折 OOF）</span></div>
+        <div class="card-body">
+          <table v-if="perf?.calibration?.length">
+            <thead><tr><th>指标</th><th>数值</th></tr></thead>
+            <tbody>
+              <tr v-for="(row, i) in perf.calibration" :key="i">
+                <td>{{ String(row['metric'] ?? '') }}</td>
+                <td>{{ fmtCell('value', row['value']) }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-else class="muted">未找到校准指标。</p>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Hosmer-Lemeshow 分组（20% 测试集近似，n≈84）</span>
+        </div>
+        <div class="card-body">
+          <table v-if="perf?.hosmer_lemeshow?.length">
+            <thead><tr><th v-for="k in Object.keys(perf.hosmer_lemeshow[0])" :key="k">{{ k }}</th></tr></thead>
+            <tbody>
+              <tr v-for="(row, i) in perf.hosmer_lemeshow" :key="i">
+                <td v-for="(v, k) in row" :key="k">{{ fmtCell(String(k), v) }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-else class="muted">未找到 HL 检验数据。</p>
+          <p class="muted" style="font-size:10px;margin-top:8px">
+            汇总：chi2=12.053，df=8，P=0.149（LR 简化模型在测试集上的近似复现，样本量小，仅供参考）。
+          </p>
+        </div>
       </div>
     </div>
   </div>
@@ -117,6 +173,7 @@ onMounted(() => {
     <div class="card-body" style="text-align:center">
       <img v-if="has('ablation_heatmap.png')" :src="api.figureUrl('ablation_heatmap.png')"
            style="max-height:420px;object-fit:contain;max-width:100%" />
+      <p v-else class="muted">图未生成</p>
       <p class="muted" style="margin-top:12px">逐步移除特征组，观察 AUC 变化。</p>
     </div>
   </div>
@@ -126,6 +183,7 @@ onMounted(() => {
     <div class="card-body">
       <img v-if="has('ensemble_comparison.png')" :src="api.figureUrl('ensemble_comparison.png')"
            style="max-height:360px;object-fit:contain;max-width:100%" />
+      <p v-else class="muted">图未生成</p>
       <div class="grid grid-3" style="margin-top:16px">
         <div><b>Voting</b><p class="muted">Soft Voting 概率平均，简单稳定</p></div>
         <div><b>Stacking</b><p class="muted">元学习器自动组合基模型</p></div>

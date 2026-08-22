@@ -44,12 +44,6 @@ class PredictResponse(BaseModel):
     missing_filled: List[str]
 
 
-class BatchPredictRequest(BaseModel):
-    rows: List[Dict[str, float]] = Field(
-        ..., description="One feature dict per patient; same semantics as /predict."
-    )
-
-
 class BatchPredictResponse(BaseModel):
     count: int
     results: List[PredictResponse]
@@ -63,6 +57,10 @@ class FeatureMeta(BaseModel):
     unit: str | None = None
     reference: str | None = None
     input: str | None = "number"
+    # Clinical plausibility bounds for form validation (None when the
+    # training side had no range for this feature).
+    lo: float | None = None
+    hi: float | None = None
 
 
 class FeaturesResponse(BaseModel):

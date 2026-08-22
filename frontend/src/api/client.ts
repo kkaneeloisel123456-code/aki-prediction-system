@@ -8,6 +8,18 @@ import type {
   DashboardDemo,
 } from "./types";
 
+// FastAPI errors put a human-readable message in `detail`: either a plain
+// string or (for 422 validation) an array of {loc, msg, type} objects.
+// String() on the array would render "[object Object]".
+function parseApiDetail(status: number, statusText: string, body: any): string {
+  let detail = `${status} ${statusText}`;
+  const d = body?.detail;
+  if (typeof d === "string") detail = `${status}: ${d}`;
+  else if (Array.isArray(d)) detail = `${status}: ${d[0]?.msg ?? JSON.stringify(d)}`;
+  else if (d) detail = `${status}: ${JSON.stringify(d)}`;
+  return detail;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     headers: { "Content-Type": "application/json" },
@@ -16,20 +28,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`;
     try {
-      const body = await res.json();
-      const d = body?.detail;
-      // FastAPI validation errors (422) send detail as an object array;
-      // String() would render "[object Object]", so extract the first msg.
-      if (typeof d === "string") detail = `${res.status}: ${d}`;
-      else if (Array.isArray(d))
-        detail = `${res.status}: ${d[0]?.msg ?? JSON.stringify(d)}`;
-      else if (d) detail = `${res.status}: ${JSON.stringify(d)}`;
+      detail = parseApiDetail(res.status, res.statusText, await res.json());
     } catch {
       /* keep default message */
     }
     throw new Error(detail);
   }
   return res.json() as Promise<T>;
+}
+
+// Shared error path for endpoints that return a Blob on success: read the
+// JSON error body (if any) instead of showing a bare status code.
+async function blobError(res: Response, fallback: string): Promise<Error> {
+  let msg = `${fallback} (${res.status})`;
+  try {
+    msg = parseApiDetail(res.status, res.statusText, await res.json());
+  } catch {
+    /* keep default message */
+  }
+  return new Error(msg);
 }
 
 export const api = {
@@ -44,9 +61,6 @@ export const api = {
   meta: () => request<MetaResponse>("/api/meta"),
   figures: () => request<string[]>("/api/figures"),
   figureUrl: (name: string) => `/api/figures/${encodeURIComponent(name)}`,
-  tables: () => request<string[]>("/api/tables"),
-  tableData: (name: string) =>
-    request<any>(`/api/tables/${encodeURIComponent(name)}`),
   cohort: () => request<CohortResponse>("/api/workstation/cohort"),
   dashboard: () => request<DashboardDemo>("/api/dashboard/demo"),
   imputation: () =>
@@ -69,23 +83,14 @@ export const api = {
         override_prob: overrideProb,
       }),
     });
-    if (!res.ok) throw new Error(`PDF 生成失败 (${res.status})`);
+    if (!res.ok) throw await blobError(res, "PDF 生成失败");
     return res.blob();
   },
   csvUpload: async (file: File) => {
     const form = new FormData();
     form.append("file", file);
     const res = await fetch("/api/predict/csv", { method: "POST", body: form });
-    if (!res.ok) {
-      let detail = `CSV 处理失败 (${res.status})`;
-      try {
-        const body = await res.json();
-        if (body?.detail) detail = String(body.detail);
-      } catch {
-        /* keep default message */
-      }
-      throw new Error(detail);
-    }
+    if (!res.ok) throw await blobError(res, "CSV 处理失败");
     return res.blob();
   },
 };
