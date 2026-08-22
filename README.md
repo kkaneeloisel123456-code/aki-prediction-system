@@ -6,8 +6,6 @@
 
 基于广西某三甲医院临床数据（420例），利用多种机器学习算法构建急性肾损伤（AKI）预测模型。通过 SHAP 可解释性分析 + DCA 决策曲线 + 嵌套式交叉验证 + Bootstrap 内部验证，为临床决策提供透明、可信的个体化风险评估。最终部署为 FastAPI + Vue 3 的在线临床决策支持系统。
 
-🏆 暑期数创 2026 · 白菜卷队 · 广西科技大学
-
 ---
 
 ## 快速启动
@@ -314,7 +312,7 @@ aki-prediction-system/
 │   ├── models/                   # 校准、时序等模块
 │   └── visualization/            # 图表模块（含 data_governance）
 ├── tests/                        # unittest 一致性与防泄漏回归测试
-├── run_clean.py                  # ★ 主管线（50次嵌套CV + 保存模型/图/表）
+├── run_clean.py                  # ★ 主管线（5折×10次重复分层交叉验证 ）
 ├── run_advanced.py               # Wave1：Optuna/Stacking/特征选择/交互项
 ├── run_wave2.py                  # Wave2：MICE/SMOTE/阈值/不确定性
 ├── run_p1.py                     # P1：临床基线/TopN/DCA/TabNet
@@ -380,7 +378,7 @@ python run_clean.py
 # 2. 出版级比赛图表（ROC/PR/校准/DCA/SHAP）
 python run_evaluation.py
 
-# 3. 加分项（VIF/PDP/三方法交叉验证/HL）
+# 3. （VIF/PDP/三方法交叉验证/HL）
 python run_bonus.py
 
 # 4. 高级方法对比（Optuna/Stacking/特征选择/交互项）
