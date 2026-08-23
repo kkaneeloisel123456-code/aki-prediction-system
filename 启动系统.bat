@@ -1,17 +1,18 @@
 @echo off
-setlocal
+setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 echo ============================================
-echo   AKI Prediction System - One-Click Launcher
+echo   AKI Full-Stack Launcher (FastAPI + Vue 3)
 echo ============================================
 echo.
 
+rem ---------- Find a usable Python ----------
 set "PY_INIT="
 python --version >nul 2>nul
 if not errorlevel 1 set "PY_INIT=python"
 if not defined PY_INIT (
-    for %%V in (3.13 3.12 3.11 3.10 3) do (
+    for %%V in (3.14 3.13 3.12 3.11 3.10 3) do (
         if not defined PY_INIT (
             py -%%V --version >nul 2>nul
             if not errorlevel 1 set "PY_INIT=py -%%V"
@@ -20,78 +21,101 @@ if not defined PY_INIT (
 )
 if not defined PY_INIT (
     echo [ERROR] Python not found.
-    echo Please install Python 3.10 or newer first.
-    echo Remember to check "Add Python to PATH".
+    echo Please install Python 3.10+ and check "Add Python to PATH".
     pause
     exit /b 1
 )
-
 echo Using Python: %PY_INIT%
 
+rem ---------- Create / repair venv ----------
 set "PY=.venv\Scripts\python.exe"
-set "NEED_VENV=0"
 if not exist "%PY%" (
-    set "NEED_VENV=1"
-) else (
-    "%PY%" --version >nul 2>nul
-    if errorlevel 1 set "NEED_VENV=1"
-)
-
-if "%NEED_VENV%"=="1" (
-    if exist ".venv" (
-        echo [WARN] Existing .venv is broken, recreating...
-        rmdir /s /q ".venv"
-    )
-    echo [1/4] Creating virtual environment...
+    if exist ".venv" rmdir /s /q ".venv"
+    echo [1/5] Creating virtual environment...
     %PY_INIT% -m venv .venv
-    if errorlevel 1 (
-        echo [ERROR] Failed to create virtual environment.
-        pause
-        exit /b 1
-    )
-)
-
-if not exist "%PY%" (
-    echo [ERROR] Virtual environment creation failed.
-    pause
-    exit /b 1
-)
-
-echo [2/4] Installing dependencies...
-"%PY%" -m pip install -r requirements.txt
-if errorlevel 1 (
-    echo [ERROR] Failed to install dependencies.
-    pause
-    exit /b 1
-)
-
-if not exist "models\final_voting_model.pkl" (
-    echo [3/4] Model not found, training final model...
-    "%PY%" run_clean.py
-    if errorlevel 1 (
-        echo [ERROR] Model training failed.
-        pause
-        exit /b 1
-    )
+    if errorlevel 1 ( echo [ERROR] Failed to create venv. & pause & exit /b 1 )
 ) else (
-    if not exist "app_data\final_model.joblib" (
-        echo [3/4] Deployment files missing, syncing from models...
-        "%PY%" -c "import joblib, pathlib, pickle, os; joblib.dump(pickle.load(open('models/final_voting_model.pkl','rb')), 'app_data/final_model.joblib'); joblib.dump(pickle.load(open('models/scaler.pkl','rb')), 'app_data/scaler.joblib'); pathlib.Path('app_data/features.txt').write_text(pathlib.Path('models/selected_features.txt').read_text(encoding='utf-8'), encoding='utf-8'); (joblib.dump(pickle.load(open('models/calibrator.pkl','rb')), 'app_data/calibrator.joblib') if os.path.exists('models/calibrator.pkl') else None)"
-        if errorlevel 1 (
-            echo [ERROR] Failed to sync deployment files.
-            pause
-            exit /b 1
-        )
-    ) else (
-        echo [3/4] Model found, skip training.
-    )
+    echo [1/5] Virtual environment found.
 )
 
-echo [4/4] Starting Streamlit Web App...
+rem ---------- Install backend deps if missing ----------
+"%PY%" -c "import fastapi, uvicorn" >nul 2>nul
+if errorlevel 1 (
+    echo [2/5] Installing backend dependencies...
+    "%PY%" -m pip install -r backend\requirements.txt
+    if errorlevel 1 ( echo [ERROR] Backend install failed. & pause & exit /b 1 )
+) else (
+    echo [2/5] Backend dependencies found.
+)
+
+rem ---------- Install frontend deps if missing ----------
+if not exist "frontend\node_modules" (
+    echo [3/5] Installing frontend dependencies, please wait...
+    pushd frontend
+    call npm install
+    set "NPM_ERR=!errorlevel!"
+    popd
+    if not "!NPM_ERR!"=="0" ( echo [ERROR] npm install failed. & pause & exit /b 1 )
+) else (
+    echo [3/5] Frontend dependencies found.
+)
+
+rem ---------- Build frontend (skip if dist is newer than all sources) ----------
+set "NEED_BUILD=0"
+if not exist "frontend\dist\index.html" (
+    set "NEED_BUILD=1"
+) else (
+    rem Find newest source file under frontend/src
+    set "NEWEST_SRC=0"
+    for /f "delims=" %%F in ('dir /b /s /a-d "frontend\src\*" 2^>nul') do (
+        if "%%~tF" gtr "!NEWEST_SRC!" set "NEWEST_SRC=%%~tF"
+    )
+    set "DIST_TIME=0"
+    for %%F in ("frontend\dist\index.html") do set "DIST_TIME=%%~tF"
+    if "!NEWEST_SRC!" gtr "!DIST_TIME!" set "NEED_BUILD=1"
+)
+if "!NEED_BUILD!"=="0" (
+    echo [4/5] Frontend up-to-date. Skipping rebuild.
+) else (
+    echo [4/5] Building frontend...
+    pushd frontend
+    call npm run build
+    set "BUILD_ERR=!errorlevel!"
+    popd
+    if not "!BUILD_ERR!"=="0" ( echo [ERROR] Frontend build failed. & pause & exit /b 1 )
+)
+
+rem ---------- Select a free port, start backend, open browser ----------
+set "HOST=127.0.0.1"
+if defined AKI_HOST set "HOST=%AKI_HOST%"
+set "AKI_PORT_FILE=%TEMP%\aki_web_port.txt"
+if exist "%AKI_PORT_FILE%" del "%AKI_PORT_FILE%" >nul 2>nul
+powershell -NoProfile -Command "$p=8000; while($p -le 8010 -and (Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue)){ $p++ }; if($p -gt 8010){ exit 1 }; Set-Content -LiteralPath '%AKI_PORT_FILE%' -Value $p"
+if errorlevel 1 (
+    echo [ERROR] Ports 8000-8010 are all occupied. Please close one service and retry.
+    pause
+    exit /b 1
+)
+set /p PORT=<"%AKI_PORT_FILE%"
+del "%AKI_PORT_FILE%" >nul 2>nul
+if "%PORT%"=="8000" (
+    echo [INFO] Port 8000 is available.
+) else (
+    echo [WARN] Port 8000 is occupied; using backup port %PORT%.
+)
+
+echo [5/5] Starting server...
 echo.
-echo If the browser does not open automatically, visit:
-echo   http://localhost:8501
+echo ============================================
+echo   App will open at:  http://localhost:%PORT%
+echo   API docs:          http://localhost:%PORT%/docs
 echo.
-powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 6; Start-Process 'http://localhost:8501'"
-"%PY%" -m streamlit run streamlit_app.py
+echo   Close this window to stop the server.
+echo ============================================
+echo.
+
+rem Wait for the server to respond (up to 60s), then open the browser.
+start "" /b powershell -NoProfile -WindowStyle Hidden -Command "for($i=0;$i -lt 60;$i++){try{Invoke-RestMethod -Uri 'http://127.0.0.1:%PORT%/api/health' -TimeoutSec 2|Out-Null; Start-Process 'http://localhost:%PORT%'; break}catch{Start-Sleep -Seconds 1}}"
+
+"%PY%" -m uvicorn backend.app.main:app --host %HOST% --port %PORT%
 pause
