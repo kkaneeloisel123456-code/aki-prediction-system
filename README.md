@@ -56,9 +56,25 @@
         ▼
 4. 一致性回归测试（推荐最后运行）
    python -m unittest discover -s tests -v
+        │
+        ▼
+5. 启动 Web 系统（三种方式任选其一）
+   方式一：一键启动（Windows 推荐）
+      双击项目根目录的 `启动系统.bat`
+      自动创建/修复虚拟环境、安装依赖、构建前端（dist 未过时跳过）、启动服务并打开浏览器。
+   方式二：在线体验
+      https://aki-prediction-system.onrender.com/
+      （免费实例冷启动可能需要几十秒）
+   方式三：手动启动
+      python -m venv .venv
+      .venv\Scripts\activate
+      pip install -r backend/requirements.txt
+      cd frontend && npm install && npm run build && cd ..
+      uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+      浏览器访问 http://localhost:8000
 ```
 
-视频展示建议：先展示本流程，再运行 `run_clean.py`，打开 `outputs/tables/final_cv_results.csv` 和 `test_auc.csv` 核对报告，最后运行测试并启动 Web 系统。
+视频展示建议：先展示本流程，再运行 `run_clean.py`，打开 `outputs/tables/final_cv_results.csv` 和 `test_auc.csv` 核对报告，最后运行测试，并用上述三种方式之一启动 Web 系统。
 
 GitHub 仓库不分发含患者可识别信息的原始临床数据。若使用评审提交包，可使用其中的脱敏副本；若在受控环境复现，请将授权数据放入 `data/raw/AKI数据.xlsx`，或设置环境变量 `AKI_DATA_PATH` 指向授权 `.xlsx` 文件。
 
@@ -380,9 +396,11 @@ python -m src.models.temporal
 # 5. 一致性回归测试（推荐最后运行）
 python -m unittest discover -s tests -v
 
-# 6. 启动 Web 系统（与训练流程独立）
+# 6. 启动 Web 系统（三种方式见上方评委验收流程）
+# 方式一：Windows 双击项目根目录的 启动系统.bat
+# 方式二：在线体验 https://aki-prediction-system.onrender.com/
+# 方式三：手动启动
 python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
-# 前端构建：cd frontend && npm install && npm run build
 # → http://localhost:8000
 ```
 ---
