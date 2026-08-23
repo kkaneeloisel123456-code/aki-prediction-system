@@ -85,6 +85,16 @@ if "!NEED_BUILD!"=="0" (
     if not "!BUILD_ERR!"=="0" ( echo [ERROR] Frontend build failed. & pause & exit /b 1 )
 )
 
+rem ---------- Stop stale AKI instances before selecting a port ----------
+set "AKI_PIDS=%TEMP%\aki_stale_pids.txt"
+if exist "%AKI_PIDS%" del "%AKI_PIDS%" >nul 2>nul
+powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process -Filter 'Name=''python.exe''' | Where-Object { $_.CommandLine -match 'backend\.app\.main' } | ForEach-Object { $_.ProcessId } | Set-Content '%AKI_PIDS%'"
+if exist "%AKI_PIDS%" (
+    for /f "usebackq delims=" %%P in ("%AKI_PIDS%") do echo [INFO] Stopping stale AKI instance, PID %%P ...
+    for /f "usebackq delims=" %%P in ("%AKI_PIDS%") do taskkill /PID %%P /F >nul 2>nul
+    del "%AKI_PIDS%" >nul 2>nul
+    timeout /t 2 /nobreak >nul
+)
 rem ---------- Select a free port, start backend, open browser ----------
 set "HOST=127.0.0.1"
 if defined AKI_HOST set "HOST=%AKI_HOST%"
