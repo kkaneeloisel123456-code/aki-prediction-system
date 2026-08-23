@@ -2,7 +2,7 @@
 
 ## 项目简介
 
-基于广西某三甲医院临床数据（420例），利用多种机器学习算法构建急性肾损伤（AKI）预测模型。通过 SHAP 可解释性分析 + DCA 决策曲线 + 嵌套式交叉验证 + Bootstrap 内部验证，为临床决策提供透明、可信的个体化风险评估。最终部署为 Streamlit 在线临床决策支持系统。
+基于广西某三甲医院临床数据（420例），利用多种机器学习算法构建急性肾损伤（AKI）预测模型。通过 SHAP 可解释性分析 + DCA 决策曲线 + 重复分层交叉验证（折内预处理） + Bootstrap 内部验证，为临床决策提供透明、可信的个体化风险评估。最终部署为 FastAPI + Vue 3 在线临床决策支持系统。
 
 **🏆 暑期数创 2026 · 白菜卷队 · 广西科技大学**
 
@@ -10,12 +10,57 @@
 
 ## 评委 / 新手快速启动（推荐）
 
-1. 解压项目压缩包
-2. 双击 `启动系统.bat`
-3. 脚本会自动创建虚拟环境、安装依赖，并启动 Web 系统
-4. 浏览器访问 https://aki-prediction.streamlit.app
+### A. 只体验 Web 系统（最快）
 
-也可以手动运行，见下方“快速开始”。
+1. 解压项目压缩包。
+2. 在项目根目录双击 `启动系统.bat`。
+3. 脚本会自动创建虚拟环境、安装后端依赖、安装前端依赖并构建前端。
+4. 浏览器打开 `http://localhost:8000`；API 文档为 `http://localhost:8000/docs`。
+
+### B. 复现实验并核对报告指标（评委验收流程）
+
+> **主指标只需要先运行 `run_clean.py`。** 其余脚本是补充实验，应在主管线完成后运行，不替代主模型指标。
+
+```text
+准备依赖与数据
+   │
+   ├─ 进入项目根目录
+   ├─ 安装 requirements.txt
+   └─ 确认 data/raw/AKI数据.xlsx 已准备好
+        │
+        ▼
+1. 主管线（必须）
+   python run_clean.py
+   ├─ 数据加载、临床范围校验、泄漏特征排除
+   ├─ 特征筛选与 Voting Ensemble 训练
+   ├─ 50 次重复分层交叉验证、独立测试集评估
+   └─ 生成模型、图表和 outputs/tables/*.csv
+        │
+        ├─ 核对主指标：
+        │    outputs/tables/final_cv_results.csv
+        │    outputs/tables/test_auc.csv
+        │    outputs/tables/model_summary_clean.csv
+        │
+        ▼
+2. 出版级评估图表（推荐）
+   python run_evaluation.py
+        │
+        ▼
+3. 补充实验（可选，均在主管线之后）
+   python run_bonus.py       # VIF、PDP、三方法交叉验证、HL
+   python run_advanced.py    # Optuna、Stacking、特征选择、交互项
+   python run_wave2.py       # MICE、SMOTE、阈值、不确定性
+   python run_p1.py          # 临床基线、TopN、DCA、TabNet
+   python -m src.models.temporal  # T0→T1→T2 时序风险轨迹
+        │
+        ▼
+4. 一致性回归测试（推荐最后运行）
+   python -m unittest discover -s tests -v
+```
+
+视频展示建议：先展示本流程，再运行 `run_clean.py`，打开 `outputs/tables/final_cv_results.csv` 和 `test_auc.csv` 核对报告，最后运行测试并启动 Web 系统。
+
+GitHub 仓库不分发含患者可识别信息的原始临床数据。若使用评审提交包，可使用其中的脱敏副本；若在受控环境复现，请将授权数据放入 `data/raw/AKI数据.xlsx`，或设置环境变量 `AKI_DATA_PATH` 指向授权 `.xlsx` 文件。
 
 ---
 
@@ -23,16 +68,16 @@
 
 | 指标 | 数值 |
 |------|------|
-| **5折×10次=50次嵌套CV AUC** | **0.8096 ± 0.0428** |
+| **5折×10次=50次重复分层CV AUC** | **0.8096 ± 0.0428** |
 | 测试集 AUC | 0.8007 |
 | Bootstrap AUC（对5折OOF概率按患者重采样1000次） | 0.799 [0.754, 0.842] |
 | 校准后 Brier（基于5折OOF概率拟合） | 0.168（原始 0.180） |
 | 过拟合差距（单次20%切分参考值, seed 42） | 0.129；Bootstrap 区间 [0.033, 0.249] |
 | 最佳模型 | Voting Ensemble (LR:2, RF:2, XGB:1, ET:1) |
 | 使用特征 | 35 个 (RF重要性Top35) |
-| 验证方式 | RepeatedStratifiedKFold 嵌套式 (5折 × 10次 = 50次评估) |
+| 验证方式 | RepeatedStratifiedKFold，折内预处理 (5折 × 10次 = 50次评估) |
 
-| 模型 | 50次CV AUC | 标准差 |
+| 模型 | 50次重复分层CV AUC | 标准差 |
 |------|-----------|--------|
 | LogisticRegression | 0.794 | 0.043 |
 | RandomForest | 0.807 | 0.041 |
@@ -44,7 +89,7 @@
 
 ## 高级方法对比（Wave 1）
 
-新增 `run_advanced.py`，与 `run_clean.py` 共用同一套数据准备与泄漏规则。所有实验（调参、特征选择、交互项、Stacking/Blending）都在训练折内完成，统一用嵌套 CV 报告。
+新增 `run_advanced.py`，与 `run_clean.py` 共用同一套数据准备与泄漏规则。所有实验（调参、特征选择、交互项、Stacking/Blending）都在训练折内完成，统一用重复分层 CV（折内预处理）报告。
 
 | 配置 | 25折AUC | 说明 |
 |------|---------|------|
@@ -56,7 +101,7 @@
 | Stacking | 0.7827 ± 0.0368 | 未超过 Voting |
 | OOF加权 Blending（5折OOF） | 0.8073 ± 0.0404 | 未超过 Voting |
 
-> 注：上表为 25 折辅助口径（5折×5次嵌套CV）；主口径为 50 次嵌套CV（见模型性能表，Voting 0.8096 ± 0.0428）。
+> 注：上表为 25 折辅助口径（5折×5次重复分层CV）；主口径为 50 次重复分层CV（见模型性能表，Voting 0.8096 ± 0.0428）。
 
 ### Optuna 贝叶斯调参（同一5折上对比，每折20 trials，内层3折CV）
 
@@ -162,11 +207,11 @@
 
 - 标准 DeLong 检验（含协方差）：Z = -7.89 / -6.91 / -3.93，Voting 均显著优于经典评分与临床 LR 基线。
 - 说明：原始 Thakar/STS 评分需完整变量，本研究使用文献公式的"简化复现版"（口径透明、可复现），报告建议同样表述。
-- 注：本表 AUC 为 5 折 OOF 口径（Voting 0.8019），与主口径 50 次嵌套CV（0.8096）属不同验证方案，差异属正常范围。
+- 注：本表 AUC 为 5 折 OOF 口径（Voting 0.8019），与主口径 50 次重复分层CV（0.8096）属不同验证方案，差异属正常范围。
 
 ### 2）精简特征模型（Top8 / Top12）
 
-| 特征数 | 模型 | 50次CV AUC均值 ± 标准差 |
+| 特征数 | 模型 | 50次重复分层CV AUC均值 ± 标准差 |
 |--------|------|------------------------|
 | 8 | LR | 0.8055 ± 0.0425 |
 | 8 | Ridge | 0.8038 ± 0.0448 |
@@ -200,7 +245,7 @@
 | TabNet | 0.7857 ± 0.0408 |
 | **Voting（同折）** | **0.8135 ± 0.0397** |
 
-> **口径说明**：本表 Voting AUC（0.8135）与 Wave 1 固定配置表（0.8122）的差异源于输入矩阵不同——run_p1.py 使用全局中位数填补后的矩阵（`prepare_training_data['X']`），run_advanced.py 使用保留缺失值的原始矩阵并在每折内填补/缩放/筛选（与 run_clean.py 模块4 的折内预处理一致）。两者均为诚实 CV（无目标泄漏），仅预处理路径不同，Voting 相对排名结论一致；本表与主口径 0.8096（折内预处理 + 50次嵌套CV）亦属不同验证方案，不直接比较。
+> **口径说明**：本表 Voting AUC（0.8135）与 Wave 1 固定配置表（0.8122）的差异源于输入矩阵不同——run_p1.py 使用全局中位数填补后的矩阵（`prepare_training_data['X']`），run_advanced.py 使用保留缺失值的原始矩阵并在每折内填补/缩放/筛选（与 run_clean.py 模块4 的折内预处理一致）。两者均为诚实 CV（无目标泄漏），仅预处理路径不同，Voting 相对排名结论一致；本表与主口径 0.8096（折内预处理 + 50次重复分层CV）亦属不同验证方案，不直接比较。
 
 - 结论：小样本（420例/125事件）下 TabNet 未优于 Voting（差约 0.028），不引入深度模型复杂度；该负面结果作为方法学严谨性证据。
 
@@ -247,7 +292,7 @@
 | 初始模型（含泄漏） | >0.99 | 单次划分 | 用KDIGO标准预测AKI — 不可信 |
 | 纯术前（保守） | 0.74 | 5折CV | 仅术前特征，完全无泄漏（历史对比） |
 | 术前+术中+ICU入室 | 0.79 | 5折CV | 临床可论证的预测时点（历史对比） |
-| **最终版（+术后早期）** | **0.8096±0.0428** | **5折×10次=50次嵌套CV** | **当前最优，填补/缩放/筛选均在训练折内** |
+| **最终版（+术后早期）** | **0.8096±0.0428** | **5折×10次=50次重复分层CV** | **当前最优，填补/缩放/筛选均在训练折内** |
 
 > **"一个可信的 0.81，胜过一百个泄漏的 0.99。"**
 
@@ -275,10 +320,12 @@ aki-prediction-system/
 │   ├── data/                     # 数据处理模块
 │   ├── models/                   # 模型训练/评估/校准
 │   └── visualization/            # 可视化模块
-├── web/                          # Streamlit Web组件
-│   └── components/               # 预测/SHAP/报告组件
-├── app_data/                     # Streamlit Cloud部署文件（model/scaler/features/calibrator/impute_values）
-├── streamlit_app.py              # ★ Web应用主入口
+├── backend/                      # FastAPI 后端服务
+│   ├── app/                      # API/预测/PDF 模块
+│   └── assets/                   # 报告字体资源
+├── frontend/                     # Vue 3 前端（Vite）
+│   └── src/                      # 页面/路由/API 客户端
+├── app_data/                     # Web部署文件（model/scaler/features/calibrator/impute_values）
 ├── run_clean.py                  # ★ 一键运行（最终版）
 ├── run_evaluation.py             # 综合评估图表
 ├── run_bonus.py                  # （VIF+PDP+三方法交叉验证+HL）
@@ -301,9 +348,9 @@ aki-prediction-system/
 
 > **校准说明**：原始模型在 OOF 上期望阳性合计约181.4，而实际阳性为125，说明未校准概率整体偏高。系统已内置 Isotonic 校准（基于5折OOF概率拟合），校准后 Brier 由 0.180 降至 0.168；Web 端展示的即为校准后概率，SHAP 解释仍基于原始模型。
 
-> **图口径说明**：roc_curves.png 标注的 AUC 为 50 次嵌套CV均值、曲线基于 5 折 OOF；dca_curve.png / dca_with_ci.png / decision_curve.png 为同一 DCA 图（run_clean 5折OOF，未校准概率）；wave2_threshold_nb.png 为 run_wave2 口径（未校准5折OOF，0.30 选点）；outputs/tmp_gauge.png 为 Web PDF 报告运行时生成的临时仪表图（非评审输出，已加入 .gitignore）。
+> **图口径说明**：roc_curves.png 标注的 AUC 为 50 次重复分层CV均值、曲线基于 5 折 OOF；dca_curve.png / dca_with_ci.png / decision_curve.png 为同一 DCA 图（run_clean 5折OOF，未校准概率）；wave2_threshold_nb.png 为 run_wave2 口径（未校准5折OOF，0.30 选点）；outputs/tmp_gauge.png 为 Web PDF 报告运行时生成的临时仪表图（非评审输出，已加入 .gitignore）。
 > **特征选择口径说明**：`run_evaluation.py` 与 `run_wave2.py` 的 `SelectFromModel` 已与 `run_clean.py` 对齐（`threshold=-np.inf`，每折固定 35 特征），评估图表均基于与最终模型一致的 35 特征矩阵。
-> **时序模块口径说明**：`outputs/phase3/tables/temporal_results.csv` 的 AUC 为**单次 5 折 cross_val_score 按折均值**（T2=0.816±0.0263），与主口径 50 次重复嵌套CV（0.8096）或 OOF 合并概率口径（≈0.80）**不是同一验证方案，不直接比较**；该表仅用于展示"信息累积带来的 AUC 增益趋势"。
+> **时序模块口径说明**：`outputs/phase3/tables/temporal_results.csv` 的 AUC 为**单次 5 折 cross_val_score 按折均值**（T2=0.816±0.0263），与主口径 50 次重复分层CV（0.8096）或 OOF 合并概率口径（≈0.80）**不是同一验证方案，不直接比较**；该表仅用于展示"信息累积带来的 AUC 增益趋势"。
 
 运行：`python run_bonus.py`
 
@@ -311,44 +358,40 @@ aki-prediction-system/
 
 ## 快速开始
 
-```bash
-# 1. 安装依赖
-pip install -r requirements.txt
+下面的命令均在项目根目录执行。若只启动 Web 系统，不需要重新训练；若要验证报告指标，请按上方“评委验收流程”执行。
 
-# 2. 运行最终模型（特征筛选 → 训练 → CV → 过拟合检查）
+```bash
+# 1. 安装训练侧依赖
+python -m pip install -r requirements.txt
+
+# 2. 主管线：特征筛选 → 训练 → 50次重复分层CV → 独立测试集评估
 python run_clean.py
 
-# 3. 生成比赛图表（ROC/PR/校准/DCA/SHAP）
+# 3. 出版级比赛图表（ROC/PR/校准/DCA/SHAP）
 python run_evaluation.py
 
-# 4. 生成加分项图表（VIF+PDP+三方法交叉验证+HL）
+# 4. 补充实验（可选，主管线完成后运行）
 python run_bonus.py
-
-# 5. 生成时序风险轨迹（T0→T1→T2）
+python run_advanced.py
+python run_wave2.py
+python run_p1.py
 python -m src.models.temporal
 
-# 6. 启动 Web 应用
-streamlit run streamlit_app.py
-# → http://localhost:8501
-
-# 7. 运行一致性回归测试
+# 5. 一致性回归测试（推荐最后运行）
 python -m unittest discover -s tests -v
 
-# 8. 高级方法对比（Optuna/Stacking/特征选择/交互项）
-python run_advanced.py
-
-# 9. Wave 2：MICE/SMOTE/阈值/不确定性
-python run_wave2.py
-
+# 6. 启动 Web 系统（与训练流程独立）
+python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+# 前端构建：cd frontend && npm install && npm run build
+# → http://localhost:8000
 ```
-
 ---
 
 ## 评价体系
 
 | 维度 | 方法 |
 |------|------|
-| **区分度** | AUC-ROC, Precision-Recall AUC, 5折×10次=50次嵌套CV, Bootstrap 95%CI |
+| **区分度** | AUC-ROC, Precision-Recall AUC, 5折×10次=50次重复分层CV, Bootstrap 95%CI |
 | **校准度** | Brier Score, Calibration Curve, OOF Isotonic 校准 |
 | **临床效用** | Decision Curve Analysis (DCA) |
 | **可解释性** | SHAP Summary/Bar/Force/Dependence Plot |
@@ -359,11 +402,11 @@ python run_wave2.py
 
 ## 答辩要点（证据定位）
 
-> **主证据**：50 次重复嵌套CV 的 AUC（0.8096 ± 0.0428）、Bootstrap 95% CI 与校准曲线（Isotonic 校准后 Brier 0.168）。三者来自同一 35 特征 + 严格折内预处理的完整流程，口径统一、可复现、无信息泄漏。
+> **主证据**：50 次重复分层CV（折内预处理）的 AUC（0.8096 ± 0.0428）、Bootstrap 95% CI 与校准曲线（Isotonic 校准后 Brier 0.168）。三者来自同一 35 特征 + 严格折内预处理的完整流程，口径统一、可复现、无信息泄漏。
 >
 > **辅助证据**：HL 检验（P=0.149，20% 测试集近似复现，n≈84）、Brier、DCA 阈值推荐定位为方法学严谨性与临床实用性的补充说明，不作为性能主指标；其口径差异（如 Wave2 与 P1 的 DCA 选点差异、HL 为近似复现）已在对应表格注明。
 >
-> **答辩叙事**：强调"0.81 的可信 AUC 胜过泄漏的 0.99"——报告内所有数字均来自严格折内预处理与嵌套CV；任何更高的数字若未说明验证口径与防泄漏措施，都不具备可比性。
+> **答辩叙事**：强调"0.81 的可信 AUC 胜过泄漏的 0.99"——报告内所有数字均来自严格折内预处理与重复分层CV；任何更高的数字若未说明验证口径与防泄漏措施，都不具备可比性。
 
 ---
 
@@ -385,7 +428,7 @@ python run_wave2.py
 - **补充证据**: IterativeImputer, SMOTE, DCA 阈值推荐, 重复CV不确定性
 - **可解释性**: SHAP
 - **可视化**: matplotlib, seaborn
-- **Web**: Streamlit
+- **Web**: FastAPI + Vue 3 (Vite)
 - **验证**: RepeatedStratifiedKFold, Bootstrap
 
 ---
@@ -397,7 +440,7 @@ python run_wave2.py
 | 队长/技术路线 | 蓝可 | 统筹、建模、优化 |
 | 数据清洗/特征工程 | 李婷、蓝可 | 数据预处理、EDA |
 | 建模/SHAP | 梁日娇、蓝可 | 模型训练、评估、可解释性 |
-| Web开发 | 王若兮 | Streamlit系统开发 |
+| Web开发 | 王若兮 | FastAPI + Vue 3 全栈Web开发 |
 | 报告撰写 | 叶宇晨、蓝可 | 报告撰写 |
 ---
 
@@ -407,7 +450,7 @@ python run_wave2.py
 
 ## 数据与隐私
 
-原始临床数据包含患者姓名等可识别信息，**不随本仓库或提交包分发**。训练脚本所需的 `data/raw/AKI数据.xlsx` 仅保存在受控环境；数据字典中的姓名列已脱敏，患者级逻辑校验明细 `aki_logic_validation_flags.csv` 与行级范围校验明细 `outputs/tables/clinical_range_flags.csv`（仅行号+脱敏值，无身份字段）均已移出公开仓库跟踪，仅保留汇总校验报告；如需核对 44 条范围标记，可在受控环境运行 `python run_clean.py` 重新生成。若后续需要公开数据集，必须完成彻底匿名化并取得医院伦理审批与患者知情同意。
+原始临床数据包含患者姓名等可识别信息，**不随本仓库或提交包分发**。GitHub 仓库不包含原始 `data/raw/AKI数据.xlsx`；评审提交包可另行提供已脱敏、姓名替换为编号的复现副本；数据字典中的姓名列已脱敏，患者级逻辑校验明细 `aki_logic_validation_flags.csv` 与行级范围校验明细 `outputs/tables/clinical_range_flags.csv`（仅行号+脱敏值，无身份字段）均已移出公开仓库跟踪，仅保留汇总校验报告；如需核对 44 条范围标记，可在受控环境运行 `python run_clean.py` 重新生成。若后续需要公开数据集，必须完成彻底匿名化并取得医院伦理审批与患者知情同意。
 
 `aki-prediction-system_提交版.zip` 为脱敏提交包，已剔除 `data/raw/`、`.git/`、缓存与临时文件。
 
