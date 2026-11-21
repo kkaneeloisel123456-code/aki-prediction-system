@@ -314,9 +314,12 @@ print(f"  {'-'*45}")
 all_results = {}
 
 for name, model in models.items():
+    # Windows 下 XGBoost 与嵌套 joblib worker 组合可能触发访问冲突；
+    # 单模型 CV 改为单进程，并让任何评分失败显式报错而非静默写成 NaN。
     scores = cross_val_score(
         build_honest_pipeline(model), X_raw, y, cv=rskf,
-        scoring='roc_auc', n_jobs=-1
+        scoring='roc_auc', n_jobs=1 if name == 'XGBoost' else -1,
+        error_score='raise'
     )
     all_results[name] = {'mean': scores.mean(), 'std': scores.std()}
     print(f"  {name:<22} {scores.mean():.4f}       {scores.std():.4f}")
@@ -324,7 +327,7 @@ for name, model in models.items():
 # Voting评估
 voting_scores = cross_val_score(
     build_honest_pipeline(voting), X_raw, y, cv=rskf,
-    scoring='roc_auc', n_jobs=-1
+    scoring='roc_auc', n_jobs=-1, error_score='raise'
 )
 all_results['Voting Ensemble'] = {'mean': voting_scores.mean(), 'std': voting_scores.std()}
 print(f"  {'Voting Ensemble':<22} {voting_scores.mean():.4f}       {voting_scores.std():.4f}  <-- 最佳")
