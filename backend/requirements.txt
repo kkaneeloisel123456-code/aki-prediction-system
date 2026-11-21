@@ -11,5 +11,5 @@ fpdf2>=2.8.0
 xgboost>=1.7.0,<4
 # Only needed to run tests/ (test_advanced imports run_advanced -> optuna,
 # test_wave2 imports run_wave2 -> imblearn); harmless for pure API usage.
-optuna>=3.0
+optuna==4.9.0
 imbalanced-learn>=0.11

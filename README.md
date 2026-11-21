@@ -283,7 +283,7 @@ uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
 aki-prediction-system/
 ├── 启动系统.bat                  # Windows 一键启动（venv/依赖/构建/启动全自动）
 ├── data/                         # 数据（不随公开仓库分发）
-│   └── raw/AKI数据.xlsx          # 原始数据（受控环境）
+│   └── raw/AKI数据.xlsx          # 原始或脱敏复现数据（受控/本地环境）
 ├── models/                       # 训练产物（Git-LFS 指针）
 │   ├── final_voting_model.pkl    # 最终 Voting 模型
 │   ├── {LogisticRegression,RandomForest,XGBoost,ExtraTrees}.pkl
@@ -348,25 +348,35 @@ aki-prediction-system/
 
 ## 快速开始
 
-### 启动 Web 系统
+### 启动 Web 系统（三种方式）
 
-见顶部"快速启动"。Windows 下双击 `启动系统.bat` 一键启动；手动方式简而言之：
+#### 方式一：一键启动（Windows 推荐）
 
-终端进入项目文件夹后执行下面操作：
+Windows 下双击项目根目录的 `启动系统.bat`。脚本会自动检查 Python 环境、创建/修复虚拟环境、安装依赖、按源码时间戳决定是否构建前端、清理旧 AKI 实例，并在 8000–8010 中选择可用端口后启动服务、打开浏览器。关闭命令窗口即可停止服务。Python 3.14+ 会显示兼容性提示，建议使用 Python 3.11–3.13。
+
+#### 方式二：在线体验
+
+[在线体验](https://aki-prediction-system.onrender.com/)（免费实例冷启动可能需要几十秒，请耐心等待。）
+
+#### 方式三：手动启动
+
+终端进入项目根目录后执行：
 
 ```bash
+python -m venv .venv
+.venv\Scripts\activate          # Windows
 pip install -r backend/requirements.txt
 cd frontend
 npm install
-npm run build
+npm run build                       # 产物输出到 frontend/dist
 cd ..
 uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
 # → http://localhost:8000
 ```
 
-浏览器访问 [http://localhost:8000](http://localhost:8000) 。
+首次启动会从 `app_data/` 加载模型工件。开发模式（前置热重载）可另开终端进入 `frontend` 执行 `npm run dev`，访问 `http://localhost:5173`；Vite 会将 `/api` 请求代理到 8000 端口。
 
-### 重新训练 / 复现实验（需要受控环境中的原始数据）
+### 重新训练 / 复现实验（需要受控环境中的原始数据或单独提供的脱敏复现数据）
 
 ```bash
 # 训练侧依赖（后端依赖是其子集）
@@ -397,7 +407,7 @@ python -m src.models.temporal
 python -m unittest discover -s tests -v
 ```
 
-> `data/raw/AKI数据.xlsx` 含患者可识别信息，**不随公开仓库分发**；上述训练脚本需要在受控环境获取该文件后运行。Web 系统加载的是 `app_data/` 下已训练好的模型工件，可独立启动。
+> 公开仓库不附带临床数据。请将从受控环境或评审提交包单独获取的原始/脱敏复现数据放在 `data/raw/AKI数据.xlsx`，或通过环境变量 `AKI_DATA_PATH` 指定文件，再按上述命令复现实验。Web 系统加载的是 `app_data/` 下已训练好的模型工件，无需训练数据即可独立启动。
 
 ---
 
@@ -474,9 +484,9 @@ python -m unittest discover -s tests -v
 
 ## 数据与隐私
 
-原始临床数据包含患者姓名等可识别信息，**不随本仓库或提交包分发**。训练脚本所需的 `data/raw/AKI数据.xlsx` 仅保存在受控环境；数据字典中的姓名列已脱敏，患者级逻辑校验明细 `aki_logic_validation_flags.csv` 与行级范围校验明细 `outputs/tables/clinical_range_flags.csv`（仅行号+脱敏值，无身份字段）均已移出公开仓库跟踪，仅保留汇总校验报告；如需核对 44 条范围标记，可在受控环境运行 `python run_clean.py` 重新生成。若后续需要公开数据集，必须完成彻底匿名化并取得医院伦理审批与患者知情同意。
+原始临床数据包含患者姓名等可识别信息，**不随本仓库分发**。评审提交包可单独附带姓名已替换为编号的脱敏复现副本；该副本同样不默认纳入公开仓库。受控环境中的数据可通过 `AKI_DATA_PATH` 指定。数据字典中的姓名列已脱敏，患者级逻辑校验明细 `aki_logic_validation_flags.csv` 与行级范围校验明细 `outputs/tables/clinical_range_flags.csv`（仅行号+脱敏值，无身份字段）均已移出公开仓库跟踪，仅保留汇总校验报告；如需核对 44 条范围标记，可在受控环境运行 `python run_clean.py` 重新生成。若后续需要公开数据集，必须完成彻底匿名化并取得医院伦理审批与患者知情同意。
 
-`aki-prediction-system_提交版.zip` 为脱敏提交包，已剔除 `data/raw/`、`.git/`、缓存与临时文件。
+`data/raw/`、`.git/`、缓存与临时文件均不应进入公开提交；本地复现所需的数据和依赖环境请单独准备。
 
 ## License
 

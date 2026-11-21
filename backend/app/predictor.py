@@ -6,6 +6,7 @@ import math
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 
 from .assets import load_assets
 from .config import FEATURE_RANGES, RISK_HIGH, RISK_LOW
@@ -100,7 +101,10 @@ def predict(inputs: Mapping[str, Optional[float]],
 
     X_raw, missing_filled, X = build_vector(features, impute, inputs)
 
-    X_scaled = scaler.transform(X)
+    # The scaler was fitted with named DataFrame columns. Preserve those names
+    # during inference to keep validation strict and avoid sklearn warnings.
+    X_frame = pd.DataFrame(X, columns=features)
+    X_scaled = scaler.transform(X_frame)
 
     if hasattr(model, "predict_proba"):
         prob = float(model.predict_proba(X_scaled)[0, 1])
