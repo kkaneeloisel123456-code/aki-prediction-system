@@ -1,13 +1,19 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useTheme } from './composables/useTheme'
+import { useAuth } from './composables/useAuth'
 import { api } from './api/client'
 
 const route = useRoute()
+const router = useRouter()
 const { theme, toggle } = useTheme()
+const auth = useAuth()
+const user = auth.user
 const online = ref(false)
 const bestAuc = ref('-')
+const isPublic = computed(() => route.meta.public === true)
+const roleLabel = computed(() => user.value?.role === 'admin' ? '管理员' : '医生')
 
 async function refreshHealth() {
   try {
@@ -19,33 +25,93 @@ async function refreshHealth() {
 // 后端晚于前端启动、或中途崩溃时，徽标要能自己恢复/更新。
 let healthTimer: ReturnType<typeof setInterval> | undefined
 
-onMounted(async () => {
+async function refreshShell() {
   await refreshHealth()
-  healthTimer = setInterval(refreshHealth, 30_000)
+  if (isPublic.value) return
   // meta 与 health 分开处理：表格读取失败不应把已确认在线的模型误标为离线。
   try {
     const m = await api.meta()
     if (m.best_auc != null) bestAuc.value = m.best_auc.toFixed(3)
   } catch { /* 顶栏 AUC 保持 '-' */ }
+}
+
+function handleUnauthorized() {
+  if (!isPublic.value) {
+    void router.replace({ path: '/login', query: { redirect: route.fullPath } })
+  }
+}
+
+onMounted(async () => {
+  window.addEventListener('aki:unauthorized', handleUnauthorized)
+  await refreshShell()
+  healthTimer = setInterval(refreshHealth, 30_000)
 })
-onUnmounted(() => { if (healthTimer) clearInterval(healthTimer) })
+watch(isPublic, (value) => { if (!value) void refreshShell() })
+onUnmounted(() => {
+  window.removeEventListener('aki:unauthorized', handleUnauthorized)
+  if (healthTimer) clearInterval(healthTimer)
+})
+
+async function signOut() {
+  await auth.logout()
+  await router.replace('/login')
+}
 
 const title = computed(() => (route.meta?.title as string) ?? '')
 
-const nav = [
-  { to: '/',            label: '首页',     icon: 'home'       },
-  { to: '/performance', label: '模型性能', icon: 'bar-chart'  },
-  { to: '/predict',     label: '风险预测', icon: 'target'     },
-  { to: '/workstation', label: '医生工作台',icon: 'users'     },
-  { to: '/batch',       label: '批量预测',  icon: 'upload'    },
-  { to: '/dashboard',   label: '管理仪表盘',icon: 'grid'     },
-  { to: '/report',      label: '报告中心', icon: 'file-text'  },
-  { to: '/governance',  label: '数据治理', icon: 'shield'     },
-]
+const nav = computed(() => [
+  { to: '/',            label: '临床工作台', icon: 'home' },
+  { to: '/patients',    label: '患者档案',   icon: 'users' },
+  { to: '/reports',     label: '报告中心',   icon: 'file-text' },
+  { to: '/schedule',    label: '预约与反馈', icon: 'calendar' },
+  ...(user.value?.role === 'admin'
+    ? [{ to: '/admin', label: '账号与审计', icon: 'shield' }]
+    : []),
+  { to: '/batch',       label: '批量导入',   icon: 'upload' },
+  { to: '/performance', label: '模型性能',   icon: 'bar-chart' },
+  { to: '/governance',  label: '数据治理',   icon: 'layers' },
+])
+
+const passwordOpen = ref(false)
+const currentPassword = ref('')
+const newPassword = ref('')
+const confirmPassword = ref('')
+const passwordError = ref('')
+const passwordBusy = ref(false)
+
+watch(() => user.value?.must_change_password, (value) => {
+  if (value) passwordOpen.value = true
+}, { immediate: true })
+
+async function submitPassword() {
+  passwordError.value = ''
+  if (newPassword.value.length < 12) {
+    passwordError.value = '新密码至少 12 个字符'
+    return
+  }
+  if (newPassword.value !== confirmPassword.value) {
+    passwordError.value = '两次输入的新密码不一致'
+    return
+  }
+  passwordBusy.value = true
+  try {
+    await api.changePassword(currentPassword.value, newPassword.value)
+    await auth.restore(true)
+    currentPassword.value = ''
+    newPassword.value = ''
+    confirmPassword.value = ''
+    passwordOpen.value = false
+  } catch (e: any) {
+    passwordError.value = e?.message ?? '修改失败'
+  } finally {
+    passwordBusy.value = false
+  }
+}
 </script>
 
 <template>
-  <div class="layout">
+  <RouterView v-if="isPublic" />
+  <div v-else class="layout">
     <!-- ── 侧边栏 ── -->
     <nav class="sidebar">
       <div class="sidebar-brand">
@@ -98,12 +164,27 @@ const nav = [
             <svg v-if="n.icon==='shield'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
             </svg>
+            <!-- calendar -->
+            <svg v-if="n.icon==='calendar'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+            </svg>
+            <!-- layers -->
+            <svg v-if="n.icon==='layers'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="12 2 2 7 12 12 22 7 12 2"/><polygon points="2 12 12 17 22 12"/><polygon points="2 17 12 22 22 17"/>
+            </svg>
           </span>
           <span class="sidebar-label">{{ n.label }}</span>
         </RouterLink>
       </div>
 
       <div class="sidebar-footer">
+        <div class="sidebar-user">
+          <div class="sidebar-user-info">
+            <span class="sidebar-user-name">{{ user?.display_name || user?.username }}</span>
+            <span class="sidebar-user-role">{{ roleLabel }}</span>
+          </div>
+          <button class="sidebar-logout" type="button" @click="signOut">退出</button>
+        </div>
         <button class="sidebar-theme-btn" @click="toggle">
           <span class="sidebar-icon">
             <svg v-if="theme === 'dark'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -115,7 +196,7 @@ const nav = [
           </span>
           <span class="sidebar-label">{{ theme === 'dark' ? '切换浅色' : '切换深色' }}</span>
         </button>
-        <div class="sidebar-version">v2.0 · Voting Ensemble</div>
+        <div class="sidebar-version">v3.0 · 临床业务版</div>
       </div>
     </nav>
 
@@ -126,18 +207,82 @@ const nav = [
           <span class="current-page">{{ title }}</span>
         </div>
         <div class="topbar-actions">
-          <span class="badge" :class="online ? 'badge-success' : 'badge-warn'" style="cursor:default">● {{ online ? '模型在线' : '模型离线' }}</span>
-          <span class="badge badge-info">AUC {{ bestAuc }}</span>
+          <span class="badge" :class="online ? 'badge-success' : 'badge-warn'" style="cursor:default">● {{ online ? '服务在线' : '服务离线' }}</span>
+          <span class="badge badge-info">模型 AUC {{ bestAuc }}</span>
         </div>
       </header>
       <div class="content">
-        <!-- 只缓存预测页：35 字段表单切页即丢是最痛的堵点；其余页面保持即进即取。 -->
-        <RouterView v-slot="{ Component }">
-          <KeepAlive include="PredictPage">
-            <component :is="Component" />
-          </KeepAlive>
-        </RouterView>
+        <RouterView />
+      </div>
+    </div>
+
+    <div v-if="passwordOpen" class="modal-mask">
+      <div class="modal-panel" style="max-width: 440px">
+        <div class="modal-head">
+          <div>
+            <div class="modal-title">首次登录：请修改初始密码</div>
+            <div class="modal-sub">修改完成前，业务接口将被暂时锁定。</div>
+          </div>
+        </div>
+        <div class="modal-body">
+          <div class="form-group" style="margin-bottom: 12px">
+            <label>当前密码</label>
+            <input v-model="currentPassword" class="form-control" type="password" autocomplete="current-password" />
+          </div>
+          <div class="form-group" style="margin-bottom: 12px">
+            <label>新密码（至少 12 个字符）</label>
+            <input v-model="newPassword" class="form-control" type="password" autocomplete="new-password" />
+          </div>
+          <div class="form-group" style="margin-bottom: 12px">
+            <label>确认新密码</label>
+            <input v-model="confirmPassword" class="form-control" type="password" autocomplete="new-password" />
+          </div>
+          <div v-if="passwordError" class="error">{{ passwordError }}</div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-primary" :disabled="passwordBusy" @click="submitPassword">
+            {{ passwordBusy ? '提交中…' : '修改并继续' }}
+          </button>
+          <button class="btn btn-secondary" @click="signOut">退出登录</button>
+        </div>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+}
+.sidebar-user-info { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.sidebar-user-name {
+  overflow: hidden;
+  color: var(--text-bright);
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-user-role { margin-top: 2px; color: var(--text-dim); font-size: 9px; }
+.sidebar-logout {
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 10px;
+  cursor: pointer;
+}
+.sidebar-logout:hover { background: var(--bg-hover); color: var(--primary); }
+@media (max-width: 900px) {
+  .sidebar-user { justify-content: center; padding: 6px; }
+  .sidebar-user-info { display: none; }
+  .sidebar-logout { padding: 4px; font-size: 9px; }
+}
+</style>

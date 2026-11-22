@@ -1,47 +1,185 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { api } from '../api/client'
-import type { DashboardDemo } from '../api/types'
-const data = ref<DashboardDemo | null>(null)
-const loadErr = ref('')
-const auc = ref('0.810')
-onMounted(() => {
-  api.dashboard().then((d: import('../api/types').DashboardDemo) => { data.value = d }).catch(() => { loadErr.value = '数据加载失败' })
-  api.meta().then(m => { if (m.best_auc != null) auc.value = m.best_auc.toFixed(3) }).catch(() => { /* 保持兜底值 */ })
+import { useAuth } from '../composables/useAuth'
+
+const auth = useAuth()
+const loading = ref(true)
+const error = ref('')
+const summary = ref<any>(null)
+const workstation = ref<any>(null)
+
+const maxMonthly = computed(() => {
+  const rows = summary.value?.monthly ?? []
+  return Math.max(1, ...rows.map((r: any) => Math.max(r.encounters, r.reports)))
 })
-const COLORS = ['#38bdf8', '#4ade80', '#fbbf24', '#a78bfa', '#f87171']
-const totalDeptCases = computed(() => data.value ? data.value.departments.reduce((s, d) => s + d.cases, 0) : 1)
+const greeting = computed(() => {
+  const h = new Date().getHours()
+  if (h < 6) return '夜间值班辛苦了'
+  if (h < 12) return '上午好'
+  if (h < 18) return '下午好'
+  return '晚上好'
+})
+const today = computed(() =>
+  new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }).format(new Date()),
+)
+
+function fmtDate(value?: string) {
+  if (!value) return '—'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+const statusText: Record<string, string> = {
+  draft: '草稿', predicted: '待复核', reviewed: '已复核', published: '已发布',
+}
+
+async function load() {
+  loading.value = true
+  error.value = ''
+  try {
+    const [d, w] = await Promise.all([api.dashboard(), api.workstation()])
+    summary.value = d
+    workstation.value = w
+  } catch (e: any) {
+    error.value = e?.message ?? '数据加载失败'
+  } finally {
+    loading.value = false
+  }
+}
+onMounted(load)
 </script>
+
 <template>
-  <h2 class="page-title">管理仪表盘</h2>
-  <p class="page-subtitle">医院管理视角：AKI 发生率趋势、科室分布 <span style="background:rgba(251,191,36,.15);color:var(--yellow);padding:1px 7px;border-radius:8px;font-size:9px;font-weight:700;margin-left:4px">演示数据</span></p>
-  <div class="kpi-grid" v-if="data">
-    <div class="kpi-card kpi-card-blue"><div class="kpi-label">本月病例数</div><div class="kpi-value">{{ data!.trend.totalCases[data!.trend.months.length-1] }}</div><div class="kpi-delta positive">↑ 示例</div></div>
-    <div class="kpi-card kpi-card-orange"><div class="kpi-label">本月 AKI 发生率</div><div class="kpi-value">{{ data.akiRate }}%</div><div class="kpi-delta neutral">125 / 420</div></div>
-    <div class="kpi-card kpi-card-green"><div class="kpi-label">模型 AUC</div><div class="kpi-value">{{ auc }}</div><div class="kpi-delta neutral">50次嵌套CV</div></div>
-    <div class="kpi-card kpi-card-blue"><div class="kpi-label">在线服务</div><div class="kpi-value" style="font-size:18px">Active</div><div class="kpi-delta neutral">演示</div></div>
-  </div>
-  <div v-if="loadErr" class="error">{{ loadErr }}</div>
-  <div class="grid-2" v-if="data">
-    <div class="card">
-      <div class="card-header"><span class="card-title">AKI 发生率趋势</span></div>
-      <div class="card-body">
-        <svg viewBox="0 0 500 220" style="width:100%;height:auto">
-          <polyline :points="data!.trend.months.map((_: string, i: number)=>`${30+i*49},${190-data!.trend.akiRates[i]*4}`).join(' ')" fill="none" stroke="var(--primary)" stroke-width="2.5" />
-          <g fill="var(--primary)"><circle v-for="(m,i) in data!.trend.months" :key="i" :cx="30+i*49" :cy="190-data!.trend.akiRates[i]*4" r="4" /></g>
-          <g class="axis-labels" font-size="9"><text v-for="(m,i) in data!.trend.months" :key="i" :x="30+i*49" :y="212" text-anchor="middle">{{ m.slice(5) }}</text></g>
-        </svg>
+  <div>
+    <div class="page-head">
+      <div>
+        <h1 class="page-title">{{ greeting }}，{{ auth.user.value?.display_name || auth.user.value?.username }}</h1>
+        <div class="page-subtitle">{{ today }} · 急性肾损伤临床风险管理工作台</div>
+      </div>
+      <div class="page-actions">
+        <RouterLink to="/patients" class="btn btn-primary">＋ 新建接诊</RouterLink>
+        <RouterLink to="/reports" class="btn btn-secondary">报告中心</RouterLink>
+        <button class="btn btn-secondary" :disabled="loading" @click="load">刷新</button>
       </div>
     </div>
-    <div class="card">
-      <div class="card-header"><span class="card-title">科室手术量分布</span></div>
-      <div class="card-body">
-        <div v-for="(d,i) in data.departments" :key="d.name" style="margin-bottom:10px">
-          <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px"><span style="color:var(--text)">{{ d.name }}</span><span class="muted">{{ d.cases }} 例 · {{ d.akiRate }}%</span></div>
-          <div style="height:8px;border-radius:4px;overflow:hidden" :style="{ background: 'var(--bg-inset)' }"><div :style="{width:(d.cases/totalDeptCases*100)+'%',height:'100%',background:COLORS[i%5]}"></div></div>
+
+    <div v-if="error" class="error">{{ error }}</div>
+    <div v-if="loading" class="card"><div class="empty-state">正在加载工作台…</div></div>
+
+    <template v-else-if="summary">
+      <div class="summary-strip">
+        <div class="summary-item">
+          <div class="label">在管患者</div>
+          <div class="value">{{ summary.patients_total }}</div>
+          <div class="hint">当前账号可见的有效档案</div>
+        </div>
+        <div class="summary-item">
+          <div class="label">就诊记录</div>
+          <div class="value">{{ summary.encounters_total }}</div>
+          <div class="hint">累计接诊与评估</div>
+        </div>
+        <div class="summary-item">
+          <div class="label">待处理</div>
+          <div class="value" :style="{color: summary.pending_total ? 'var(--yellow)' : 'var(--green)'}">{{ summary.pending_total }}</div>
+          <div class="hint">尚未发布正式报告</div>
+        </div>
+        <div class="summary-item">
+          <div class="label">已发布报告</div>
+          <div class="value">{{ summary.reports_total }}</div>
+          <div class="hint">今日预约 {{ summary.today_appointments }} 人次</div>
         </div>
       </div>
-    </div>
+
+      <div class="grid-2-1">
+        <div>
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">待处理就诊</span>
+              <RouterLink to="/patients" style="font-size:10px;color:var(--primary)">查看全部 →</RouterLink>
+            </div>
+            <div v-if="!summary.recent_encounters?.length" class="empty-state">
+              <strong>暂无就诊记录</strong>
+              从患者档案进入并创建一次接诊。
+            </div>
+            <div v-else class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr><th>患者</th><th>就诊编号</th><th>发生时间</th><th>状态</th><th></th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="e in summary.recent_encounters" :key="e.id">
+                    <td>
+                      <div class="primary-cell">{{ e.patient_name }}</div>
+                      <div class="sub-cell">{{ e.patient_id }}</div>
+                    </td>
+                    <td>{{ e.case_ref }}</td>
+                    <td>{{ fmtDate(e.occurred_at) }}</td>
+                    <td><span class="status" :class="`status-${e.status}`">{{ statusText[e.status] ?? e.status }}</span></td>
+                    <td class="text-right">
+                      <RouterLink :to="`/encounters/${e.id}`" class="btn btn-sm btn-secondary">进入</RouterLink>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header"><span class="card-title">近六个月业务量</span></div>
+            <div class="card-body">
+              <div v-for="m in summary.monthly" :key="m.month" style="display:grid;grid-template-columns:64px 1fr 1fr 80px;gap:10px;align-items:center;margin-bottom:9px">
+                <span style="font-size:10px;color:var(--text-dim)">{{ m.month.slice(5) }} 月</span>
+                <div class="metric-progress" style="margin:0">
+                  <div class="track"><div class="fill" :style="{width: `${m.encounters / maxMonthly * 100}%`}" /></div>
+                </div>
+                <div style="height:5px;background:var(--bg-inset);border-radius:3px;overflow:hidden">
+                  <div :style="{width: `${m.reports / maxMonthly * 100}%`,height:'100%',background:'var(--green)',borderRadius:'3px'}" />
+                </div>
+                <span style="font-size:10px;color:var(--text-dim);text-align:right">{{ m.encounters }} 诊 / {{ m.reports }} 报</span>
+              </div>
+              <div class="muted" style="font-size:10px;margin-top:4px">蓝色为就诊量，绿色为报告发布量。</div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">风险构成</span></div>
+            <div class="card-body">
+              <div v-for="(level, key) in { 高: 'high', 中: 'medium', 低: 'low' }" :key="key" style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+                <span class="status" :class="`status-${key === '高' ? 'high' : key === '中' ? 'medium' : 'low'}`" style="width:42px;justify-content:center">{{ key }}风险</span>
+                <div style="flex:1;height:8px;background:var(--bg-inset);border-radius:4px;overflow:hidden">
+                  <div :style="{width: `${summary.risk_distribution[key] / Math.max(1, summary.risk_distribution.高 + summary.risk_distribution.中 + summary.risk_distribution.低) * 100}%`,height:'100%',background: `var(--${key === '高' ? 'red' : key === '中' ? 'yellow' : 'green'})`,borderRadius:'4px'}" />
+                </div>
+                <span style="font-size:12px;font-weight:800;color:var(--text-bright);width:28px;text-align:right">{{ summary.risk_distribution[key] }}</span>
+              </div>
+              <div class="info-box mb-0" style="margin-top:4px">按每个患者最近一次有效预测统计。</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header"><span class="card-title">手术类型分布</span></div>
+            <div class="card-body">
+              <div v-if="!summary.departments?.length" class="muted">暂无数据</div>
+              <div v-for="d in summary.departments.slice(0,6)" :key="d.name" style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed var(--border)">
+                <span style="font-size:11px;color:var(--text)">{{ d.name }}</span>
+                <span style="font-size:11px;font-weight:700;color:var(--text-bright)">{{ d.cases }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header"><span class="card-title">快捷入口</span></div>
+            <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
+              <RouterLink to="/patients" class="btn btn-secondary">患者档案与接诊</RouterLink>
+              <RouterLink to="/reports" class="btn btn-secondary">报告检索与下载</RouterLink>
+              <RouterLink to="/schedule" class="btn btn-secondary">预约排班与反馈</RouterLink>
+              <RouterLink v-if="auth.user.value?.role === 'admin'" to="/admin" class="btn btn-secondary">账号、审计与备份</RouterLink>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
   </div>
-  <p class="muted" v-if="data" style="margin-top:8px">本页图表为演示数据，不代表真实科室统计；实际部署后可接入医院信息系统。</p>
 </template>

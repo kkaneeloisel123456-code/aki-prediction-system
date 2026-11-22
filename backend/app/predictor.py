@@ -30,15 +30,18 @@ def _feature_timing(name: str) -> str:
     return "preop"
 
 
-def _is_missing(val: Any) -> bool:
-    """Return True for None, NaN, inf, or non-numeric values that must be imputed."""
+def _finite_float(val: Any) -> Optional[float]:
+    """Coerce to a finite float, or None for values that must be imputed.
+
+    None means either a literal None, NaN, +/-inf, or a non-numeric value.
+    """
     if val is None:
-        return True
+        return None
     try:
         f = float(val)
     except (TypeError, ValueError):
-        return True
-    return math.isnan(f) or math.isinf(f)
+        return None
+    return None if math.isnan(f) or math.isinf(f) else f
 
 
 # TreeExplainer construction walks the whole booster and costs roughly a
@@ -66,23 +69,22 @@ def build_vector(features: List[str], impute_values: Dict[str, float],
     X = np.zeros(len(features))
     missing: List[str] = []
     for i, feat in enumerate(features):
-        val = inputs.get(feat, None)
-        if not _is_missing(val):
-            v = float(val)
-            rng = FEATURE_RANGES.get(feat)
-            # Mirror the training pipeline: physiologically impossible values
-            # were flagged as missing there, so median-fill them here too
-            # instead of letting a typo drive the prediction.
-            if rng is not None and not (rng[0] <= v <= rng[1]):
-                X[i] = impute_values.get(feat, 0.0)
-                missing.append(feat)
-                continue
-            # Clamp to a clinically sane range: huge values overflow float32
-            # inside the tree models and crash with a 500.
-            X[i] = float(np.clip(v, -1e6, 1e6))
-        else:
+        v = _finite_float(inputs.get(feat))
+        if v is None:
             X[i] = impute_values.get(feat, 0.0)
             missing.append(feat)
+            continue
+        rng = FEATURE_RANGES.get(feat)
+        # Mirror the training pipeline: physiologically impossible values
+        # were flagged as missing there, so median-fill them here too
+        # instead of letting a typo drive the prediction.
+        if rng is not None and not (rng[0] <= v <= rng[1]):
+            X[i] = impute_values.get(feat, 0.0)
+            missing.append(feat)
+            continue
+        # Clamp to a clinically sane range: huge values overflow float32
+        # inside the tree models and crash with a 500.
+        X[i] = float(np.clip(v, -1e6, 1e6))
     raw = X.copy()
     return raw, missing, X.reshape(1, -1)
 

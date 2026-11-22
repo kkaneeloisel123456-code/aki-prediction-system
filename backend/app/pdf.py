@@ -140,20 +140,6 @@ def generate_pdf(patient: Dict[str, Any], result: Dict[str, Any]) -> bytes:
              align="C", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)
 
-    # When the caller forced a demo probability (override_prob), the banner /
-    # risk band / clinical advice no longer reflect the model output, so the
-    # report must say so prominently - it must never pass as a real prediction.
-    if result.get("probability_overridden"):
-        pdf.set_fill_color(255, 243, 205)
-        pdf.set_draw_color(180, 140, 20)
-        pdf.set_text_color(140, 90, 0)
-        pdf.set_font(font, "B", 10)
-        pdf.cell(W, 8,
-                 "演示数据：本报告概率为人工指定的演示值（override_prob），非模型计算结果",
-                 align="C", border=True, fill=True, new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(4)
-    pdf.ln(4)
-
     # -----------------------------------------------------------------------
     # Progress bar (visual probability gauge)
     # -----------------------------------------------------------------------
@@ -287,6 +273,180 @@ def generate_pdf(patient: Dict[str, Any], result: Dict[str, Any]) -> bytes:
     # -----------------------------------------------------------------------
     # Output
     # -----------------------------------------------------------------------
+    buf = io.BytesIO()
+    buf.write(pdf.output())
+    return buf.getvalue()
+
+
+def _safe_text(value: Any, limit: int = 5000) -> str:
+    text = "" if value is None else str(value)
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text).strip()
+    return text[:limit]
+
+
+def generate_clinical_report(snapshot: Dict[str, Any]) -> bytes:
+    """Render the immutable snapshot of a published clinical report."""
+    from fpdf import FPDF
+
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_margins(left=18, top=18, right=18)
+    pdf.set_auto_page_break(auto=True, margin=18)
+    font = _setup_font(pdf)
+    pdf.add_page()
+    width = _effective_width(pdf)
+
+    patient = snapshot.get("patient") or {}
+    encounter = snapshot.get("encounter") or {}
+    prediction = snapshot.get("prediction") or {}
+    result = prediction.get("result") or {}
+    review = snapshot.get("review") or {}
+    published_by = snapshot.get("published_by") or {}
+    report_no = _safe_text(snapshot.get("report_no"), 80)
+    version = snapshot.get("version", 1)
+
+    def heading(text: str, size: int = 11) -> None:
+        pdf.ln(2)
+        pdf.set_font(font, "B", size)
+        pdf.set_text_color(28, 45, 70)
+        pdf.cell(width, 7, _safe_text(text), new_x="LMARGIN", new_y="NEXT")
+        pdf.set_draw_color(45, 110, 180)
+        pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + width, pdf.get_y())
+        pdf.ln(3)
+
+    def line(label: str, value: Any) -> None:
+        pdf.set_font(font, "B", 9)
+        pdf.set_text_color(70, 80, 95)
+        pdf.cell(28, 5.5, label)
+        pdf.set_font(font, "", 9)
+        pdf.set_text_color(35, 40, 50)
+        pdf.multi_cell(width - 28, 5.5, _safe_text(value, 1000), new_x="LMARGIN", new_y="NEXT")
+
+    pdf.set_font(font, "B", 18)
+    pdf.set_text_color(25, 40, 65)
+    pdf.cell(width, 11, "急性肾损伤（AKI）临床评估报告", align="C",
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font(font, "", 9)
+    pdf.set_text_color(100, 105, 112)
+    pdf.cell(width, 6, f"报告编号：{report_no}  ·  第 {version} 版", align="C",
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(3)
+
+    if result.get("manual"):
+        band, probability, calibrated = "人工审核", None, False
+    else:
+        band = _safe_text(result.get("risk_level") or "未分级")
+        probability = result.get("probability")
+        calibrated = bool(result.get("calibrated"))
+    r, g, b = _risk_color(band) if band != "人工审核" else (90, 90, 100)
+    pdf.set_fill_color(r, g, b)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font(font, "B", 16)
+    if probability is None:
+        banner = "人工审核 · 未采用模型自动分级"
+    else:
+        banner = f"{band}风险   {float(probability) * 100:.1f}%"
+    pdf.cell(width, 14, banner, align="C", fill=True, new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font(font, "", 8)
+    pdf.set_text_color(80, 85, 92)
+    note = "概率已校准" if calibrated else "概率未校准"
+    pdf.cell(width, 5, f"分层阈值：低 < {0.30:.2f} / 中 {0.30:.2f}–{0.70:.2f} / 高 ≥ {0.70:.2f}  ·  {note}",
+             align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(3)
+
+    heading("患者与就诊")
+    line("姓名", patient.get("name"))
+    line("病历号", patient.get("mrn"))
+    line("性别 / 出生年", f"{patient.get('sex') or ''} / {patient.get('birth_year') or ''}")
+    line("证件（脱敏）", patient.get("certificate") or "未提供")
+    line("就诊编号", encounter.get("case_ref"))
+    line("就诊时间", encounter.get("occurred_at"))
+    line("手术类型", encounter.get("surgery_type") or "未填写")
+
+    heading("临床诊断")
+    pdf.set_font(font, "", 9)
+    pdf.set_text_color(40, 45, 52)
+    pdf.multi_cell(width, 5.5, _safe_text(encounter.get("diagnosis")), new_x="LMARGIN", new_y="NEXT")
+    heading("医嘱 / 随访建议")
+    pdf.multi_cell(width, 5.5, _safe_text(encounter.get("orders")), new_x="LMARGIN", new_y="NEXT")
+
+    if not result.get("manual"):
+        heading("本次实测指标")
+        values = encounter.get("values") or {}
+        from .feature_labels import get_label
+        rows = []
+        for key, value in values.items():
+            label = get_label(key)
+            rows.append((label.get("label") or key, value, label.get("unit") or ""))
+        if rows:
+            col = [width * 0.48, width * 0.32, width * 0.20]
+            pdf.set_font(font, "B", 8)
+            pdf.set_fill_color(38, 65, 102)
+            pdf.set_text_color(255, 255, 255)
+            for i, title in enumerate(("指标", "结果", "单位")):
+                pdf.cell(col[i], 6, title, border=0, align="C", fill=True)
+            pdf.ln(6)
+            pdf.set_font(font, "", 8)
+            for idx, (name, value, unit) in enumerate(rows):
+                pdf.set_fill_color(246, 248, 252) if idx % 2 == 0 else pdf.set_fill_color(255, 255, 255)
+                pdf.set_text_color(45, 50, 58)
+                pdf.cell(col[0], 5.5, _safe_text(name, 40), border="B", fill=True)
+                pdf.cell(col[1], 5.5, _safe_text(value, 30), border="B", align="C", fill=True)
+                pdf.cell(col[2], 5.5, _safe_text(unit, 20), border="B", align="C", fill=True,
+                         new_x="LMARGIN", new_y="NEXT")
+        else:
+            pdf.set_font(font, "", 9)
+            pdf.multi_cell(width, 5.5, "本次未录入实测指标。")
+
+        shap_items = (result.get("shap_values") or [])[:10]
+        heading("模型解释（SHAP 前 10 项）")
+        if shap_items:
+            col = [width * 0.40, width * 0.18, width * 0.22, width * 0.20]
+            pdf.set_font(font, "B", 8)
+            pdf.set_fill_color(38, 65, 102)
+            pdf.set_text_color(255, 255, 255)
+            for i, title in enumerate(("指标", "当前值", "方向", "SHAP")):
+                pdf.cell(col[i], 6, title, border=0, align="C", fill=True)
+            pdf.ln(6)
+            for idx, item in enumerate(shap_items):
+                pdf.set_font(font, "", 8)
+                pdf.set_fill_color(246, 248, 252) if idx % 2 == 0 else pdf.set_fill_color(255, 255, 255)
+                pdf.set_text_color(45, 50, 58)
+                pdf.cell(col[0], 5.5, _safe_text(item.get("feature"), 40), border="B", fill=True)
+                pdf.cell(col[1], 5.5, _safe_text(item.get("value"), 20), border="B", align="C", fill=True)
+                pdf.set_text_color(160, 40, 40) if item.get("direction") == "risk" else pdf.set_text_color(30, 125, 70)
+                pdf.cell(col[2], 5.5, "升高风险" if item.get("direction") == "risk" else "降低风险",
+                         border="B", align="C", fill=True)
+                pdf.set_text_color(45, 50, 58)
+                pdf.cell(col[3], 5.5, f"{float(item.get('shap') or 0):+.4f}",
+                         border="B", align="C", fill=True, new_x="LMARGIN", new_y="NEXT")
+        else:
+            pdf.set_font(font, "", 9)
+            pdf.multi_cell(width, 5.5, "本次无可用解释项。")
+
+    heading("医生复核与发布")
+    decision_map = {"agree": "认可模型结果", "adjust": "调整判断", "defer": "暂缓采纳", "manual": "人工审核"}
+    line("复核结论", decision_map.get(review.get("decision"), review.get("decision") or "未记录"))
+    line("复核说明", review.get("reason") or "未填写")
+    line("复核时间", review.get("created_at") or "未记录")
+    line("发布人", published_by.get("name") or "未记录")
+    line("模型版本", prediction.get("model_version") or "人工审核 / 不适用")
+    line("发布时间", snapshot.get("generated_at") or "")
+
+    pdf.ln(3)
+    pdf.set_font(font, "", 8)
+    pdf.set_text_color(125, 130, 138)
+    pdf.multi_cell(
+        width, 4.2,
+        "【声明】本报告由 AKI 临床智能评估系统根据已保存的预测快照生成，"
+        "仅供具备资质的医疗专业人员参考，不能替代临床诊断和治疗决策。"
+        "报告内容与模型版本已固化存档，后续数据修改不会改变本版本。",
+        align="C",
+    )
+    pdf.set_y(-16)
+    pdf.set_font(font, "", 7)
+    pdf.cell(width, 4, f"{report_no}  ·  第 {version} 版", align="L")
+    pdf.cell(0, 4, f"第 {pdf.page_no()} 页", align="R")
+
     buf = io.BytesIO()
     buf.write(pdf.output())
     return buf.getvalue()

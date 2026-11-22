@@ -5,24 +5,56 @@ from __future__ import annotations
 import io
 import logging
 import math
-import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from . import predictor
 from .assets import load_assets
-from .config import CORS_ORIGINS, FEATURE_RANGES, OUTPUTS_DIR, RISK_HIGH, RISK_LOW
-from .pdf import generate_pdf
+from .auth import AuthTokenError
+from .auth_service import (
+    authenticate,
+    change_password,
+    cleanup_expired,
+    clear_login_failures,
+    create_session,
+    is_configured,
+    login_rate_limited,
+    public_user,
+    read_session,
+    record_login_failure,
+    revoke_session,
+    verify_csrf,
+)
+from .config import (
+    AUTH_COOKIE_NAME,
+    AUTH_CSRF_COOKIE_NAME,
+    AUTH_COOKIE_SECURE,
+    AUTH_REMEMBER_DAYS,
+    AUTH_SESSION_HOURS,
+    CORS_ORIGINS,
+    FEATURE_RANGES,
+    OUTPUTS_DIR,
+    RISK_HIGH,
+    RISK_LOW,
+)
+from .clinical_api import router as clinical_router
+from .admin_api import router as admin_router
+from .patient_portal_api import router as portal_router
+from .import_api import router as import_router
+from .database import ensure_initialized, utc_now
 from .schemas import (
+    AuthStatusResponse,
+    AuthUser,
     BatchPredictResponse,
     FeaturesResponse,
     HealthResponse,
+    LoginRequest,
     PredictRequest,
     PredictResponse,
 )
@@ -49,25 +81,20 @@ def _safe_join(base: Path, name: str) -> Path:
     return candidate
 
 
-def _safe_filename(pid: Optional[str]) -> str:
-    """Sanitize a patient ID for safe use in a Content-Disposition filename."""
-    if not pid:
-        return "patient"
-    return re.sub(r"[^A-Za-z0-9_.-]", "_", pid)[:64]
-
-
 @asynccontextmanager
 async def _lifespan(application: FastAPI):  # noqa: ARG001
-    """Load model assets once at startup; fail fast if critical files are missing."""
+    """Initialize the business database and load model assets once at startup."""
+    ensure_initialized()
+    cleanup_expired()
     load_assets()
-    logger.info("Model assets loaded.")
+    logger.info("Clinical database and model assets ready.")
     yield
 
 
 app = FastAPI(
     title="AKI Prediction API",
     version="1.0.0",
-    description="急性肾损伤预测：单患者/批量预测、SHAP解释、PDF报告。",
+    description="急性肾损伤预测：患者档案、接诊预测、医生复核、报告发布与患者服务。",
     lifespan=_lifespan,
 )
 
@@ -78,6 +105,167 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(clinical_router)
+app.include_router(admin_router)
+app.include_router(portal_router)
+app.include_router(import_router)
+
+_PUBLIC_API_PATHS = {
+    "/api/health",
+    "/api/auth/login",
+    "/api/auth/logout",
+    "/api/auth/status",
+}
+_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+_MUST_CHANGE_ALLOWED = {
+    "/api/auth/password",
+    "/api/auth/status",
+    "/api/auth/logout",
+}
+
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Cross-Origin-Opener-Policy": "same-origin",
+}
+
+
+def _with_security_headers(response: Response) -> Response:
+    for key, value in _SECURITY_HEADERS.items():
+        response.headers.setdefault(key, value)
+    return response
+
+
+@app.middleware("http")
+async def protect_api(request: Request, call_next):
+    """Require a DB-backed session and CSRF token for staff APIs."""
+    path = request.url.path.rstrip("/") or "/"
+    if request.method == "OPTIONS":
+        return _with_security_headers(await call_next(request))
+    # Patient portal handles its own portal session and Origin checks.
+    if path.startswith("/api/portal"):
+        return _with_security_headers(await call_next(request))
+    if not path.startswith("/api") or path in _PUBLIC_API_PATHS:
+        return _with_security_headers(await call_next(request))
+
+    token = request.cookies.get(AUTH_COOKIE_NAME)
+    if not token:
+        return _with_security_headers(JSONResponse(
+            status_code=401, content={"detail": "登录状态已失效，请重新登录"}
+        ))
+    try:
+        user, csrf_hash = read_session(token)
+    except AuthTokenError:
+        return _with_security_headers(JSONResponse(
+            status_code=401, content={"detail": "登录状态已失效，请重新登录"}
+        ))
+    request.state.user = user
+    request.state.csrf_hash = csrf_hash
+    request.state.session_token = token
+
+    if user.get("must_change_password") and path not in _MUST_CHANGE_ALLOWED:
+        return _with_security_headers(JSONResponse(
+            status_code=403, content={"detail": "首次登录必须修改初始密码"}
+        ))
+    if request.method not in _SAFE_METHODS:
+        cookie_csrf = request.cookies.get(AUTH_CSRF_COOKIE_NAME)
+        header_csrf = request.headers.get("x-csrf-token")
+        if not verify_csrf(csrf_hash, header_csrf, cookie_csrf):
+            return _with_security_headers(JSONResponse(
+                status_code=403, content={"detail": "CSRF 校验失败，请刷新页面后重试"}
+            ))
+    return _with_security_headers(await call_next(request))
+
+
+@app.post("/api/auth/login", response_model=AuthStatusResponse)
+def auth_login(req: LoginRequest, request: Request, response: Response) -> AuthStatusResponse:
+    username = req.username.strip()
+    host = request.client.host if request.client else "unknown"
+    rate_key = f"{host}|{username.lower()}"
+    if login_rate_limited(rate_key):
+        raise HTTPException(status_code=429, detail="登录尝试次数过多，请 5 分钟后再试")
+    try:
+        user = authenticate(username, req.password)
+    except Exception as exc:
+        logger.exception("Authentication backend unavailable")
+        raise HTTPException(status_code=503, detail="认证服务暂不可用") from exc
+    if user is None:
+        record_login_failure(rate_key)
+        raise HTTPException(status_code=401, detail="账号或密码错误")
+
+    clear_login_failures(rate_key)
+    ttl_seconds = (
+        AUTH_REMEMBER_DAYS * 24 * 3600 if req.remember
+        else AUTH_SESSION_HOURS * 3600
+    )
+    token, csrf, _ = create_session(
+        user, ttl_seconds,
+        ip=host, user_agent=request.headers.get("user-agent"),
+    )
+    response.set_cookie(
+        AUTH_COOKIE_NAME, token,
+        max_age=ttl_seconds if req.remember else None,
+        path="/", secure=AUTH_COOKIE_SECURE, httponly=True, samesite="lax",
+    )
+    # Double-submit CSRF cookie is intentionally readable by the same-origin
+    # frontend; it contains no credential by itself.
+    response.set_cookie(
+        AUTH_CSRF_COOKIE_NAME, csrf,
+        max_age=ttl_seconds if req.remember else None,
+        path="/", secure=AUTH_COOKIE_SECURE, httponly=False, samesite="lax",
+    )
+    return AuthStatusResponse(
+        authenticated=True, configured=True, user=AuthUser(**user),
+    )
+
+
+@app.post("/api/auth/logout", response_model=AuthStatusResponse)
+def auth_logout(request: Request, response: Response) -> AuthStatusResponse:
+    token = request.cookies.get(AUTH_COOKIE_NAME)
+    if token:
+        try:
+            _, csrf_hash = read_session(token)
+            if not verify_csrf(
+                csrf_hash, request.headers.get("x-csrf-token"),
+                request.cookies.get(AUTH_CSRF_COOKIE_NAME),
+            ):
+                raise HTTPException(status_code=403, detail="CSRF 校验失败")
+            revoke_session(token)
+        except AuthTokenError:
+            pass
+    response.delete_cookie(
+        AUTH_COOKIE_NAME, path="/", secure=AUTH_COOKIE_SECURE,
+        httponly=True, samesite="lax",
+    )
+    response.delete_cookie(
+        AUTH_CSRF_COOKIE_NAME, path="/", secure=AUTH_COOKIE_SECURE,
+        httponly=False, samesite="lax",
+    )
+    try:
+        configured = is_configured()
+    except Exception:
+        configured = False
+    return AuthStatusResponse(authenticated=False, configured=configured, user=None)
+
+
+@app.get("/api/auth/status", response_model=AuthStatusResponse)
+def auth_status(request: Request) -> AuthStatusResponse:
+    try:
+        configured = is_configured()
+    except Exception:
+        logger.exception("Auth status check failed")
+        return AuthStatusResponse(authenticated=False, configured=False, user=None)
+    token = request.cookies.get(AUTH_COOKIE_NAME)
+    if not token:
+        return AuthStatusResponse(authenticated=False, configured=configured, user=None)
+    try:
+        user, _ = read_session(token)
+    except AuthTokenError:
+        return AuthStatusResponse(authenticated=False, configured=configured, user=None)
+    return AuthStatusResponse(authenticated=True, configured=configured, user=AuthUser(**user))
 
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -93,12 +281,6 @@ def health() -> HealthResponse:
 
 @app.post("/api/predict", response_model=PredictResponse)
 def predict_single(req: PredictRequest) -> PredictResponse:
-    # override_prob is a demo-only knob for /api/report/pdf; accepting it here
-    # would let callers believe they can force the JSON prediction path.
-    if req.override_prob is not None:
-        raise HTTPException(
-            status_code=422,
-            detail="override_prob 仅用于 /api/report/pdf 的演示场景，/api/predict 不接受该参数")
     # Tolerate stray whitespace in caller-supplied keys (copy-paste from
     # spreadsheets) so features aren't silently median-filled.
     feats = {k.strip(): v for k, v in req.features.items()}
@@ -154,35 +336,6 @@ def data_imputation() -> Dict[str, Any]:
         for feat in assets["features"]
     ]
     return {"count": len(rows), "features": rows}
-
-
-@app.post("/api/report/pdf")
-def report_pdf(req: PredictRequest) -> Response:
-    # Same key-whitespace tolerance as /api/predict so both endpoints agree
-    # on the same payload (padded keys otherwise get median-filled here but
-    # not there).
-    feats = {k.strip(): v for k, v in req.features.items()}
-    result = predictor.predict(feats, patient_id=req.patient_id)
-    if req.override_prob is not None:
-        result["probability"] = req.override_prob
-        result["risk_level"] = predictor.risk_band(req.override_prob)
-        result["prediction"] = int(req.override_prob >= 0.5)
-        result["calibrated"] = False
-        # The PDF draws a visible banner when this is set, so a demo report
-        # can never be mistaken for a real model prediction.
-        result["probability_overridden"] = True
-    pdf_bytes = generate_pdf(
-        {"id": req.patient_id or "N/A", "age": feats.get("年龄")},
-        result,
-    )
-    safe = _safe_filename(req.patient_id)
-    filename = f"AKI_Report_{safe}.pdf"
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
 
 
 def _csv_dupe_columns(raw: bytes) -> list:
@@ -467,109 +620,6 @@ def app_meta() -> Dict[str, Any]:
         "risk_low": RISK_LOW,
         "risk_high": RISK_HIGH,
     }
-
-
-@app.get("/api/workstation/cohort")
-def workstation_cohort() -> Dict[str, Any]:
-    """Synthetic 20-patient cohort (seed=42), predicted by the real model.
-
-    Demo data only — not real patients.
-    """
-    import random
-    rng = random.Random(42)
-    n = 20
-    surgery_types = [
-        "心脏瓣膜手术", "冠状动脉旁路移植术", "联合手术",
-        "结构性心脏病手术", "大血管疾病手术",
-    ]
-    patients = []
-    for i in range(n):
-        age    = rng.randint(45, 81)
-        sex = "男" if rng.choice([True, False]) else "女"
-        surgery = rng.choice(surgery_types)
-        apache = rng.randint(8, 29)
-        # Pre-op values (clinically plausible, correlated with age)
-        pre_scr  = round(rng.uniform(60, 130), 1)
-        pre_egfr = round(max(35.0, 110 - age * 0.55 + rng.gauss(0, 12)), 1)
-        pre_bnp  = round(max(50.0, 300 + (age - 55) * 18 + rng.gauss(0, 250)), 1)
-        pre_hstn = round(max(2.0, 8 + (age - 55) * 0.25 + rng.gauss(0, 6)), 2)
-        pre_wbc  = round(max(3.5, 7 + rng.gauss(0, 2)), 2)
-        # ICU admission values — the model's top drivers; vary widely so the
-        # cohort shows a realistic mix of low / medium / high risk.
-        icu_scr  = round(max(45.0, pre_scr * rng.uniform(0.8, 2.6) + rng.gauss(0, 12)), 1)
-        icu_egfr = round(max(10.0, pre_egfr * rng.uniform(0.4, 1.15) + rng.gauss(0, 8)), 1)
-        # Post-op biomarkers (elevated in AKI)
-        post_lac = round(max(0.8, 2.5 + (icu_scr - pre_scr) * 0.04 + rng.gauss(0, 1.6)), 2)
-        post_b2m = round(max(1.0, 1.5 + (icu_scr - pre_scr) * 0.025 + rng.gauss(0, 0.9)), 2)
-        post_mb  = round(max(100.0, 250 + rng.gauss(0, 180) + (post_lac - 2.5) * 80), 1)
-        post_urea= round(max(3.0, 5.0 + (icu_scr - pre_scr) * 0.05 + rng.gauss(0, 2.5)), 2)
-        post_alb = round(min(42.0, 33 - (post_lac - 2.5) * 0.8 + rng.gauss(0, 2)), 1)
-        post_be  = round(max(-10.0, -2.5 - (post_lac - 2.5) * 1.2 + rng.gauss(0, 1.5)), 2)
-        post_hstn= round(max(50.0, pre_hstn * rng.uniform(1.5, 8) + rng.gauss(0, 200)), 1)
-        surg_time = int(max(120.0, rng.gauss(290, 90)))
-        blood_loss= int(max(100.0, rng.gauss(400, 250)))
-        crystalloid=int(max(200.0, rng.gauss(600, 250)))
-        features = {
-            "年龄": float(age),
-            "性别": 1.0 if sex == "男" else 2.0,
-            "术前Scr": pre_scr,
-            "术前eGFR": pre_egfr,
-            "术前BNP": pre_bnp,
-            "术前hsTn": pre_hstn,
-            "术前WBC": pre_wbc,
-            "APACHEII": float(apache),
-            "ICUAdmSCr": icu_scr,
-            "ICUAdmeGFR": icu_egfr,
-            "术后Lactate": post_lac,
-            "术后β2MG": post_b2m,
-            "术后Mb": post_mb,
-            "术后Urea": post_urea,
-            "术后Alb": post_alb,
-            "术后BE": post_be,
-            "术后hsTn": post_hstn,
-            "手术时间": float(surg_time),
-            "术中失血量": float(blood_loss),
-            "术中晶体液量": float(crystalloid),
-        }
-        pred = predictor.predict(features, explain=False)
-        patients.append({
-            "id": f"P{1001+i:04d}",
-            "age": age, "sex": sex, "surgery": surgery,
-            "preScr": pre_scr, "preEgfr": pre_egfr, "apache": apache,
-            "probability": pred["probability"],
-            "riskLevel": pred["risk_level"],
-            # Full feature vector so "查看" can pre-fill the prediction form.
-            "features": features,
-        })
-    high = sum(1 for p in patients if p["riskLevel"] == "高")
-    mid = sum(1 for p in patients if p["riskLevel"] == "中")
-    low = sum(1 for p in patients if p["riskLevel"] == "低")
-    return {
-        "patients": patients,
-        "summary": {"high": high, "mid": mid, "low": low, "total": n},
-    }
-
-
-@app.get("/api/dashboard/demo")
-def dashboard_demo() -> Dict[str, Any]:
-    """Hard-coded demo data for the management dashboard (not real statistics)."""
-    return {
-        "trend": {
-            "months": ["2025-09","2025-10","2025-11","2025-12","2026-01",
-                       "2026-02","2026-03","2026-04","2026-05","2026-06"],
-            "akiRates": [32.5,31.2,33.8,30.1,29.5,28.7,27.3,28.1,26.8,25.9],
-            "totalCases": [38,42,35,40,45,41,48,39,43,46],
-        },
-        "departments": [
-            {"name": "心血管外科", "cases": 180, "akiRate": 32.2},
-            {"name": "心脏大血管外科", "cases": 95, "akiRate": 28.4},
-            {"name": "结构性心脏病科", "cases": 72, "akiRate": 25.0},
-            {"name": "胸外科", "cases": 45, "akiRate": 22.2},
-            {"name": "其他", "cases": 28, "akiRate": 35.7},
-        ],
-        "akiRate": 29.8,
-    }
-
 
 
 def _data_types() -> dict:

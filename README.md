@@ -1,6 +1,6 @@
 # AKI 急性肾损伤智能预测系统
 
-> **在线体验**：[https://aki-prediction-system.onrender.com/](https://aki-prediction-system.onrender.com/)（免费实例冷启动可能需要几十秒）
+> 本版本为**临床业务生产导向版**：患者档案、就诊、医生复核、正式报告、权限审计、预约反馈和患者门户均使用本地 SQLite 持久化，不再使用合成患者或演示统计数据。
 
 ## 项目简介
 
@@ -32,13 +32,27 @@ npm install
 npm run build                     # 产物输出到 frontend/dist
 cd ..
 
-# 3. 启动服务（后端同时托管前端静态页面）
+# 3. 首次启动创建管理员（随机初始密码仅在终端显示一次）
+python scripts/init_auth.py --username admin --role admin --generate-password
+
+# 4. 启动服务（后端同时托管前端静态页面）
 uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
 ```
 
 浏览器访问 [http://localhost:8000](http://localhost:8000) 。首次启动会从 `app_data/` 加载模型工件（已随包提供，无需 Git LFS）。
 
 开发模式（前端热重载）：另开一个终端进入 `frontend` 目录后执行 `npm run dev`，访问 [http://localhost:5173](http://localhost:5173) ，Vite 会把 `/api` 代理到 8000 端口的后端。
+
+### 本地登录、数据库与账号管理
+
+- 一键启动器首次运行时会在缺少认证配置的情况下创建 `admin` 并生成随机初始密码；随后自动初始化 `backend/clinical.db`、导入管理员并生成首份一致性备份。
+- `backend/auth_config.json` 只作为首次管理员导入来源，保存 PBKDF2 密码哈希和旧会话密钥，已被 Git 忽略；日常账号数据存放在 SQLite。
+- 数据库默认路径为 `backend/clinical.db`，可用环境变量 `AKI_DB_PATH` 覆盖；备份目录默认 `backend/backups`，可用 `AKI_BACKUP_DIR` 覆盖。
+- 普通会话 12 小时，勾选“记住登录状态”后 7 天；会话保存在数据库，可在“账号与审计”页面撤销。新增医生账号、停用账号、重置密码均通过管理员页面完成；新账号首次登录必须改密。
+- 患者数据、WAL/SHM、备份和恢复临时文件均已加入 `.gitignore`，不要提交到仓库。
+- 生产环境建议启用 HTTPS，并设置 `AKI_AUTH_SECURE_COOKIE=1` 为会话 Cookie 增加 `Secure` 属性；整个系统应部署在受控内网或经医院批准的服务器上。
+- 备份与恢复：管理员页面可手动创建一致性备份（含 SHA-256 校验）；命令行恢复示例：
+  `python -m backend.app.backup restore backend/backups/clinical-YYYYMMDDTHHMMSSZ.db --confirm`。恢复前系统会自动保留一份紧急副本。
 
 ---
 
@@ -296,12 +310,24 @@ aki-prediction-system/
 │   └── impute_values.json        # 推理时缺失值中位数
 ├── backend/                      # FastAPI 后端
 │   ├── app/                      # main / predictor / assets / pdf / schemas / config
+│   │   ├── database.py           # SQLite Schema、事务、审计、ID/时间工具
+│   │   ├── auth_service.py       # 数据库账号、PBKDF2、会话、CSRF、权限
+│   │   ├── clinical_api.py       # 患者-就诊-草稿-预测-复核-报告闭环
+│   │   ├── patient_portal_api.py # 患者门户、查询码、预约、反馈
+│   │   ├── admin_api.py          # 账号、排班、审计、系统概览、手动备份
+│   │   ├── import_api.py         # CSV 模板、预览、提交
+│   │   └── backup.py             # 一致性备份、校验、恢复
 │   ├── assets/fonts/             # PDF 用 CJK 字体
+│   ├── clinical.db               # 本地业务库（Git 忽略）
+│   ├── backups/                  # 一致性备份（Git 忽略）
 │   └── requirements.txt
 ├── frontend/                     # Vue 3 + Vite + TypeScript 前端
-│   ├── src/                      # 页面、组件、API 客户端、composables
+│   ├── src/pages/                # 登录、工作台、患者、接诊、报告、排班、管理、导入、患者门户
 │   ├── dist/                     # 构建产物（由后端托管，不入库）
 │   └── package.json
+├── scripts/
+│   ├── init_auth.py              # 首次生成管理员配置
+│   └── init_clinical_db.py       # 初始化业务库、导入管理员、首份备份
 ├── outputs/                      # 训练输出
 │   ├── figures/                  # ROC/PR/DCA/校准/SHAP/消融/亚组图
 │   ├── tables/                   # CV/Bootstrap/HL/SHAP/特征时点等表
@@ -346,37 +372,7 @@ aki-prediction-system/
 
 ---
 
-## 快速开始
-
-### 启动 Web 系统（三种方式）
-
-#### 方式一：一键启动（Windows 推荐）
-
-Windows 下双击项目根目录的 `启动系统.bat`。脚本会自动检查 Python 环境、创建/修复虚拟环境、安装依赖、按源码时间戳决定是否构建前端、清理旧 AKI 实例，并在 8000–8010 中选择可用端口后启动服务、打开浏览器。关闭命令窗口即可停止服务。Python 3.14+ 会显示兼容性提示，建议使用 Python 3.11–3.13。
-
-#### 方式二：在线体验
-
-[在线体验](https://aki-prediction-system.onrender.com/)（免费实例冷启动可能需要几十秒，请耐心等待。）
-
-#### 方式三：手动启动
-
-终端进入项目根目录后执行：
-
-```bash
-python -m venv .venv
-.venv\Scripts\activate          # Windows
-pip install -r backend/requirements.txt
-cd frontend
-npm install
-npm run build                       # 产物输出到 frontend/dist
-cd ..
-uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
-# → http://localhost:8000
-```
-
-首次启动会从 `app_data/` 加载模型工件。开发模式（前置热重载）可另开终端进入 `frontend` 执行 `npm run dev`，访问 `http://localhost:5173`；Vite 会将 `/api` 请求代理到 8000 端口。
-
-### 重新训练 / 复现实验（需要受控环境中的原始数据或单独提供的脱敏复现数据）
+## 重新训练 / 复现实验
 
 ```bash
 # 训练侧依赖（后端依赖是其子集）
@@ -403,8 +399,8 @@ python run_p1.py
 # 7. 时序风险轨迹（T0→T1→T2）
 python -m src.models.temporal
 
-# 8. 一致性回归测试
-python -m unittest discover -s tests -v
+# 8. 后端与 API 回归测试
+python -m pytest -q
 ```
 
 > 公开仓库不附带临床数据。请将从受控环境或评审提交包单独获取的原始/脱敏复现数据放在 `data/raw/AKI数据.xlsx`，或通过环境变量 `AKI_DATA_PATH` 指定文件，再按上述命令复现实验。Web 系统加载的是 `app_data/` 下已训练好的模型工件，无需训练数据即可独立启动。
@@ -436,16 +432,24 @@ python -m unittest discover -s tests -v
 
 ## Web 系统功能
 
-系统为 FastAPI 后端 + Vue 3 前端的单页应用，共 8 个页面：
+系统为 FastAPI + Vue 3 单页应用，数据来自本地 SQLite，不使用合成患者或硬编码统计。
 
-1. **首页**: 核心指标（AUC/样本量/发生率）、模型对比、功能导航
-2. **模型性能**: 50次嵌套CV结果表、混淆矩阵、ROC/PR、校准/DCA、Bootstrap分布、消融热力图、集成对比
-3. **风险预测**（核心）: 分时段Tab表单（术前/术中/ICU/术后）→ 实时预测 → 风险仪表盘 → SHAP Top6双向条形图 → PDF报告下载
-4. **医生工作台**: 合成患者风险队列（seed=42）、点击查看回填预测表单、CSV拖拽批量上传
-5. **批量预测**: CSV 文件上传 → 逐行预测 → 结果 CSV 下载（UTF-8 BOM）
-6. **管理仪表盘**: AKI发生率趋势、科室分布（演示数据）
-7. **报告中心**: 示例报告下载、模型特征时点分组
-8. **数据治理**: 治理流程图、特征缺失值/训练中位数查询、质量仪表盘
+### 员工端
+
+1. **登录**：本地账号认证，双主题登录页，首次登录强制改密。
+2. **临床工作台**：真实患者/就诊/报告计数、待处理就诊、风险构成、月度业务量。
+3. **患者档案**：按姓名/病历号/风险检索，新建患者，管理员为医生分配查看或编辑权限。
+4. **患者详情**：基本信息、就诊历史、新建接诊、患者查询码、档案编辑和授权管理。
+5. **接诊工作台**：就诊信息 → 35 项指标录入 → 模型评估（校准概率、SHAP、缺失填充）→ 复核、checklist、缺失确认、发布报告、PDF 下载。
+6. **报告中心**：已发布/已撤销报告列表与快照详情；报告含 SHA-256，管理员可撤销并回退就诊状态。
+7. **预约与反馈**：号源管理、现场预约、待诊流转（签到/完成/爽约）、患者评价审核。
+8. **账号与审计**（仅管理员）：员工账号、患者账号、系统概览、手动备份、审计日志。
+9. **批量导入**：下载 CSV 模板 → 上传预览（逐行校验）→ 提交无错误行；支持新建患者或复用已有患者，导入后进入接诊补录。
+10. **模型性能 / 数据治理**：保留研究型指标、图表和特征缺失/中位数查询，供答辩和内部评审使用。
+
+### 患者门户（公开页面，无需员工账号）
+
+患者可注册/登录、使用一次性查询码绑定病历号、查看已发布报告、预约号源、取消预约并提交就诊评价。患者会话使用独立的 HttpOnly Cookie，不能访问员工业务 API。
 
 后端 API 文档（Swagger UI）：启动后访问 `/docs`。
 
@@ -461,6 +465,7 @@ python -m unittest discover -s tests -v
 - **可解释性**: SHAP（TreeExplainer，基于XGBoost子模型）
 - **训练侧可视化**: matplotlib, seaborn
 - **后端**: FastAPI + uvicorn + pydantic v2 + joblib + fpdf2
+- **业务存储**: SQLite（WAL、外键、事务、审计、一致性备份）
 - **前端**: Vue 3 + Vite + vue-router + TypeScript（图表为手写SVG/CSS，无第三方图表库）
 - **验证**: RepeatedStratifiedKFold 嵌套CV、Bootstrap、Isotonic 校准
 

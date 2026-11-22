@@ -62,3 +62,25 @@ _extra = os.environ.get("CORS_ORIGINS", "").strip()
 if _extra:
     _default_origins.extend(o.strip() for o in _extra.split(",") if o.strip())
 CORS_ORIGINS = _default_origins
+
+# Local authentication. The JSON file contains PBKDF2 password hashes and the
+# HMAC session secret, never plaintext passwords. It is intentionally ignored
+# by Git; scripts/init_auth.py creates and maintains it.
+AUTH_CONFIG_FILE = Path(
+    os.environ.get("AKI_AUTH_CONFIG", str(BACKEND_DIR / "auth_config.json"))
+).expanduser()
+CLINICAL_DB_FILE = Path(
+    os.environ.get("AKI_DB_PATH", str(BACKEND_DIR / "clinical.db"))
+).expanduser()
+DATABASE_BACKUP_DIR = Path(
+    os.environ.get("AKI_BACKUP_DIR", str(BACKEND_DIR / "backups"))
+).expanduser()
+AUTH_COOKIE_NAME = "aki_session"
+AUTH_CSRF_COOKIE_NAME = "aki_csrf"
+AUTH_COOKIE_SECURE = os.environ.get("AKI_AUTH_SECURE_COOKIE", "0").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+AUTH_SESSION_HOURS = max(1, int(os.environ.get("AKI_AUTH_SESSION_HOURS", "12")))
+AUTH_REMEMBER_DAYS = max(1, int(os.environ.get("AKI_AUTH_REMEMBER_DAYS", "7")))
+PATIENT_PORTAL_TTL_MINUTES = max(5, int(os.environ.get("AKI_PORTAL_TTL_MINUTES", "720")))
+PATIENT_QUERY_TTL_MINUTES = max(5, int(os.environ.get("AKI_QUERY_TTL_MINUTES", "10")))

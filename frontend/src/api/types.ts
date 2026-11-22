@@ -19,3 +19,11 @@ export interface MetaResponse { n_features: number; n_models: number; best_auc: 
 export interface CohortPatient { id: string; age: number; sex: string; surgery: string; preScr: number; preEgfr: number; apache: number; probability: number; riskLevel: string; features?: Record<string, number> }
 export interface CohortResponse { patients: CohortPatient[]; summary: { high: number; mid: number; low: number; total: number } }
 export interface DashboardDemo { trend: { months: string[]; akiRates: number[]; totalCases: number[] }; departments: { name: string; cases: number; akiRate: number }[]; akiRate: number }
+export interface AuthUser {
+  id?: string
+  username: string
+  display_name?: string
+  role: 'admin' | 'doctor'
+  must_change_password?: boolean
+}
+export interface AuthStatus { authenticated: boolean; configured: boolean; user: AuthUser | null }

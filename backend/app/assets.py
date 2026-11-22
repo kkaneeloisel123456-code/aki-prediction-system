@@ -8,6 +8,7 @@ models/*.pkl are unresolved Git-LFS pointers.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from functools import lru_cache
@@ -56,6 +57,18 @@ def load_assets() -> Dict[str, Any]:
             "Re-run training or copy a complete impute_values.json into app_data/."
         )
 
+    # Deployment fingerprint makes every clinical prediction traceable to the
+    # exact model/scaler/calibrator/feature artifacts used at inference time.
+    digest = hashlib.sha256()
+    for artifact in (FINAL_MODEL, SCALER, CALIBRATOR, FEATURES_FILE, IMPUTE_VALUES):
+        if artifact.exists():
+            digest.update(artifact.name.encode("utf-8"))
+            with artifact.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+    model_hash = digest.hexdigest()
+    model_version = f"AKI-V1-{model_hash[:12].upper()}"
+
     return {
         "model": model,
         "scaler": scaler,
@@ -63,4 +76,6 @@ def load_assets() -> Dict[str, Any]:
         "features": features,
         "impute_values": impute_values,
         "shap_model": shap_model,
+        "model_hash": model_hash,
+        "model_version": model_version,
     }

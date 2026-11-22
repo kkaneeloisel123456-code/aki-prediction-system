@@ -80,3 +80,16 @@ __pycache__/
 app_data_staging/
 
 app_data_backup/
+
+# Local login credentials (PBKDF2 hashes + session secret)
+backend/auth_config.json
+backend/auth_config.json.tmp
+
+# Clinical SQLite business database and backups (patient data — never commit)
+backend/clinical.db
+backend/clinical.db-wal
+backend/clinical.db-shm
+backend/clinical.db-*
+backend/backups/
+backend/*.restore-tmp
+backend/*.pre-restore-*.db

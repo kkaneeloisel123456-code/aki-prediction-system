@@ -1,4 +1,5 @@
 @echo off
+"%SystemRoot%\System32\chcp.com" 65001 >nul
 setlocal
 cd /d "%~dp0"
 
@@ -132,6 +133,23 @@ if not exist "app_data\final_model.joblib" (
     pause
     exit /b 1
 )
+
+rem ---------- 首次启动创建本地管理员（配置只保存密码哈希）----------
+set "AUTH_CONFIG=backend\auth_config.json"
+if defined AKI_AUTH_CONFIG set "AUTH_CONFIG=%AKI_AUTH_CONFIG%"
+if not exist "%AUTH_CONFIG%" (
+    echo [首次启动] 正在创建本地管理员 admin...
+    "%PY%" scripts\init_auth.py --username admin --role admin --generate-password --config "%AUTH_CONFIG%"
+    if errorlevel 1 ( echo [错误] 登录账号初始化失败。 & pause & exit /b 1 )
+    echo [重要] 请妥善保存上方仅显示一次的初始密码。
+) else (
+    echo [信息] 本地登录配置已就绪。
+)
+
+rem ---------- 首次启动初始化临床数据库 ----------
+echo [信息] 检查并初始化临床业务数据库...
+"%PY%" scripts\init_clinical_db.py
+if errorlevel 1 ( echo [错误] 临床数据库初始化失败。 & pause & exit /b 1 )
 
 rem ---------- 端口检查：释放旧实例，检测占用 ----------
 set "AKI_PIDS=%TEMP%\aki_stale_pids.txt"
