@@ -27,13 +27,24 @@ const shapRows = computed(() =>
 const valueRows = computed(() => {
   const list = Object.entries(values.value)
   const rows: any[] = []
-  for (let i = 0; i < list.length; i += 2) rows.push([list[i], list[i + 1]])
+  for (let i = 0; i < list.length; i += 2) rows.push(list.slice(i, i + 2))
   return rows
 })
 const riskClass = computed(() => {
   const level = report.value?.risk_level
   return level === '高' ? 'high' : level === '中' ? 'medium' : 'low'
 })
+const riskLabel = computed(() => {
+  const level = report.value?.risk_level
+  if (!level) return '未评估'
+  return level === '人工审核' ? '人工审核' : `${level}风险`
+})
+const decisionLabels: Record<string, string> = {
+  agree: '认可模型结果', adjust: '调整风险判断', defer: '暂缓采纳', manual: '人工审核',
+}
+function decisionText(value?: string) {
+  return value ? (decisionLabels[value] || value) : '未复核'
+}
 function fmt(value?: string) {
   if (!value) return '—'
   const d = new Date(value)
@@ -123,8 +134,8 @@ onMounted(load)
             <div class="prob-card" :class="riskClass" style="padding:14px">
               <div class="prob-label">AKI 预测概率</div>
               <div class="prob-value" style="font-size:30px">{{ typeof result.probability === 'number' ? `${(result.probability * 100).toFixed(1)}%` : '人工审核' }}</div>
-              <div class="prob-risk">{{ report.risk_level || '人工审核' }}风险</div>
-              <div class="prob-meta">模型版本：{{ val(pred.model_version) }}<br />输入指纹：<span class="font-mono" style="font-size:9px">{{ val(pred.input_fingerprint).slice(0, 24) }}…</span></div>
+              <div class="prob-risk">{{ riskLabel }}</div>
+              <div class="prob-meta">模型版本：{{ pred.model_version || '人工审核 / 不适用' }}<br />输入指纹：<span class="font-mono" style="font-size:9px">{{ val(pred.input_fingerprint).slice(0, 24) }}…</span></div>
             </div>
             <div>
               <div class="muted" style="font-size:10px;margin-bottom:4px">主要 SHAP 贡献</div>
@@ -170,7 +181,7 @@ onMounted(load)
           <div class="doc-sec-title">六、医生复核</div>
           <table class="doc-table">
             <tbody>
-              <tr><th style="width:90px">复核结论</th><td>{{ review.decision || '未复核' }}</td><th style="width:90px">复核医生</th><td>{{ review.reviewer_name || '—' }}</td></tr>
+              <tr><th style="width:90px">复核结论</th><td>{{ decisionText(review.decision) }}</td><th style="width:90px">复核医生</th><td>{{ review.reviewer_name || '—' }}</td></tr>
               <tr><th>复核时间</th><td>{{ fmt(review.created_at) }}</td><th>发布人</th><td>{{ snapshot.published_by?.name || '—' }}</td></tr>
               <tr><th>复核意见</th><td colspan="3">{{ review.reason || '—' }}</td></tr>
             </tbody>
@@ -203,7 +214,7 @@ onMounted(load)
           <div class="muted" style="font-size:11px;line-height:1.9">
             报告版本：v{{ report.version }}<br />
             关联就诊：{{ report.encounter_id }}<br />
-            模型版本：{{ pred.model_version }}<br />
+            模型版本：{{ pred.model_version || '人工审核 / 不适用' }}<br />
             预测时间：{{ fmt(pred.predicted_at) }}
           </div>
         </div>

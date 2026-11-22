@@ -12,8 +12,8 @@ from pathlib import Path
 from .database import connect, database_path, initialize_database
 
 
-def backup_database(target_dir: Path | None = None) -> Path:
-    source = database_path()
+def backup_database(target_dir: Path | None = None, *, source_path: Path | None = None) -> Path:
+    source = Path(source_path or database_path())
     if not source.exists():
         initialize_database(source)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -51,6 +51,12 @@ def restore_database(source: Path, *, confirm: bool = False) -> Path:
             raise RuntimeError("备份文件完整性检查失败")
     finally:
         check.close()
+    digest_file = source.with_suffix(".sha256")
+    if digest_file.exists():
+        expected = digest_file.read_text(encoding="utf-8").strip().lower()
+        actual = hashlib.sha256(source.read_bytes()).hexdigest()
+        if not expected or actual != expected:
+            raise RuntimeError("备份文件 SHA-256 校验失败")
     target = database_path()
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
@@ -61,6 +67,12 @@ def restore_database(source: Path, *, confirm: bool = False) -> Path:
     temp = target.with_name(target.name + ".restoring")
     shutil.copy2(source, temp)
     temp.replace(target)
+    # WAL/SHM belong to the replaced main file; leaving them would replay the
+    # old log into the restored database on the next open.
+    for suffix in ("-wal", "-shm"):
+        sidecar = target.with_name(target.name + suffix)
+        if sidecar.exists():
+            sidecar.unlink()
     initialize_database(target)
     return target
 

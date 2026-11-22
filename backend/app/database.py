@@ -22,7 +22,29 @@ from .config import BACKEND_DIR
 _INIT_LOCK = threading.Lock()
 _INITIALIZED: set[str] = set()
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+
+# Prediction rows come from two origins:
+#   model  - produced by the deployed model; probability/model_version/model_hash set
+#   manual - clinician-entered risk when no model result exists; model fields NULL
+# ``probability`` and the model fields are nullable so manual rows stay honest
+# instead of writing sentinel strings such as "N/A" into statistics.
+_PREDICTIONS_COLUMNS = """(
+    id TEXT PRIMARY KEY,
+    encounter_id TEXT NOT NULL REFERENCES encounters(id) ON DELETE CASCADE,
+    patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+    actor_id TEXT NOT NULL REFERENCES users(id),
+    input_json TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    probability REAL,
+    risk_level TEXT NOT NULL,
+    model_version TEXT,
+    model_hash TEXT,
+    input_fingerprint TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'valid' CHECK(status IN ('valid','superseded')),
+    predicted_at TEXT NOT NULL,
+    origin TEXT NOT NULL DEFAULT 'model' CHECK(origin IN ('model','manual'))
+)"""
 
 
 def database_path() -> Path:
@@ -167,22 +189,11 @@ CREATE TABLE IF NOT EXISTS encounter_drafts (
     PRIMARY KEY(user_id, encounter_id)
 );
 
-CREATE TABLE IF NOT EXISTS predictions (
-    id TEXT PRIMARY KEY,
-    encounter_id TEXT NOT NULL REFERENCES encounters(id) ON DELETE CASCADE,
-    patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
-    actor_id TEXT NOT NULL REFERENCES users(id),
-    input_json TEXT NOT NULL,
-    result_json TEXT NOT NULL,
-    probability REAL NOT NULL,
-    risk_level TEXT NOT NULL,
-    model_version TEXT NOT NULL,
-    model_hash TEXT NOT NULL,
-    input_fingerprint TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'valid' CHECK(status IN ('valid','superseded')),
-    predicted_at TEXT NOT NULL
-);
+CREATE TABLE IF NOT EXISTS predictions
+""" + _PREDICTIONS_COLUMNS + """
+;
 CREATE INDEX IF NOT EXISTS idx_predictions_encounter ON predictions(encounter_id);
+CREATE INDEX IF NOT EXISTS idx_predictions_patient ON predictions(patient_id);
 
 CREATE TABLE IF NOT EXISTS clinical_reviews (
     id TEXT PRIMARY KEY,
@@ -323,6 +334,74 @@ CREATE INDEX IF NOT EXISTS idx_import_batches_created ON import_batches(created_
 """
 
 
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _migrate_predictions_v3(conn: sqlite3.Connection, target: Path) -> bool:
+    """Rebuild ``predictions`` so manual rows can carry NULL model fields.
+
+    SQLite has no ``ALTER COLUMN``; the only way to drop the NOT NULL
+    constraints is a table rebuild.  The child table ``clinical_reviews``
+    references ``predictions(id)`` by name, so the old table must NOT be
+    renamed (that rewrites the child's FK clause to the new name).  Instead:
+    create the replacement, copy rows, drop the old table, then rename the
+    replacement back to ``predictions``.
+
+    Returns True when a migration ran.
+    """
+    columns = _table_columns(conn, "predictions")
+    if not columns or "origin" in columns:
+        return False
+    # A file copy is the approved rollback point; a failure to copy is
+    # logged by the caller but must not silently skip the migration.
+    try:
+        from .backup import backup_database
+        from .config import DATABASE_BACKUP_DIR
+
+        backup_database(DATABASE_BACKUP_DIR, source_path=target)
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"[database] 迁移前备份失败（继续，事务内失败会回滚）：{exc}")
+
+    # foreign_keys can only be toggled outside a transaction.
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute("CREATE TABLE predictions_new " + _PREDICTIONS_COLUMNS)
+        conn.execute(
+            """INSERT INTO predictions_new
+               (id,encounter_id,patient_id,actor_id,input_json,result_json,probability,
+                risk_level,model_version,model_hash,input_fingerprint,status,predicted_at,origin)
+               SELECT id,encounter_id,patient_id,actor_id,input_json,result_json,probability,
+                      risk_level,model_version,model_hash,input_fingerprint,status,predicted_at,
+                      'model'
+               FROM predictions"""
+        )
+        conn.execute("DROP TABLE predictions")
+        conn.execute("ALTER TABLE predictions_new RENAME TO predictions")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_predictions_encounter ON predictions(encounter_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_predictions_patient ON predictions(patient_id)"
+        )
+        broken = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if broken:
+            detail = ", ".join(str(dict(row)) for row in broken[:3])
+            raise RuntimeError(f"迁移后外键检查失败：{detail}")
+        integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        if integrity != "ok":
+            raise RuntimeError(f"迁移后完整性检查失败：{integrity}")
+        conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")
+    return True
+
+
 def initialize_database(path: Path | None = None) -> Path:
     target = Path(path or database_path())
     key = str(target)
@@ -332,6 +411,7 @@ def initialize_database(path: Path | None = None) -> Path:
         conn = connect(target)
         try:
             conn.executescript(_SCHEMA)
+            _migrate_predictions_v3(conn, target)
             conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         finally:
             conn.close()

@@ -11,8 +11,8 @@ const authMode = ref<'login' | 'register' | 'query'>('login')
 const tab = ref<'overview' | 'reports' | 'appointments' | 'feedback'>('overview')
 const loginForm = reactive({ username: '', password: '' })
 const registerForm = reactive({ username: '', display_name: '', password: '', phone_last4: '' })
-const queryForm = reactive({ mrn: '', name: '', query_code: '' })
-const bindForm = reactive({ mrn: '', name: '', query_code: '' })
+const queryForm = reactive({ mrn: '', name: '', query_code: '', certificate_last4: '', phone_last4: '' })
+const bindForm = reactive({ mrn: '', name: '', query_code: '', certificate_last4: '', phone_last4: '' })
 const reports = ref<any[]>([])
 const appointments = ref<any[]>([])
 const feedback = ref<any[]>([])
@@ -31,6 +31,15 @@ const patient = computed(() => status.value?.patient)
 const isQueryMode = computed(() => status.value?.mode === 'query_code')
 const completedAppointments = computed(() => appointments.value.filter((a) => a.status === 'completed'))
 const upcoming = computed(() => appointments.value.filter((a) => a.status === 'booked' || a.status === 'checked_in'))
+const detailResult = computed(() => detail.value?.snapshot?.prediction?.result ?? {})
+const detailProbability = computed(() => {
+  const p = detailResult.value?.probability
+  return typeof p === 'number' ? `${(p * 100).toFixed(1)}%` : null
+})
+const detailRisk = computed(() => {
+  if (detailResult.value?.manual || detailProbability.value === null) return '人工审核'
+  return detailResult.value?.risk_level || '未分级'
+})
 
 function fmt(value?: string) {
   if (!value) return '—'
@@ -100,6 +109,7 @@ async function doRegister() {
 async function doQuery() {
   error.value = ''
   if (!queryForm.mrn || !queryForm.name || !queryForm.query_code) { error.value = '请填写病历号、姓名和查询码'; return }
+  if (!queryForm.certificate_last4 && !queryForm.phone_last4) { error.value = '请填写证件号末四位或手机号末四位'; return }
   busy.value = true
   try {
     const res = await api.portal.query({ ...queryForm })
@@ -112,6 +122,7 @@ async function doQuery() {
 async function doBind() {
   error.value = ''
   if (!bindForm.mrn || !bindForm.name || !bindForm.query_code) { error.value = '请填写完整信息'; return }
+  if (!bindForm.certificate_last4 && !bindForm.phone_last4) { error.value = '请填写证件号末四位或手机号末四位'; return }
   busy.value = true
   try {
     await api.portal.bind({ ...bindForm })
@@ -131,7 +142,8 @@ async function logout() {
 async function openReport(r: any) {
   error.value = ''
   try {
-    detail.value = await api.portal.report(r.id)
+    const res = await api.portal.report(r.id)
+    detail.value = res.report ?? res
     showReport.value = true
   } catch (e: any) { error.value = e?.message ?? '报告加载失败' }
 }
@@ -235,8 +247,10 @@ onMounted(async () => {
           <div class="form-group mb-12"><label>病历号</label><input v-model="queryForm.mrn" class="form-control" /></div>
           <div class="form-group mb-12"><label>姓名</label><input v-model="queryForm.name" class="form-control" /></div>
           <div class="form-group mb-12"><label>查询码</label><input v-model="queryForm.query_code" class="form-control font-mono" maxlength="8" style="letter-spacing:2px;text-transform:uppercase" /></div>
+          <div class="form-group mb-12"><label>证件号末四位</label><input v-model="queryForm.certificate_last4" class="form-control" maxlength="4" placeholder="与档案登记一致" /></div>
+          <div class="form-group mb-12"><label>或 手机号末四位</label><input v-model="queryForm.phone_last4" class="form-control" maxlength="4" placeholder="二选一填写" /></div>
           <button class="btn btn-primary" style="width:100%" :disabled="busy" @click="doQuery">{{ busy ? '核验中…' : '核验并查看报告' }}</button>
-          <div class="muted mt-8" style="font-size:10px">查询码由医院工作人员生成，仅限本人使用，过期需重新申领。</div>
+          <div class="muted mt-8" style="font-size:10px">查询码由医院工作人员生成，需同时核对证件或手机末四位；过期需重新申领。</div>
         </div>
       </div>
 
@@ -247,6 +261,8 @@ onMounted(async () => {
         <div class="form-group mb-12"><label>病历号</label><input v-model="bindForm.mrn" class="form-control" /></div>
         <div class="form-group mb-12"><label>姓名</label><input v-model="bindForm.name" class="form-control" /></div>
         <div class="form-group mb-12"><label>查询码</label><input v-model="bindForm.query_code" class="form-control font-mono" maxlength="8" /></div>
+        <div class="form-group mb-12"><label>证件号末四位</label><input v-model="bindForm.certificate_last4" class="form-control" maxlength="4" placeholder="与档案登记一致" /></div>
+        <div class="form-group mb-12"><label>或 手机号末四位</label><input v-model="bindForm.phone_last4" class="form-control" maxlength="4" placeholder="二选一填写" /></div>
         <button class="btn btn-primary" style="width:100%" :disabled="busy" @click="doBind">{{ busy ? '绑定中…' : '绑定档案' }}</button>
       </div>
 
@@ -354,10 +370,10 @@ onMounted(async () => {
         <div class="modal-head"><div><div class="modal-title">{{ detail?.report_no }}</div><div class="modal-sub">{{ detail?.patient_name }} · 第 {{ detail?.version }} 版 · {{ fmt(detail?.published_at) }}</div></div><button class="modal-close" @click="showReport = false">×</button></div>
         <div class="modal-body" v-if="detail">
           <div class="assessment-grid">
-            <div class="prob-card" :class="detail.risk_level === '高' ? 'high' : detail.risk_level === '中' ? 'medium' : 'low'">
+            <div class="prob-card" :class="detailRisk === '高' ? 'high' : detailRisk === '中' ? 'medium' : detailRisk === '低' ? 'low' : ''">
               <div class="prob-label">AKI 风险</div>
-              <div class="prob-value">{{ detail.snapshot?.prediction?.result?.probability != null ? `${(detail.snapshot.prediction.result.probability * 100).toFixed(1)}%` : '人工审核' }}</div>
-              <div class="prob-risk">{{ detail.risk_level || '人工审核' }}</div>
+              <div class="prob-value">{{ detailProbability ?? '人工审核' }}</div>
+              <div class="prob-risk">{{ detailRisk === '人工审核' ? '人工审核' : `${detailRisk}风险` }}</div>
             </div>
             <div>
               <div class="document-line" style="font-size:11px;line-height:1.8">
@@ -366,6 +382,9 @@ onMounted(async () => {
                 <strong style="color:var(--text-bright)">复核：</strong>{{ detail.snapshot?.review?.reviewer_name || '—' }} · {{ detail.snapshot?.review?.reason || '—' }}
               </div>
             </div>
+          </div>
+          <div class="info-box mt-12">
+            本次评估为{{ detailRisk === '人工审核' ? '人工审核结果' : `${detailRisk}风险（概率 ${detailProbability}）` }}，仅作临床参考，不能替代医生诊断或医嘱。
           </div>
           <div class="side-card mt-12"><div class="side-title">报告完整性</div><div class="hash-text">{{ detail.sha256 }}</div></div>
         </div>

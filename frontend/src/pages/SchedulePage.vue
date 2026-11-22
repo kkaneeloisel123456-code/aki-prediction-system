@@ -47,18 +47,20 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const requests: Promise<any>[] = [
-      api.slots(), api.appointments(aptFilter.value ? `status=${aptFilter.value}` : ''),
+    const [s, a, f, w] = await Promise.all([
+      api.slots(),
+      api.appointments(aptFilter.value ? `status=${aptFilter.value}` : ''),
       api.feedback(fbFilter.value ? `status=${fbFilter.value}` : ''),
-    ]
-    if (isAdmin.value) requests.push(api.doctors(), api.workstation())
-    const [s, a, f, d, w] = await Promise.all(requests)
+      api.workstation(),
+    ])
     slots.value = s.slots ?? []
     appointments.value = a.appointments ?? []
     feedback.value = f.feedback ?? []
-    doctors.value = d?.doctors ?? []
     patients.value = w?.patients ?? []
-    if (isAdmin.value && doctors.value.length && !slotForm.doctor_id) slotForm.doctor_id = doctors.value[0].id
+    if (isAdmin.value) {
+      doctors.value = (await api.doctors()).doctors ?? []
+      if (doctors.value.length && !slotForm.doctor_id) slotForm.doctor_id = doctors.value[0].id
+    }
   } catch (e: any) {
     error.value = e?.message ?? '预约数据加载失败'
   } finally {

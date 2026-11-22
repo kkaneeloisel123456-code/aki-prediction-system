@@ -73,6 +73,17 @@ const isPublished = computed(() => encounter.value?.status === 'published')
 const statusText: Record<string, string> = {
   draft: '草稿', predicted: '待复核', reviewed: '已复核', published: '已发布',
 }
+const decisionText: Record<string, string> = {
+  agree: '认可模型结果', adjust: '调整判断', defer: '暂缓采纳', manual: '人工审核',
+}
+const featureLabels = computed(() => Object.fromEntries(
+  metas.value.map((m) => [m.name, m.label || m.name]),
+))
+function shapLabel(name: string) { return featureLabels.value[name] || name }
+function isFilledFeature(name: string) {
+  const filled = prediction.value?.missing_filled ?? encounter.value?.latest_prediction?.missing_filled ?? []
+  return filled.includes(name)
+}
 function fmt(value?: string) {
   if (!value) return '—'
   return new Date(value).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -201,6 +212,10 @@ async function submitReview() {
     error.value = '调整、暂缓或人工审核必须填写理由'
     return
   }
+  if (!reviewDone.value) {
+    const saved = await persistDraft(true)
+    if (!saved) return
+  }
   reviewing.value = true
   try {
     const res = await api.review(encounter.value.id, {
@@ -260,9 +275,17 @@ async function downloadPdf() {
 
 function goStep(n: number) {
   if (n === 3 && !hasPrediction.value) { error.value = '请先运行模型评估'; return }
-  if (n === 4 && !reviewDone.value) { error.value = '请先完成医生复核'; return }
   error.value = ''
   step.value = n
+}
+function startManualReview() {
+  error.value = ''
+  if (measuredCount.value === 0) {
+    error.value = '至少录入一项实测指标后才能进入人工审核'
+    return
+  }
+  reviewDecision.value = 'manual'
+  step.value = 4
 }
 function markDirty() { dirty.value = true }
 
@@ -287,7 +310,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
         </div>
       </div>
       <div class="page-actions" v-if="encounter">
-        <button class="btn btn-secondary" :disabled="saving || !canEdit" @click="persistDraft(false)">{{ saving ? '保存中…' : '保存草稿' }}</button>
+        <button v-if="!isPublished" class="btn btn-secondary" :disabled="saving || !canEdit" @click="persistDraft(false)">{{ saving ? '保存中…' : '保存草稿' }}</button>
         <button class="btn btn-secondary" :disabled="loading" @click="load">重新载入</button>
       </div>
     </div>
@@ -323,7 +346,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
               <div class="info-item"><div class="k">就诊编号</div><div class="v font-mono">{{ encounter.case_ref }}</div></div>
               <div class="info-item"><div class="k">发生时间</div><div class="v">{{ fmt(encounter.occurred_at) }}</div></div>
               <div class="info-item"><div class="k">手术类型</div><div class="v">{{ encounter.surgery_type || '未填写' }}</div></div>
-              <div class="info-item"><div class="k">创建人</div><div class="v">{{ encounter.created_by }}</div></div>
+              <div class="info-item"><div class="k">创建人</div><div class="v">{{ encounter.created_by_name || encounter.created_by }}</div></div>
             </div>
             <div class="form-group mb-12">
               <label>临床诊断（将写入正式报告）</label>
@@ -335,7 +358,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
             </div>
           </div>
           <div class="modal-foot" style="position:static;border-top:1px solid var(--border)">
-            <button class="btn btn-secondary" :disabled="saving || !canEdit" @click="persistDraft(false)">保存草稿</button>
+            <button v-if="!isPublished" class="btn btn-secondary" :disabled="saving || !canEdit" @click="persistDraft(false)">保存草稿</button>
             <button class="btn btn-primary" @click="goStep(2)">下一步：录入指标 →</button>
           </div>
         </div>
@@ -396,6 +419,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
         <div class="modal-foot" style="position:static;border-top:1px solid var(--border)">
           <button class="btn btn-secondary" @click="goStep(1)">← 上一步</button>
           <button class="btn btn-secondary" :disabled="saving || !canEdit" @click="persistDraft(false)">保存草稿</button>
+          <button class="btn btn-secondary" :disabled="!canEdit || isPublished" @click="startManualReview">无模型结果，人工审核</button>
           <button class="btn btn-primary" :disabled="predicting || !canEdit || isPublished" @click="runPrediction">
             {{ predicting ? '模型计算中…' : '保存并运行模型 →' }}
           </button>
@@ -417,7 +441,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
                   <div class="prob-value">{{ probabilityText }}</div>
                   <div class="prob-risk" :style="{color: `var(--${riskClass === 'high' ? 'red' : riskClass === 'medium' ? 'yellow' : 'green'})`}">{{ riskText }}</div>
                   <div class="prob-meta">
-                    二分类判定：{{ (prediction?.prediction ?? encounter.latest_prediction?.prediction) === 1 ? '阳性（高风险）' : '阴性（低风险）' }}<br />
+                    二分类判定：{{ (prediction?.prediction ?? encounter.latest_prediction?.prediction) === 1 ? '阳性' : '阴性' }}<br />
                     概率校准：{{ (prediction?.calibrated ?? encounter.latest_prediction?.calibrated) ? '已校准' : '未校准' }}<br />
                     实测 {{ measuredCount }} 项 / 缺失填充 {{ (prediction?.missing_filled ?? encounter.latest_prediction?.missing_filled ?? []).length }} 项
                   </div>
@@ -427,7 +451,10 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
                   <div v-if="!shapRows.length" class="muted">当前没有解释数据</div>
                   <div v-else class="shap-list">
                     <div v-for="s in shapRows" :key="s.feature" class="shap-row">
-                      <div class="name" :title="s.feature">{{ s.feature }}</div>
+                      <div class="name" :title="s.feature">
+                        {{ shapLabel(s.feature) }}
+                        <span v-if="isFilledFeature(s.feature)" class="status status-draft">填充值</span>
+                      </div>
                       <div class="bar"><span :style="{width: `${Math.abs(s.shap) / maxShap * 100}%`, background: s.shap >= 0 ? 'var(--red)' : 'var(--green)'}" /></div>
                       <div class="effect">{{ s.shap >= 0 ? '↑ 风险' : '↓ 保护' }} {{ Math.abs(s.shap).toFixed(3) }}</div>
                     </div>
@@ -494,7 +521,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
                 </div>
               </div>
               <div v-if="reviewDone && encounter.latest_review" class="info-box mt-12">
-                已由 {{ encounter.latest_review.reviewer_name }} 于 {{ fmt(encounter.latest_review.created_at) }} 完成复核：{{ encounter.latest_review.decision }}。{{ encounter.latest_review.reason }}
+                已由 {{ encounter.latest_review.reviewer_name }} 于 {{ fmt(encounter.latest_review.created_at) }} 完成复核：{{ decisionText[encounter.latest_review.decision] || encounter.latest_review.decision }}。{{ encounter.latest_review.reason }}
               </div>
             </div>
             <div class="modal-foot" style="position:static;border-top:1px solid var(--border)">
@@ -546,7 +573,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
               患者：{{ encounter.patient_name }}<br />
               风险：{{ riskText }}<br />
               概率：{{ probabilityText }}<br />
-              复核：{{ encounter.latest_review?.decision || '未完成' }}<br />
+              复核：{{ decisionText[encounter.latest_review?.decision] || encounter.latest_review?.decision || '未完成' }}<br />
               状态：{{ statusText[encounter.status] }}
             </div>
           </div>

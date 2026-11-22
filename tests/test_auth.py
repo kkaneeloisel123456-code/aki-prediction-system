@@ -152,6 +152,8 @@ def test_clinical_publish_pdf_and_backup(client):
     })
     assert publish.status_code == 200, publish.text
     report_id = publish.json()["id"]
+    published_detail = client.get(f"/api/encounters/{encounter_id}").json()
+    assert published_detail["values"] == features, "发布后指标必须回写到就诊记录"
 
     pdf = client.get(f"/api/reports/{report_id}/pdf")
     assert pdf.status_code == 200, pdf.text
@@ -186,3 +188,366 @@ def test_csv_import_accepts_metric_less_draft(client):
     assert commit.status_code == 200, commit.text
     assert commit.json()["imported"] == 1
     assert commit.json()["results"][0]["encounter_id"]
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 regression tests (migration, manual review, portal, RBAC, import)
+# ---------------------------------------------------------------------------
+def _model_features() -> dict[str, float]:
+    from backend.app.assets import load_assets
+    assets = load_assets()
+    features = {
+        name: assets["impute_values"].get(name, 1.0)
+        for name in assets["features"]
+    }
+    return {k: v for k, v in features.items() if v is not None}
+
+
+def _published_case(client: TestClient, mrn: str = "P0001") -> dict:
+    """Create a fully published report and return its ids."""
+    doctor_id = create_doctor(client)
+    patient = client.post("/api/patients", json={
+        "mrn": mrn, "name": "测试患者", "sex": "男", "birth_year": 1960,
+        "certificate_last4": "1234", "phone_last4": "5678", "owner_id": doctor_id,
+    })
+    assert patient.status_code == 201, patient.text
+    patient_id = patient.json()["id"]
+    encounter = client.post(f"/api/patients/{patient_id}/encounters", json={
+        "case_ref": "CASE-1", "occurred_at": "2026-11-20T09:00:00+08:00",
+        "surgery_type": "冠脉搭桥", "values": {},
+        "diagnosis": "术后AKI风险", "orders": "监测肌酐与尿量",
+    })
+    assert encounter.status_code == 201, encounter.text
+    encounter_id = encounter.json()["id"]
+    detail = client.get(f"/api/encounters/{encounter_id}").json()
+    features = _model_features()
+    draft = client.put(f"/api/encounters/{encounter_id}/draft", json={
+        "row_version": detail["row_version"], "draft_version": 0,
+        "values": features, "diagnosis": "术后AKI风险", "orders": "监测肌酐与尿量",
+    })
+    assert draft.status_code == 200, draft.text
+    prediction = client.post(f"/api/encounters/{encounter_id}/predict", json={
+        "row_version": detail["row_version"], "features": features,
+    })
+    assert prediction.status_code == 200, prediction.text
+    detail = client.get(f"/api/encounters/{encounter_id}").json()
+    review = client.post(f"/api/encounters/{encounter_id}/review", json={
+        "row_version": detail["row_version"], "decision": "agree", "reason": "符合临床表现",
+    })
+    assert review.status_code == 200, review.text
+    detail = client.get(f"/api/encounters/{encounter_id}").json()
+    checklist = client.get(f"/api/encounters/{encounter_id}/checklist").json()
+    assert checklist["can_publish"] is True, checklist
+    publish = client.post(f"/api/encounters/{encounter_id}/publish", json={
+        "row_version": detail["row_version"], "draft_version": checklist["draft_version"],
+        "missing_ack": False,
+    })
+    assert publish.status_code == 200, publish.text
+    detail = client.get(f"/api/encounters/{encounter_id}").json()
+    return {
+        "doctor_id": doctor_id, "patient_id": patient_id, "encounter_id": encounter_id,
+        "report_id": publish.json()["id"], "encounter": detail,
+        "risk": prediction.json()["prediction"]["risk_level"],
+        "probability": prediction.json()["prediction"]["probability"],
+    }
+
+
+def test_predictions_migration_rebuilds_table():
+    import sqlite3
+    migration_db = TEST_ROOT / "migration.db"
+    for suffix in ("", "-wal", "-shm"):
+        path = Path(str(migration_db) + suffix)
+        if path.exists():
+            path.unlink()
+    conn = sqlite3.connect(migration_db)
+    conn.executescript(
+        """
+        CREATE TABLE users (
+            id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
+            role TEXT NOT NULL, password_hash TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
+            must_change_password INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL, last_login_at TEXT
+        );
+        CREATE TABLE patients (
+            id TEXT PRIMARY KEY, mrn TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+            sex TEXT NOT NULL, birth_year INTEGER, certificate_last4 TEXT, phone_last4 TEXT,
+            owner_id TEXT, active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE encounters (
+            id TEXT PRIMARY KEY, patient_id TEXT NOT NULL REFERENCES patients(id),
+            case_ref TEXT NOT NULL, occurred_at TEXT NOT NULL, surgery_type TEXT,
+            values_json TEXT NOT NULL DEFAULT '{}', diagnosis TEXT NOT NULL DEFAULT '',
+            orders TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'draft',
+            current_prediction_id TEXT, row_version INTEGER NOT NULL DEFAULT 1,
+            created_by TEXT NOT NULL, updated_by TEXT NOT NULL,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE predictions (
+            id TEXT PRIMARY KEY,
+            encounter_id TEXT NOT NULL REFERENCES encounters(id) ON DELETE CASCADE,
+            patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+            actor_id TEXT NOT NULL REFERENCES users(id),
+            input_json TEXT NOT NULL, result_json TEXT NOT NULL,
+            probability REAL NOT NULL, risk_level TEXT NOT NULL,
+            model_version TEXT NOT NULL, model_hash TEXT NOT NULL,
+            input_fingerprint TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'valid', predicted_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_predictions_encounter ON predictions(encounter_id);
+        CREATE TABLE clinical_reviews (
+            id TEXT PRIMARY KEY,
+            encounter_id TEXT NOT NULL REFERENCES encounters(id) ON DELETE CASCADE,
+            prediction_id TEXT NOT NULL REFERENCES predictions(id) ON DELETE CASCADE,
+            reviewer_id TEXT NOT NULL REFERENCES users(id),
+            decision TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
+            prediction_fingerprint TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        INSERT INTO users VALUES('U-1','admin','管理员','admin','x',1,0,'2026-01-01','2026-01-01',NULL);
+        INSERT INTO patients VALUES('P-1','MRN-1','旧患者','男',1960,'1234','5678','U-1',1,'2026-01-01','2026-01-01');
+        INSERT INTO encounters VALUES('E-1','P-1','CASE-1','2026-11-20T09:00:00+08:00','搭桥','{}','','','predicted','PD-1',1,'U-1','U-1','2026-01-01','2026-01-01');
+        INSERT INTO predictions VALUES('PD-1','E-1','P-1','U-1','{}','{}',0.5,'中','V1','hash','fp','valid','2026-01-01');
+        INSERT INTO clinical_reviews VALUES('RV-1','E-1','PD-1','U-1','agree','','fp','2026-01-01');
+        """
+    )
+    conn.execute("PRAGMA user_version=2")
+    conn.commit()
+    conn.close()
+
+    db.reset_initialization_cache()
+    db.initialize_database(migration_db)
+    db.reset_initialization_cache()
+    check = sqlite3.connect(migration_db)
+    try:
+        version = check.execute("PRAGMA user_version").fetchone()[0]
+        assert version == 3
+        columns = {row[1]: row for row in check.execute("PRAGMA table_info(predictions)")}
+        assert "origin" in columns
+        for nullable in ("probability", "model_version", "model_hash"):
+            assert columns[nullable][3] == 0, f"{nullable} 仍然 NOT NULL"
+        assert check.execute("SELECT origin FROM predictions WHERE id='PD-1'").fetchone()[0] == "model"
+        review_sql = check.execute(
+            "SELECT sql FROM sqlite_master WHERE name='clinical_reviews'"
+        ).fetchone()[0]
+        assert "REFERENCES predictions" in review_sql
+        assert "predictions_new" not in review_sql
+        assert check.execute("PRAGMA foreign_key_check").fetchall() == []
+        check.execute(
+            """INSERT INTO predictions
+               (id,encounter_id,patient_id,actor_id,input_json,result_json,probability,
+                risk_level,model_version,model_hash,input_fingerprint,status,predicted_at,origin)
+               VALUES('PD-M','E-1','P-1','U-1','{}','{}',NULL,'人工审核',NULL,NULL,'fp2','valid','2026-01-01','manual')"""
+        )
+        assert check.execute(
+            "SELECT probability,model_version,origin FROM predictions WHERE id='PD-M'"
+        ).fetchone() == (None, None, "manual")
+    finally:
+        check.close()
+
+
+def test_manual_review_without_prediction_succeeds(client):
+    login(client)
+    doctor_id = create_doctor(client)
+    patient = client.post("/api/patients", json={
+        "mrn": "MAN-1", "name": "人工审核患者", "sex": "女", "birth_year": 1970,
+        "owner_id": doctor_id,
+    })
+    assert patient.status_code == 201, patient.text
+    patient_id = patient.json()["id"]
+    encounter = client.post(f"/api/patients/{patient_id}/encounters", json={
+        "case_ref": "MAN-CASE", "occurred_at": "2026-11-20T09:00:00+08:00",
+        "values": {},
+    })
+    encounter_id = encounter.json()["id"]
+    detail = client.get(f"/api/encounters/{encounter_id}").json()
+    draft = client.put(f"/api/encounters/{encounter_id}/draft", json={
+        "row_version": detail["row_version"], "draft_version": 0,
+        "values": {"术前eGFR": 40}, "diagnosis": "慢性肾脏病 4 期",
+        "orders": "复查肌酐、避免肾毒性药物",
+    })
+    assert draft.status_code == 200, draft.text
+    review = client.post(f"/api/encounters/{encounter_id}/review", json={
+        "row_version": detail["row_version"], "decision": "manual",
+        "reason": "模型不可用，按肌酐与尿量人工判断为中风险",
+    })
+    assert review.status_code == 200, review.text
+    with db.reader() as conn:
+        row = conn.execute(
+            "SELECT * FROM predictions WHERE encounter_id=? AND origin='manual'",
+            (encounter_id,),
+        ).fetchone()
+        assert row is not None
+        assert row["probability"] is None
+        assert row["model_version"] is None and row["model_hash"] is None
+        assert db.json_load(row["input_json"], {}) == {"术前eGFR": 40}
+        enc = conn.execute(
+            "SELECT values_json FROM encounters WHERE id=?", (encounter_id,)
+        ).fetchone()
+        assert db.json_load(enc["values_json"], {}) == {"术前eGFR": 40}
+
+
+def test_portal_report_detail_matches_list_and_requires_second_factor(client):
+    login(client)
+    case = _published_case(client)
+    query_code = client.post(f"/api/patients/{case['patient_id']}/query-code")
+    assert query_code.status_code == 200, query_code.text
+    code = query_code.json().get("query_code")
+    assert code
+
+    missing_factor = client.post("/api/portal/query", json={
+        "mrn": "P0001", "name": "测试患者", "query_code": code,
+        "certificate_last4": "", "phone_last4": "",
+    })
+    assert missing_factor.status_code == 400, missing_factor.text
+    wrong_factor = client.post("/api/portal/query", json={
+        "mrn": "P0001", "name": "测试患者", "query_code": code,
+        "certificate_last4": "9999",
+    })
+    assert wrong_factor.status_code == 400, wrong_factor.text
+
+    ok = client.post("/api/portal/query", json={
+        "mrn": "P0001", "name": "测试患者", "query_code": code,
+        "certificate_last4": "1234",
+    })
+    assert ok.status_code == 200, ok.text
+    listed = client.get("/api/portal/reports").json()["reports"]
+    assert listed and listed[0]["risk_level"] == case["risk"]
+    detail = client.get(f"/api/portal/reports/{case['report_id']}")
+    assert detail.status_code == 200, detail.text
+    report = detail.json()["report"]
+    result = report["snapshot"]["prediction"]["result"]
+    assert result["risk_level"] == listed[0]["risk_level"]
+    assert abs(result["probability"] - listed[0]["probability"]) < 1e-9
+    assert report["sha256"]
+
+
+def test_deactivate_account_and_last_admin_protection(client):
+    login(client)
+    admin_id = client.get("/api/auth/status").json()["user"]["id"]
+    create_doctor(client, "doctor_off")
+    doctor_client = TestClient(app)
+    try:
+        response = doctor_client.post("/api/auth/login", json={
+            "username": "doctor_off", "password": "DoctorPass123!", "remember": False,
+        })
+        assert response.status_code == 200, response.text
+        assert doctor_client.get("/api/meta").status_code == 200
+        deactivated = client.patch(f"/api/admin/users/{get_user_id('doctor_off')}", json={"active": False})
+        assert deactivated.status_code == 200, deactivated.text
+        assert deactivated.json()["active"] == 0
+        assert doctor_client.get("/api/meta").status_code == 401
+    finally:
+        doctor_client.close()
+    self_off = client.patch(f"/api/admin/users/{admin_id}", json={"active": False})
+    assert self_off.status_code == 409, self_off.text
+    assert "不能停用" in self_off.text
+
+
+def get_user_id(username: str) -> str:
+    with db.reader() as conn:
+        row = conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
+    assert row
+    return row["id"]
+
+
+def test_view_only_grant_cannot_publish(client):
+    login(client)
+    doctor1 = create_doctor(client, "owner_doc")
+    doctor2 = create_doctor(client, "view_doc")
+    patient = client.post("/api/patients", json={
+        "mrn": "RBAC-1", "name": "权限患者", "sex": "男", "birth_year": 1960,
+        "owner_id": doctor1,
+    })
+    patient_id = patient.json()["id"]
+    login(client, "owner_doc", "DoctorPass123!")
+    encounter = client.post(f"/api/patients/{patient_id}/encounters", json={
+        "case_ref": "RBAC-CASE", "occurred_at": "2026-11-20T09:00:00+08:00",
+        "values": {}, "diagnosis": "待评估", "orders": "监测",
+    })
+    encounter_id = encounter.json()["id"]
+    detail = client.get(f"/api/encounters/{encounter_id}").json()
+    features = _model_features()
+    client.put(f"/api/encounters/{encounter_id}/draft", json={
+        "row_version": detail["row_version"], "draft_version": 0,
+        "values": features, "diagnosis": "待评估", "orders": "监测",
+    })
+    client.post(f"/api/encounters/{encounter_id}/predict", json={
+        "row_version": detail["row_version"], "features": features,
+    })
+    detail = client.get(f"/api/encounters/{encounter_id}").json()
+    client.post(f"/api/encounters/{encounter_id}/review", json={
+        "row_version": detail["row_version"], "decision": "agree", "reason": "同意",
+    })
+
+    login(client)
+    grant = client.post(f"/api/patients/{patient_id}/grants", json={
+        "doctor_id": doctor2, "permission": "view",
+    })
+    assert grant.status_code in (200, 201), grant.text
+    login(client, "view_doc", "DoctorPass123!")
+    detail = client.get(f"/api/encounters/{encounter_id}").json()
+    denied = client.post(f"/api/encounters/{encounter_id}/publish", json={
+        "row_version": detail["row_version"], "draft_version": 0,
+        "missing_ack": True,
+    })
+    assert denied.status_code == 403, denied.text
+
+
+def test_import_rejects_invalid_sex_with_chinese_reason(client):
+    login(client)
+    create_doctor(client, "import_doc")
+    bad = client.post("/api/imports/commit", json={"rows": [{
+        "index": 1, "mrn": "SEX-BAD", "name": "错误性别", "sex": "X",
+        "case_ref": "SEX-1", "occurred_at": "2026-11-20T10:00:00+08:00",
+        "owner_id": "import_doc", "values": {},
+    }]})
+    assert bad.status_code == 200, bad.text
+    assert bad.json()["failed"] == 1
+    assert "性别" in bad.json()["results"][0]["error"]
+
+    good = client.post("/api/imports/commit", json={"rows": [{
+        "index": 1, "mrn": "sex-good", "name": "别名性别", "sex": "M",
+        "case_ref": "SEX-2", "occurred_at": "2026-11-20T10:00:00+08:00",
+        "owner_id": "import_doc", "values": {},
+    }]})
+    assert good.status_code == 200, good.text
+    assert good.json()["imported"] == 1
+    with db.reader() as conn:
+        row = conn.execute(
+            "SELECT sex,mrn FROM patients WHERE mrn='SEX-GOOD'"
+        ).fetchone()
+        assert row and row["sex"] == "男"
+
+
+def test_diagnosis_length_limit(client):
+    login(client)
+    doctor_id = create_doctor(client)
+    patient = client.post("/api/patients", json={
+        "mrn": "LEN-1", "name": "长度患者", "sex": "男", "owner_id": doctor_id,
+    })
+    patient_id = patient.json()["id"]
+    response = client.post(f"/api/patients/{patient_id}/encounters", json={
+        "case_ref": "LEN-CASE", "occurred_at": "2026-11-20T09:00:00+08:00",
+        "values": {}, "diagnosis": "诊" * 4001,
+    })
+    assert response.status_code == 422, response.text
+
+
+def test_dashboard_hides_published_encounters(client):
+    login(client)
+    case = _published_case(client, mrn="DASH-1")
+    summary = client.get("/api/dashboard/summary").json()
+    assert summary["pending_total"] == 0
+    assert all(item["id"] != case["encounter_id"] for item in summary["recent_encounters"])
+
+
+def test_restore_removes_stale_wal_and_shm(client):
+    login(client)
+    backup = client.post("/api/admin/backup")
+    assert backup.status_code in (200, 201), backup.text
+    snapshot = TEST_ROOT / "backups" / backup.json()["filename"]
+    for suffix in ("-wal", "-shm"):
+        Path(str(DB_PATH) + suffix).write_bytes(b"stale")
+    restore_database(snapshot, confirm=True)
+    for suffix in ("-wal", "-shm"):
+        assert not Path(str(DB_PATH) + suffix).exists()

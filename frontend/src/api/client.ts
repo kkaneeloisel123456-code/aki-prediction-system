@@ -8,12 +8,37 @@ import type {
 
 // FastAPI errors put a human-readable message in `detail`: either a plain
 // string or (for 422 validation) an array of {loc, msg, type} objects.
+const FIELD_LABELS: Record<string, string> = {
+  birth_year: "出生年份", sex: "性别", mrn: "病历号", name: "姓名",
+  password: "密码", new_password: "新密码", current_password: "当前密码",
+  query_code: "查询码", case_ref: "就诊编号", occurred_at: "发生时间",
+  diagnosis: "诊断", orders: "医嘱", capacity: "号源容量",
+  certificate_last4: "证件号末四位", phone_last4: "手机号末四位",
+  rating: "评分", content: "评价内容", username: "账号",
+  display_name: "姓名", reason: "理由",
+};
+
+function validationDetail(d: any[]): string {
+  const first = d[0] ?? {};
+  const loc = Array.isArray(first.loc) ? first.loc.filter((part: any) => part !== "body") : [];
+  const key = loc.length ? String(loc[loc.length - 1]) : "";
+  const field = FIELD_LABELS[key] ?? (key || "提交内容");
+  const msg = String(first.msg ?? "");
+  if (msg.includes("at least")) return `${field}长度不足`;
+  if (msg.includes("at most") || msg.toLowerCase().includes("too long")) return `${field}超出长度限制`;
+  if (msg.includes("greater than or equal")) return `${field}取值过小`;
+  if (msg.includes("less than or equal")) return `${field}取值过大`;
+  if (msg.includes("valid integer")) return `${field}必须是整数`;
+  if (msg.includes("valid string")) return `${field}格式不正确`;
+  return `${field}填写有误`;
+}
+
 function parseApiDetail(status: number, statusText: string, body: any): string {
   let detail = `${status} ${statusText}`;
   const d = body?.detail;
-  if (typeof d === "string") detail = `${status}: ${d}`;
-  else if (Array.isArray(d)) detail = `${status}: ${d[0]?.msg ?? JSON.stringify(d)}`;
-  else if (d) detail = `${status}: ${JSON.stringify(d)}`;
+  if (typeof d === "string") detail = d;
+  else if (Array.isArray(d)) detail = `${status === 422 ? "提交内容有误：" : ""}${validationDetail(d)}`;
+  else if (d) detail = JSON.stringify(d);
   return detail;
 }
 
@@ -47,12 +72,23 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const csrf = cookie("aki_csrf");
     if (csrf) headers.set("X-CSRF-Token", decodeURIComponent(csrf));
   }
-  const res = await fetch(path, {
-    credentials: "same-origin",
-    ...init,
-    method,
-    headers,
-  });
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 15000);
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      credentials: "same-origin",
+      ...init,
+      method,
+      headers,
+      signal: init.signal ?? controller.signal,
+    });
+  } catch (error: any) {
+    if (error?.name === "AbortError") throw new Error("请求超时，请检查网络或稍后重试");
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+  }
   if (!res.ok) {
     notifyUnauthorized(path, res.status);
     let detail = `${res.status} ${res.statusText}`;

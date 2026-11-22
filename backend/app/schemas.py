@@ -143,23 +143,23 @@ class EncounterCreateRequest(BaseModel):
     occurred_at: str
     surgery_type: Optional[str] = Field(default=None, max_length=100)
     values: Dict[str, Any] = Field(default_factory=dict)
-    diagnosis: str = ""
-    orders: str = ""
+    diagnosis: str = Field(default="", max_length=4000)
+    orders: str = Field(default="", max_length=4000)
 
 
 class EncounterUpdateRequest(BaseModel):
     row_version: int
     values: Dict[str, Any] = Field(default_factory=dict)
-    diagnosis: str = ""
-    orders: str = ""
+    diagnosis: str = Field(default="", max_length=4000)
+    orders: str = Field(default="", max_length=4000)
 
 
 class DraftSaveRequest(BaseModel):
     row_version: int
     draft_version: int = 0
     values: Dict[str, Any] = Field(default_factory=dict)
-    diagnosis: str = ""
-    orders: str = ""
+    diagnosis: str = Field(default="", max_length=4000)
+    orders: str = Field(default="", max_length=4000)
 
 
 class ClinicalReviewRequest(BaseModel):
@@ -195,6 +195,10 @@ class PortalBindRequest(BaseModel):
     mrn: str = Field(min_length=1, max_length=40)
     name: str = Field(min_length=1, max_length=80)
     query_code: str = Field(min_length=6, max_length=32)
+    # One second factor is required by the API: certificate last 4 or phone
+    # last 4, matching the value already registered on the patient record.
+    certificate_last4: Optional[str] = Field(default=None, max_length=4)
+    phone_last4: Optional[str] = Field(default=None, max_length=4)
 
 
 class PortalQueryRequest(PortalBindRequest):

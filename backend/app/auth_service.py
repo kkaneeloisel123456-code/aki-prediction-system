@@ -89,11 +89,13 @@ def public_user(row: Any) -> dict[str, Any]:
     }
 
 
-def get_user(user_id: str) -> dict[str, Any] | None:
+def get_user(user_id: str, *, include_inactive: bool = False) -> dict[str, Any] | None:
+    """Return one account. Session checks use the active-only default."""
     with db.reader() as conn:
-        row = conn.execute(
-            "SELECT * FROM users WHERE id=? AND active=1", (user_id,)
-        ).fetchone()
+        sql = "SELECT * FROM users WHERE id=?"
+        if not include_inactive:
+            sql += " AND active=1"
+        row = conn.execute(sql, (user_id,)).fetchone()
         return db.row_to_dict(row)
 
 
@@ -325,6 +327,15 @@ def update_user(
             ).fetchone()[0]
             if row["role"] == "admin" and admins <= 1:
                 raise ValueError("不能降级系统内唯一的管理员")
+        if active is False:
+            if user_id == actor_id:
+                raise ValueError("不能停用自己的账号")
+            if row["role"] == "admin" and int(row["active"]) == 1:
+                admins = conn.execute(
+                    "SELECT COUNT(*) FROM users WHERE role='admin' AND active=1"
+                ).fetchone()[0]
+                if admins <= 1:
+                    raise ValueError("不能停用系统内唯一的管理员")
         password_hash = row["password_hash"]
         if password is not None:
             if len(password) < PASSWORD_MIN_LENGTH:
@@ -360,7 +371,7 @@ def update_user(
             detail={"role": role, "active": active, "password_reset": password is not None},
             ip=ip,
         )
-    return get_user(user_id) or {}
+    return get_user(user_id, include_inactive=True) or {}
 
 
 def change_password(

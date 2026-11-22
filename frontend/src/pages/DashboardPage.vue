@@ -7,7 +7,6 @@ const auth = useAuth()
 const loading = ref(true)
 const error = ref('')
 const summary = ref<any>(null)
-const workstation = ref<any>(null)
 
 const maxMonthly = computed(() => {
   const rows = summary.value?.monthly ?? []
@@ -38,9 +37,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [d, w] = await Promise.all([api.dashboard(), api.workstation()])
-    summary.value = d
-    workstation.value = w
+    summary.value = await api.dashboard()
   } catch (e: any) {
     error.value = e?.message ?? '数据加载失败'
   } finally {
@@ -99,8 +96,8 @@ onMounted(load)
               <RouterLink to="/patients" style="font-size:10px;color:var(--primary)">查看全部 →</RouterLink>
             </div>
             <div v-if="!summary.recent_encounters?.length" class="empty-state">
-              <strong>暂无就诊记录</strong>
-              从患者档案进入并创建一次接诊。
+              <strong>暂无待处理就诊</strong>
+              已发布的记录不再出现在这里。
             </div>
             <div v-else class="table-wrap">
               <table class="data-table">
@@ -111,13 +108,13 @@ onMounted(load)
                   <tr v-for="e in summary.recent_encounters" :key="e.id">
                     <td>
                       <div class="primary-cell">{{ e.patient_name }}</div>
-                      <div class="sub-cell">{{ e.patient_id }}</div>
+                      <div class="sub-cell">{{ e.mrn || e.patient_id }}</div>
                     </td>
                     <td>{{ e.case_ref }}</td>
                     <td>{{ fmtDate(e.occurred_at) }}</td>
                     <td><span class="status" :class="`status-${e.status}`">{{ statusText[e.status] ?? e.status }}</span></td>
                     <td class="text-right">
-                      <RouterLink :to="`/encounters/${e.id}`" class="btn btn-sm btn-secondary">进入</RouterLink>
+                      <RouterLink :to="`/encounters/${e.id}`" class="btn btn-sm btn-secondary">继续评估</RouterLink>
                     </td>
                   </tr>
                 </tbody>

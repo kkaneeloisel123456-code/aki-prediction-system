@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import hashlib
 import json
 import os
 import re
@@ -23,10 +24,51 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from backend.app import database as db  # noqa: E402
 from backend.app.auth import hash_password  # noqa: E402
 from backend.app.config import AUTH_CONFIG_FILE  # noqa: E402
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+PASSWORD_MIN_LENGTH = 12
+
+
+def update_database_account(username: str, role: str, password: str) -> bool:
+    """Update the live database account when one already exists.
+
+    Returns True when the database was authoritative (it already had users),
+    so the legacy JSON file is no longer written.
+    """
+    db.ensure_initialized()
+    with db.reader() as conn:
+        if not conn.execute("SELECT 1 FROM users LIMIT 1").fetchone():
+            return False
+        existing = conn.execute(
+            "SELECT * FROM users WHERE username=? COLLATE NOCASE", (username,)
+        ).fetchone()
+    with db.transaction(immediate=True) as conn:
+        now = db.utc_now()
+        if existing is None:
+            user_id = "U-" + hashlib.sha256(
+                username.lower().encode("utf-8")
+            ).hexdigest()[:12].upper()
+            conn.execute(
+                """INSERT INTO users
+                   (id,username,display_name,role,password_hash,active,
+                    must_change_password,created_at,updated_at,last_login_at)
+                   VALUES(?,?,?,?,?,1,0,?,?,NULL)""",
+                (user_id, username, username, role, hash_password(password), now, now),
+            )
+        else:
+            conn.execute(
+                """UPDATE users SET password_hash=?,must_change_password=0,
+                       updated_at=? WHERE id=?""",
+                (hash_password(password), now, existing["id"]),
+            )
+            conn.execute(
+                "UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL",
+                (now, existing["id"]),
+            )
+    return True
 
 
 def parse_args() -> argparse.Namespace:
@@ -54,12 +96,21 @@ def main() -> int:
     elif args.password is not None:
         password = args.password
     else:
-        password = getpass.getpass("请输入新密码（至少 8 个字符）：")
+        password = getpass.getpass(f"请输入新密码（至少 {PASSWORD_MIN_LENGTH} 个字符）：")
         confirmation = getpass.getpass("请再次输入：")
         if password != confirmation:
             raise SystemExit("两次输入的密码不一致。")
-    if not 8 <= len(password) <= 1024:
-        raise SystemExit("密码长度必须为 8–1024 个字符。")
+    if not PASSWORD_MIN_LENGTH <= len(password) <= 1024:
+        raise SystemExit(f"密码长度必须为 {PASSWORD_MIN_LENGTH}–1024 个字符。")
+
+    # Once the database has accounts, the JSON file is only a legacy bootstrap
+    # source and is ignored. Write the reset to the live database instead.
+    if update_database_account(args.username, args.role, password):
+        print(f"已更新数据库账号：{args.username}（{args.role}）")
+        if generated:
+            print(f"初始密码（仅显示一次）：{password}")
+        print("明文密码未写入任何文件。旧会话已失效，重启后端后登录生效。")
+        return 0
 
     path = args.config.expanduser().resolve()
     data = {"version": 1, "secret_key": secrets.token_urlsafe(48), "users": {}}

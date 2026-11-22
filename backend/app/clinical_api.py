@@ -170,6 +170,7 @@ def _encounter_dict(row: Any, *, include_values: bool = True) -> dict[str, Any]:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "created_by": row["created_by"],
+        "created_by_name": row["created_by_name"] if "created_by_name" in row.keys() else None,
         "updated_by": row["updated_by"],
         "latest_prediction": None,
         "latest_review": None,
@@ -197,6 +198,7 @@ def _encounter_dict(row: Any, *, include_values: bool = True) -> dict[str, Any]:
 
 _ENCOUNTER_SELECT = """
     SELECT e.*, p.name AS patient_name, p.mrn,
+           (SELECT u.display_name FROM users u WHERE u.id=e.created_by) AS created_by_name,
            pr.result_json AS prediction_json,
            (SELECT rv.decision || '|' || rv.reason || '|' || rv.created_at || '|' || rv.reviewer_id
             FROM clinical_reviews rv WHERE rv.encounter_id=e.id
@@ -831,6 +833,17 @@ def review_encounter(encounter_id: str, req: ClinicalReviewRequest, request: Req
         row = _get_encounter(conn, user, encounter_id, write=True)
         if req.row_version != row["row_version"]:
             raise _err("就诊记录已更新，请重新核对预测结果", 409)
+        draft = conn.execute(
+            "SELECT * FROM encounter_drafts WHERE user_id=? AND encounter_id=?",
+            (user["id"], encounter_id),
+        ).fetchone()
+        values = json_load(row["values_json"], {})
+        diagnosis, orders = row["diagnosis"], row["orders"]
+        if draft:
+            payload = json_load(draft["payload_json"], {})
+            values = payload.get("values", values)
+            diagnosis = payload.get("diagnosis", diagnosis)
+            orders = payload.get("orders", orders)
         prediction = conn.execute(
             "SELECT * FROM predictions WHERE id=? AND encounter_id=? AND status='valid'",
             (row["current_prediction_id"], encounter_id),
@@ -848,11 +861,11 @@ def review_encounter(encounter_id: str, req: ClinicalReviewRequest, request: Req
             conn.execute(
                 """INSERT INTO predictions
                    (id,encounter_id,patient_id,actor_id,input_json,result_json,probability,
-                    risk_level,model_version,model_hash,input_fingerprint,status,predicted_at)
-                   VALUES(?,?,?,?,?,?,NULL,'人工审核',?,?,?, 'valid',?)""",
+                    risk_level,model_version,model_hash,input_fingerprint,status,predicted_at,origin)
+                   VALUES(?,?,?,?,?,?,NULL,'人工审核',NULL,NULL,?,'valid',?,'manual')""",
                 (pid, encounter_id, row["patient_id"], user["id"],
-                 json_dump(json_load(row["values_json"], {})),
-                 json_dump({"manual": True}), "N/A", "N/A", fingerprint, utc_now()),
+                 json_dump(values),
+                 json_dump({"manual": True}), fingerprint, utc_now()),
             )
             conn.execute(
                 "UPDATE encounters SET current_prediction_id=? WHERE id=?", (pid, encounter_id)
@@ -869,9 +882,10 @@ def review_encounter(encounter_id: str, req: ClinicalReviewRequest, request: Req
         )
         new_status = "predicted" if req.decision == "defer" else "reviewed"
         conn.execute(
-            """UPDATE encounters SET status=?,row_version=row_version+1,
-                   updated_by=?,updated_at=? WHERE id=?""",
-            (new_status, user["id"], utc_now(), encounter_id),
+            """UPDATE encounters SET status=?,values_json=?,diagnosis=?,orders=?,
+                   row_version=row_version+1,updated_by=?,updated_at=? WHERE id=?""",
+            (new_status, json_dump(values), diagnosis, orders,
+             user["id"], utc_now(), encounter_id),
         )
         record_audit(
             conn, actor_type="user", actor_id=user["id"], action="clinical_review",
@@ -929,7 +943,7 @@ def publish_report(encounter_id: str, req: ReportPublishRequest, request: Reques
     user = _user(request)
     now = utc_now()
     with db.transaction(immediate=True) as conn:
-        row = _get_encounter(conn, user, encounter_id)
+        row = _get_encounter(conn, user, encounter_id, write=True)
         if req.row_version != row["row_version"]:
             raise _err("就诊记录已更新，请重新核对发布内容", 409)
         draft = conn.execute(
@@ -1013,9 +1027,9 @@ def publish_report(encounter_id: str, req: ReportPublishRequest, request: Reques
              snapshot_json, digest, user["id"], review["reviewer_id"], now),
         )
         conn.execute(
-            """UPDATE encounters SET diagnosis=?,orders=?,status='published',
+            """UPDATE encounters SET values_json=?,diagnosis=?,orders=?,status='published',
                    row_version=row_version+1,updated_by=?,updated_at=? WHERE id=?""",
-            (diagnosis, orders, user["id"], now, encounter_id),
+            (json_dump(values), diagnosis, orders, user["id"], now, encounter_id),
         )
         conn.execute(
             "DELETE FROM encounter_drafts WHERE encounter_id=? AND user_id=?",
@@ -1210,7 +1224,7 @@ def dashboard_summary(request: Request):
             f"SELECT COUNT(*) FROM patients p WHERE p.active=1 AND {access}", params
         ).fetchone()[0]
         encounters = conn.execute(
-            f"""SELECT e.*,p.name AS patient_name FROM encounters e
+            f"""SELECT e.*,p.name AS patient_name,p.mrn AS mrn FROM encounters e
                 JOIN patients p ON p.id=e.patient_id
                 WHERE p.active=1 AND {access} ORDER BY e.occurred_at DESC""",
             params,
@@ -1232,6 +1246,10 @@ def dashboard_summary(request: Request):
         ).fetchall()
     risk = {"高": 0, "中": 0, "低": 0}
     for pred in predictions:
+        # Manual rows carry no probability/model and must not enter model
+        # risk-distribution statistics.
+        if pred["origin"] != "model" or pred["probability"] is None:
+            continue
         level = pred["risk_level"]
         if level in risk:
             risk[level] += 1
@@ -1260,7 +1278,7 @@ def dashboard_summary(request: Request):
     for enc in encounters:
         name = enc["surgery_type"] or "未分类"
         dept[name] = dept.get(name, 0) + 1
-    pending = sum(1 for e in encounters if e["status"] != "published")
+    pending_encounters = [e for e in encounters if e["status"] != "published"]
     today = now.date().isoformat()
     today_appointments = sum(
         1 for a in appointments
@@ -1271,7 +1289,7 @@ def dashboard_summary(request: Request):
     return {
         "patients_total": patient_count,
         "encounters_total": len(encounters),
-        "pending_total": pending,
+        "pending_total": len(pending_encounters),
         "reports_total": published_reports,
         "today_appointments": today_appointments,
         "risk_distribution": risk,
@@ -1286,11 +1304,12 @@ def dashboard_summary(request: Request):
         "recent_encounters": [
             {
                 "id": e["id"], "patient_id": e["patient_id"],
-                "patient_name": e["patient_name"], "case_ref": e["case_ref"],
+                "patient_name": e["patient_name"], "mrn": e["mrn"],
+                "case_ref": e["case_ref"],
                 "occurred_at": e["occurred_at"], "status": e["status"],
                 "row_version": e["row_version"],
             }
-            for e in encounters[:8]
+            for e in pending_encounters[:8]
         ],
     }
 

@@ -342,7 +342,7 @@ def generate_clinical_report(snapshot: Dict[str, Any]) -> bytes:
     pdf.set_text_color(255, 255, 255)
     pdf.set_font(font, "B", 16)
     if probability is None:
-        banner = "人工审核 · 未采用模型自动分级"
+        banner = "人工审核 · 无模型概率"
     else:
         banner = f"{band}风险   {float(probability) * 100:.1f}%"
     pdf.cell(width, 14, banner, align="C", fill=True, new_x="LMARGIN", new_y="NEXT")
@@ -369,34 +369,34 @@ def generate_clinical_report(snapshot: Dict[str, Any]) -> bytes:
     heading("医嘱 / 随访建议")
     pdf.multi_cell(width, 5.5, _safe_text(encounter.get("orders")), new_x="LMARGIN", new_y="NEXT")
 
-    if not result.get("manual"):
-        heading("本次实测指标")
-        values = encounter.get("values") or {}
-        from .feature_labels import get_label
-        rows = []
-        for key, value in values.items():
-            label = get_label(key)
-            rows.append((label.get("label") or key, value, label.get("unit") or ""))
-        if rows:
-            col = [width * 0.48, width * 0.32, width * 0.20]
-            pdf.set_font(font, "B", 8)
-            pdf.set_fill_color(38, 65, 102)
-            pdf.set_text_color(255, 255, 255)
-            for i, title in enumerate(("指标", "结果", "单位")):
-                pdf.cell(col[i], 6, title, border=0, align="C", fill=True)
-            pdf.ln(6)
-            pdf.set_font(font, "", 8)
-            for idx, (name, value, unit) in enumerate(rows):
-                pdf.set_fill_color(246, 248, 252) if idx % 2 == 0 else pdf.set_fill_color(255, 255, 255)
-                pdf.set_text_color(45, 50, 58)
-                pdf.cell(col[0], 5.5, _safe_text(name, 40), border="B", fill=True)
-                pdf.cell(col[1], 5.5, _safe_text(value, 30), border="B", align="C", fill=True)
-                pdf.cell(col[2], 5.5, _safe_text(unit, 20), border="B", align="C", fill=True,
-                         new_x="LMARGIN", new_y="NEXT")
-        else:
-            pdf.set_font(font, "", 9)
-            pdf.multi_cell(width, 5.5, "本次未录入实测指标。")
+    heading("本次实测指标")
+    values = encounter.get("values") or {}
+    from .feature_labels import get_label
+    rows = []
+    for key, value in values.items():
+        label = get_label(key)
+        rows.append((label.get("label") or key, value, label.get("unit") or ""))
+    if rows:
+        col = [width * 0.48, width * 0.32, width * 0.20]
+        pdf.set_font(font, "B", 8)
+        pdf.set_fill_color(38, 65, 102)
+        pdf.set_text_color(255, 255, 255)
+        for i, title in enumerate(("指标", "结果", "单位")):
+            pdf.cell(col[i], 6, title, border=0, align="C", fill=True)
+        pdf.ln(6)
+        pdf.set_font(font, "", 8)
+        for idx, (name, value, unit) in enumerate(rows):
+            pdf.set_fill_color(246, 248, 252) if idx % 2 == 0 else pdf.set_fill_color(255, 255, 255)
+            pdf.set_text_color(45, 50, 58)
+            pdf.cell(col[0], 5.5, _safe_text(name, 40), border="B", fill=True)
+            pdf.cell(col[1], 5.5, _safe_text(value, 30), border="B", align="C", fill=True)
+            pdf.cell(col[2], 5.5, _safe_text(unit, 20), border="B", align="C", fill=True,
+                     new_x="LMARGIN", new_y="NEXT")
+    else:
+        pdf.set_font(font, "", 9)
+        pdf.multi_cell(width, 5.5, "本次未录入实测指标。")
 
+    if not result.get("manual"):
         shap_items = (result.get("shap_values") or [])[:10]
         heading("模型解释（SHAP 前 10 项）")
         if shap_items:

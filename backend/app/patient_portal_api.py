@@ -181,7 +181,30 @@ def _clear_failures(conn: Any, key: str) -> None:
     conn.execute("DELETE FROM login_throttle WHERE throttle_key=?", (key,))
 
 
-def _verify_query_code(conn: Any, mrn: str, name: str, code: str, limit_key: str) -> Any:
+def _second_factor_ok(patient: Any, certificate_last4: str | None, phone_last4: str | None) -> bool | None:
+    """Check a registered certificate/phone suffix.
+
+    Returns True on match, False on mismatch, None when the record has no
+    registered second factor at all (the caller turns that into a clear
+    "register it first" message rather than a silent pass).
+    """
+    registered_cert = (patient["certificate_last4"] or "").strip()
+    registered_phone = (patient["phone_last4"] or "").strip()
+    if not registered_cert and not registered_phone:
+        return None
+    provided_cert = (certificate_last4 or "").strip()
+    provided_phone = (phone_last4 or "").strip()
+    if registered_cert and provided_cert and hmac.compare_digest(registered_cert, provided_cert):
+        return True
+    if registered_phone and provided_phone and hmac.compare_digest(registered_phone, provided_phone):
+        return True
+    return False
+
+
+def _verify_query_code(
+    conn: Any, mrn: str, name: str, code: str, limit_key: str,
+    certificate_last4: str | None = None, phone_last4: str | None = None,
+) -> Any:
     now = int(time.time())
     if _throttle_limited(conn, limit_key):
         raise _err("核验尝试次数过多，请稍后再试", 429)
@@ -202,6 +225,12 @@ def _verify_query_code(conn: Any, mrn: str, name: str, code: str, limit_key: str
     if not matched:
         _record_failure(conn, limit_key)
         raise _err("姓名、病历号或查询码错误")
+    factor = _second_factor_ok(patient, certificate_last4, phone_last4)
+    if factor is None:
+        raise _err("该档案未登记证件或手机号末四位，请先联系医院补登记后再核验")
+    if not factor:
+        _record_failure(conn, limit_key)
+        raise _err("证件或手机号末四位与档案不一致")
     _clear_failures(conn, limit_key)
     return patient
 
@@ -322,7 +351,10 @@ def bind_patient(req: PortalBindRequest, request: Request):
         raise _err("账号已绑定患者档案，如需更换请联系管理员", 409)
     key = f"bind|{_ip(request)}|{session['account_id']}"
     with db.transaction(immediate=True) as conn:
-        patient = _verify_query_code(conn, req.mrn, req.name, req.query_code, key)
+        patient = _verify_query_code(
+            conn, req.mrn, req.name, req.query_code, key,
+            req.certificate_last4, req.phone_last4,
+        )
         conn.execute("UPDATE patient_accounts SET patient_id=?,updated_at=? WHERE id=?",
                      (patient["id"], utc_now(), session["account_id"]))
         conn.execute("UPDATE portal_sessions SET patient_id=? WHERE id=?",
@@ -344,7 +376,10 @@ def query_reports(req: PortalQueryRequest, request: Request, response: Response)
     _origin_ok(request)
     key = f"query|{_ip(request)}"
     with db.reader() as conn:
-        patient = _verify_query_code(conn, req.mrn, req.name, req.query_code, key)
+        patient = _verify_query_code(
+            conn, req.mrn, req.name, req.query_code, key,
+            req.certificate_last4, req.phone_last4,
+        )
     ttl = PATIENT_QUERY_TTL_MINUTES * 60
     token = _create_portal_session(
         account_id=None, patient_id=patient["id"], ttl_seconds=ttl, ip=_ip(request)
@@ -596,7 +631,8 @@ def portal_report(report_id: str, request: Request):
         )
         return {"report": {"id": row["id"], "report_no": row["report_no"],
                            "version": row["version"], "published_at": row["published_at"],
-                           "status": row["status"], "snapshot": snapshot}}
+                           "status": row["status"], "sha256": row["sha256"],
+                           "snapshot": snapshot}}
 
 
 @router.get("/reports/{report_id}/pdf")

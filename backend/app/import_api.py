@@ -58,6 +58,20 @@ def _decode(raw: bytes) -> str:
     raise _err("文件编码无法识别，请另存为 UTF-8 或 GBK CSV")
 
 
+SEX_ALIASES = {
+    "男": "男", "女": "女", "未知": "未知",
+    "m": "男", "male": "男", "f": "女", "female": "女",
+    "unknown": "未知", "": "未知",
+}
+
+
+def _normalise_sex(value: Any) -> str:
+    key = str(value or "").strip().lower()
+    if key in SEX_ALIASES:
+        return SEX_ALIASES[key]
+    raise ValueError("性别只能为 男 / 女 / 未知（也接受 M/F、male/female）")
+
+
 def _parse_dt(value: str) -> datetime:
     text = value.strip().replace("/", "-")
     if not text:
@@ -105,8 +119,10 @@ def _normalise_row(
         errors.append("就诊编号不能为空")
 
     sex = canonical.get("sex") or "未知"
-    if sex not in {"男", "女", "未知"}:
-        errors.append("性别只能为 男 / 女 / 未知")
+    try:
+        sex = _normalise_sex(sex)
+    except ValueError as exc:
+        errors.append(str(exc))
     birth_year = None
     if canonical.get("birth_year"):
         try:
@@ -297,7 +313,7 @@ def commit_import(req: ImportCommitRequest, request: Request):
     for row in req.rows:
         index = row.get("index", len(results) + 1)
         try:
-            mrn = str(row.get("mrn") or "").strip()
+            mrn = str(row.get("mrn") or "").strip().upper()
             name = str(row.get("name") or "").strip()
             case_ref = str(row.get("case_ref") or "").strip()
             occurred_text = str(row.get("occurred_at") or "")
@@ -307,6 +323,13 @@ def commit_import(req: ImportCommitRequest, request: Request):
                 occurred = _parse_dt(occurred_text)
             except ValueError:
                 raise ValueError("发生时间格式无效") from None
+            sex = _normalise_sex(row.get("sex"))
+            diagnosis_text = str(row.get("diagnosis") or "").strip()
+            orders_text = str(row.get("orders") or "").strip()
+            if len(diagnosis_text) > 4000:
+                raise ValueError("诊断超过 4000 字")
+            if len(orders_text) > 4000:
+                raise ValueError("医嘱超过 4000 字")
             values = row.get("values") or {}
             if not isinstance(values, dict):
                 raise ValueError("指标格式无效")
@@ -321,22 +344,30 @@ def commit_import(req: ImportCommitRequest, request: Request):
                     "SELECT * FROM patients WHERE mrn=? COLLATE NOCASE AND active=1", (mrn,)
                 ).fetchone()
                 if existing:
+                    if existing["name"] != name:
+                        raise ValueError("病历号已存在但姓名不一致，该行未导入")
                     patient_id = existing["id"]
                     access = _access_map(conn, user, patient_id)
                     if not access["edit"]:
                         raise ValueError("无权向该患者导入就诊")
                 else:
-                    owner_id = str(row.get("owner_id") or "").strip()
-                    if not owner_id:
-                        owner_id = user["id"] if user["role"] == "doctor" else ""
-                    if not owner_id:
-                        raise ValueError("新患者必须指定负责人ID")
+                    owner_ref = str(row.get("owner_id") or "").strip()
+                    if not owner_ref:
+                        owner_ref = user["id"] if user["role"] == "doctor" else ""
+                    if not owner_ref:
+                        raise ValueError("新患者必须指定负责人（医生用户名）")
+                    if user["role"] == "doctor" and owner_ref not in {user["id"], user["username"]}:
+                        raise ValueError("医生只能把新患者建在自己名下")
                     doctor = conn.execute(
-                        "SELECT 1 FROM users WHERE id=? AND role='doctor' AND active=1",
-                        (owner_id,),
+                        """SELECT id FROM users WHERE role='doctor' AND active=1
+                           AND (username=? COLLATE NOCASE OR id=?)""",
+                        (owner_ref, owner_ref),
                     ).fetchone()
                     if not doctor:
                         raise ValueError("负责人必须是有效医生")
+                    owner_id = doctor["id"]
+                    if user["role"] != "doctor" and owner_id == user["id"]:
+                        raise ValueError("请填写医生用户名，而不是管理员账号")
                     patient_id = new_id("P")
                     conn.execute(
                         """INSERT INTO patients
@@ -344,7 +375,7 @@ def commit_import(req: ImportCommitRequest, request: Request):
                             owner_id,active,created_at,updated_at)
                            VALUES(?,?,?,?,?,?,?,?,1,?,?)""",
                         (
-                            patient_id, mrn, name, str(row.get("sex") or "未知"),
+                            patient_id, mrn, name, sex,
                             row.get("birth_year"), row.get("certificate_last4") or None,
                             row.get("phone_last4") or None, owner_id, utc_now(), utc_now(),
                         ),
@@ -359,8 +390,8 @@ def commit_import(req: ImportCommitRequest, request: Request):
                     (
                         encounter_id, patient_id, case_ref, occurred.isoformat(),
                         str(row.get("surgery_type") or "").strip() or None,
-                        json_dump(stored), str(row.get("diagnosis") or "").strip(),
-                        str(row.get("orders") or "").strip(), user["id"], user["id"],
+                        json_dump(stored), diagnosis_text, orders_text,
+                        user["id"], user["id"],
                         utc_now(), utc_now(),
                     ),
                 )
@@ -381,7 +412,12 @@ def commit_import(req: ImportCommitRequest, request: Request):
             results.append({"index": index, "ok": False, "error": str(message)})
         except Exception as exc:
             failed += 1
-            results.append({"index": index, "ok": False, "error": f"数据库写入失败：{exc}"})
+            message = str(exc)
+            if "UNIQUE constraint failed: encounters" in message:
+                message = "同一患者下就诊编号已存在，该行未导入"
+            elif "UNIQUE constraint failed: patients.mrn" in message:
+                message = "病历号已存在，该行未导入"
+            results.append({"index": index, "ok": False, "error": f"数据库写入失败：{message}"})
 
     batch_id = new_id("IMP")
     with db.transaction(immediate=True) as conn:
