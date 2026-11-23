@@ -13,6 +13,7 @@ const user = auth.user
 const online = ref(false)
 const bestAuc = ref('-')
 const isPublic = computed(() => route.meta.public === true)
+const isPilot = computed(() => route.path.startsWith('/patients') || route.path.startsWith('/encounters'))
 const roleLabel = computed(() => user.value?.role === 'admin' ? '管理员' : '医生')
 
 async function refreshHealth() {
@@ -111,7 +112,7 @@ async function submitPassword() {
 
 <template>
   <RouterView v-if="isPublic" />
-  <div v-else class="layout">
+  <div v-else class="layout" :class="{ 'pilot-shell': isPilot }">
     <!-- ── 侧边栏 ── -->
     <nav class="sidebar">
       <div class="sidebar-brand">

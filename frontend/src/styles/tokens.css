@@ -1,0 +1,457 @@
+/* ─────────────────────────────────────────────────────────────
+   AKI · 2a 试点设计令牌
+   颜色只在这里定义；页面样式必须引用变量，不得写死色值。
+   试点范围：/patients、/encounters。
+   ───────────────────────────────────────────────────────────── */
+
+:root {
+  --pilot-space-1: 4px;
+  --pilot-space-2: 8px;
+  --pilot-space-3: 12px;
+  --pilot-space-4: 16px;
+  --pilot-space-5: 24px;
+  --pilot-space-6: 32px;
+  --pilot-space-7: 48px;
+
+  --pilot-font-xs: 12px;
+  --pilot-font-sm: 14px;
+  --pilot-font-md: 16px;
+  --pilot-font-lg: 20px;
+  --pilot-font-xl: 28px;
+
+  --pilot-radius-control: 2px;
+  --pilot-radius-card: 4px;
+  --pilot-radius-pill: 999px;
+}
+
+/* ── 浅色：暖纸色病房默认 ─────────────────────────────────── */
+html[data-theme="light"] {
+  --pilot-bg: #F3F0E8;
+  --pilot-surface: #FBF9F4;
+  --pilot-surface-2: #EDE8DC;
+  --pilot-hover: #F1ECE2;
+  --pilot-ink: #1C1917;
+  --pilot-ink-soft: #3F3A33;
+  --pilot-muted: #6B655C;
+  --pilot-line: #D9D2C4;
+  --pilot-line-strong: #C4BA9F;
+  --pilot-accent: #0E6B5C;
+  --pilot-accent-hover: #0A5549;
+  --pilot-accent-soft: #E3EFEC;
+  --pilot-on-accent: #FFFFFF;
+  --pilot-high: #9F2D2D;
+  --pilot-high-soft: #F4E7E4;
+  --pilot-mid: #8A5A12;
+  --pilot-mid-soft: #F3ECE0;
+  --pilot-low: #1F6B4A;
+  --pilot-low-soft: #E6F0EA;
+  --pilot-shadow: 0 1px 2px rgba(28, 25, 23, .08);
+  --pilot-shadow-lg: 0 12px 32px rgba(28, 25, 23, .18);
+
+  /* Element Plus 映射 */
+  --el-color-primary: #0E6B5C;
+  --el-color-primary-light-3: #4A9183;
+  --el-color-primary-light-5: #7FB5AA;
+  --el-color-primary-light-7: #B5D4CD;
+  --el-color-primary-light-8: #D3E5E0;
+  --el-color-primary-light-9: #EDF5F2;
+  --el-color-primary-dark-2: #0A5549;
+  --el-color-success: #1F6B4A;
+  --el-color-success-light-9: #E6F0EA;
+  --el-color-warning: #8A5A12;
+  --el-color-warning-light-9: #F3ECE0;
+  --el-color-danger: #9F2D2D;
+  --el-color-danger-light-9: #F4E7E4;
+  --el-color-info: #6B655C;
+  --el-color-info-light-9: #EDE8DC;
+  --el-bg-color: #FBF9F4;
+  --el-bg-color-page: #F3F0E8;
+  --el-bg-color-overlay: #FBF9F4;
+  --el-text-color-primary: #1C1917;
+  --el-text-color-regular: #3F3A33;
+  --el-text-color-secondary: #6B655C;
+  --el-text-color-placeholder: #8C857A;
+  --el-text-color-disabled: #A9A196;
+  --el-border-color: #D9D2C4;
+  --el-border-color-light: #E4DED2;
+  --el-border-color-lighter: #ECE7DC;
+  --el-border-color-extra-light: #F2EEE4;
+  --el-fill-color: #EDE8DC;
+  --el-fill-color-light: #F2EEE4;
+  --el-fill-color-lighter: #F6F2E9;
+  --el-fill-color-blank: #FBF9F4;
+  --el-mask-color: rgba(28, 25, 23, .45);
+  --el-border-radius-base: 2px;
+  --el-border-radius-small: 2px;
+  --el-font-size-base: 14px;
+  --el-box-shadow-light: 0 1px 2px rgba(28, 25, 23, .08);
+}
+
+/* ── 深色：炭绿黑 ─────────────────────────────────────────── */
+html.dark[data-theme="dark"] {
+  --pilot-bg: #161A17;
+  --pilot-surface: #1D231F;
+  --pilot-surface-2: #242C26;
+  --pilot-hover: #263029;
+  --pilot-ink: #EDE9E0;
+  --pilot-ink-soft: #CFCAC0;
+  --pilot-muted: #A39C90;
+  --pilot-line: #38423A;
+  --pilot-line-strong: #4A564C;
+  --pilot-accent: #4FA98F;
+  --pilot-accent-hover: #6BBBA4;
+  --pilot-accent-soft: #1F332D;
+  --pilot-on-accent: #10201A;
+  --pilot-high: #D98A87;
+  --pilot-high-soft: #33201F;
+  --pilot-mid: #D3A15E;
+  --pilot-mid-soft: #33291D;
+  --pilot-low: #7BC3A4;
+  --pilot-low-soft: #1E3229;
+  --pilot-shadow: 0 1px 2px rgba(0, 0, 0, .35);
+  --pilot-shadow-lg: 0 12px 32px rgba(0, 0, 0, .5);
+
+  --el-color-primary: #4FA98F;
+  --el-color-primary-light-3: #3F8873;
+  --el-color-primary-light-5: #346F5F;
+  --el-color-primary-light-7: #2A574B;
+  --el-color-primary-light-8: #253F37;
+  --el-color-primary-light-9: #1F332D;
+  --el-color-primary-dark-2: #6BBBA4;
+  --el-color-success: #7BC3A4;
+  --el-color-success-light-9: #1E3229;
+  --el-color-warning: #D3A15E;
+  --el-color-warning-light-9: #33291D;
+  --el-color-danger: #D98A87;
+  --el-color-danger-light-9: #33201F;
+  --el-color-info: #A39C90;
+  --el-color-info-light-9: #242C26;
+  --el-bg-color: #1D231F;
+  --el-bg-color-page: #161A17;
+  --el-bg-color-overlay: #232B26;
+  --el-text-color-primary: #EDE9E0;
+  --el-text-color-regular: #CFCAC0;
+  --el-text-color-secondary: #A39C90;
+  --el-text-color-placeholder: #7E776C;
+  --el-text-color-disabled: #6A645B;
+  --el-border-color: #38423A;
+  --el-border-color-light: #323B34;
+  --el-border-color-lighter: #2B332D;
+  --el-border-color-extra-light: #252C27;
+  --el-fill-color: #242C26;
+  --el-fill-color-light: #202723;
+  --el-fill-color-lighter: #1B211D;
+  --el-fill-color-blank: #1D231F;
+  --el-mask-color: rgba(0, 0, 0, .62);
+  --el-border-radius-base: 2px;
+  --el-border-radius-small: 2px;
+  --el-font-size-base: 14px;
+  --el-box-shadow-light: 0 1px 2px rgba(0, 0, 0, .35);
+}
+
+/* ── 试点壳层：只影响 /patients 与 /encounters ───────────── */
+.layout.pilot-shell .sidebar {
+  background: var(--pilot-surface);
+  border-right-color: var(--pilot-line);
+}
+.layout.pilot-shell .sidebar-brand,
+.layout.pilot-shell .sidebar-footer { border-color: var(--pilot-line); }
+.layout.pilot-shell .sidebar-logo { color: var(--pilot-accent); }
+.layout.pilot-shell .sidebar-title,
+.layout.pilot-shell .brand-name { color: var(--pilot-ink); font-size: var(--pilot-font-md); }
+.layout.pilot-shell .sidebar-subtitle { display: none; }
+.layout.pilot-shell .sidebar-link,
+.layout.pilot-shell .sidebar-theme-btn { color: var(--pilot-muted); font-size: var(--pilot-font-xs); }
+.layout.pilot-shell .sidebar-link { height: 40px; }
+.layout.pilot-shell .sidebar-footer { gap: var(--pilot-space-2); }
+.layout.pilot-shell .sidebar-label { font-size: var(--pilot-font-xs); }
+.layout.pilot-shell .sidebar-user-name { color: var(--pilot-ink); font-size: var(--pilot-font-xs); }
+.layout.pilot-shell .sidebar-user-role,
+.layout.pilot-shell .sidebar-version,
+.layout.pilot-shell .sidebar-logout { color: var(--pilot-muted); font-size: var(--pilot-font-xs); }
+.layout.pilot-shell .badge {
+  border: 1px solid var(--pilot-line);
+  background: var(--pilot-surface-2);
+  color: var(--pilot-muted);
+  font-size: var(--pilot-font-xs);
+}
+.layout.pilot-shell .badge-success {
+  border-color: var(--pilot-low);
+  background: var(--pilot-low-soft);
+  color: var(--pilot-low);
+}
+.layout.pilot-shell .badge-info {
+  border-color: var(--pilot-accent);
+  background: var(--pilot-accent-soft);
+  color: var(--pilot-accent);
+}
+.layout.pilot-shell .current-page { color: var(--pilot-ink); font-size: var(--pilot-font-sm); }
+.layout.pilot-shell .topbar-actions { margin-left: auto; }
+.layout.pilot-shell .sidebar-link:hover { background: var(--pilot-hover); color: var(--pilot-ink); }
+.layout.pilot-shell .sidebar-link.active {
+  background: var(--pilot-accent-soft) !important;
+  color: var(--pilot-accent) !important;
+  box-shadow: inset 3px 0 0 var(--pilot-accent) !important;
+}
+.layout.pilot-shell .sidebar-theme-btn:hover { background: var(--pilot-hover); color: var(--pilot-accent); }
+.layout.pilot-shell .sidebar-user { background: var(--pilot-surface-2); border-color: var(--pilot-line); }
+.layout.pilot-shell .sidebar-user-name { color: var(--pilot-ink); }
+.layout.pilot-shell .sidebar-user-role,
+.layout.pilot-shell .sidebar-version,
+.layout.pilot-shell .sidebar-logout { color: var(--pilot-muted); }
+.layout.pilot-shell .main { background: var(--pilot-bg); }
+.layout.pilot-shell .topbar {
+  height: 56px;
+  padding: 0 var(--pilot-space-5);
+  background: var(--pilot-surface);
+  border-bottom-color: var(--pilot-line);
+}
+.layout.pilot-shell .current-page { color: var(--pilot-ink); }
+.layout.pilot-shell .content { padding: 0; background: var(--pilot-bg); }
+
+/* ── 试点共用原语 ─────────────────────────────────────────── */
+.pilot-page {
+  min-height: 100%;
+  padding: var(--pilot-space-5) var(--pilot-space-6) var(--pilot-space-7);
+  background: var(--pilot-bg);
+  color: var(--pilot-ink);
+  font-size: var(--pilot-font-sm);
+  line-height: 1.45;
+}
+.pilot-page-inner { max-width: 1440px; margin: 0 auto; }
+
+.pilot-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--pilot-space-4);
+  margin-bottom: var(--pilot-space-5);
+}
+.pilot-kicker {
+  margin-bottom: var(--pilot-space-1);
+  color: var(--pilot-muted);
+  font-size: var(--pilot-font-xs);
+  font-weight: 600;
+  letter-spacing: .04em;
+}
+.pilot-title {
+  color: var(--pilot-ink);
+  font-size: var(--pilot-font-xl);
+  font-weight: 700;
+  line-height: 1.2;
+}
+.pilot-sub {
+  margin-top: var(--pilot-space-2);
+  color: var(--pilot-muted);
+  font-size: var(--pilot-font-sm);
+}
+.pilot-actions { display: flex; align-items: center; gap: var(--pilot-space-2); flex-wrap: wrap; }
+
+.pilot-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pilot-space-2);
+  height: 40px;
+  padding: 0 var(--pilot-space-4);
+  border: 1px solid var(--pilot-line);
+  border-radius: var(--pilot-radius-control);
+  background: var(--pilot-surface);
+  color: var(--pilot-ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.pilot-btn:hover { background: var(--pilot-hover); border-color: var(--pilot-line-strong); }
+.pilot-btn:disabled { cursor: not-allowed; opacity: .45; }
+.pilot-btn:focus-visible,
+.pilot-input:focus-visible,
+.pilot-select:focus-visible,
+.pilot-textarea:focus-visible {
+  outline: 2px solid var(--pilot-accent);
+  outline-offset: 1px;
+}
+.pilot-btn-primary {
+  border-color: var(--pilot-accent);
+  background: var(--pilot-accent);
+  color: var(--pilot-on-accent);
+}
+.pilot-btn-primary:hover {
+  border-color: var(--pilot-accent-hover);
+  background: var(--pilot-accent-hover);
+}
+.pilot-btn-ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--pilot-muted);
+  padding: 0 var(--pilot-space-2);
+}
+.pilot-btn-ghost:hover { background: transparent; color: var(--pilot-ink); }
+.pilot-link {
+  color: var(--pilot-accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.pilot-link:hover { color: var(--pilot-accent-hover); text-decoration: underline; }
+
+.pilot-input,
+.pilot-select,
+.pilot-textarea {
+  width: 100%;
+  border: 1px solid var(--pilot-line);
+  border-radius: var(--pilot-radius-control);
+  background: var(--pilot-surface);
+  color: var(--pilot-ink);
+  font: inherit;
+}
+.pilot-input,
+.pilot-select { height: 40px; padding: 0 var(--pilot-space-3); }
+.pilot-textarea { padding: var(--pilot-space-3); resize: vertical; line-height: 1.55; }
+.pilot-input::placeholder,
+.pilot-textarea::placeholder { color: var(--pilot-muted); opacity: .8; }
+.pilot-input:disabled,
+.pilot-select:disabled,
+.pilot-textarea:disabled { background: var(--pilot-surface-2); color: var(--pilot-muted); }
+
+.pilot-panel {
+  border: 1px solid var(--pilot-line);
+  border-radius: var(--pilot-radius-card);
+  background: var(--pilot-surface);
+  box-shadow: var(--pilot-shadow);
+}
+.pilot-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pilot-space-3);
+  min-height: 48px;
+  padding: var(--pilot-space-3) var(--pilot-space-4);
+  border-bottom: 1px solid var(--pilot-line);
+}
+.pilot-panel-title {
+  color: var(--pilot-ink);
+  font-size: var(--pilot-font-md);
+  font-weight: 700;
+}
+.pilot-panel-body { padding: var(--pilot-space-4); }
+.pilot-muted { color: var(--pilot-muted); }
+.pilot-mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+
+.pilot-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pilot-space-1);
+  min-height: 24px;
+  padding: 0 var(--pilot-space-2);
+  border-radius: var(--pilot-radius-pill);
+  background: var(--pilot-surface-2);
+  color: var(--pilot-muted);
+  font-size: var(--pilot-font-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pilot-chip-high { background: var(--pilot-high-soft); color: var(--pilot-high); }
+.pilot-chip-mid { background: var(--pilot-mid-soft); color: var(--pilot-mid); }
+.pilot-chip-low { background: var(--pilot-low-soft); color: var(--pilot-low); }
+.pilot-chip-accent { background: var(--pilot-accent-soft); color: var(--pilot-accent); }
+
+.pilot-error {
+  margin-bottom: var(--pilot-space-4);
+  padding: var(--pilot-space-3) var(--pilot-space-4);
+  border: 1px solid var(--pilot-high);
+  border-radius: var(--pilot-radius-control);
+  background: var(--pilot-high-soft);
+  color: var(--pilot-high);
+  font-size: var(--pilot-font-sm);
+}
+.pilot-notice {
+  margin-bottom: var(--pilot-space-4);
+  padding: var(--pilot-space-3) var(--pilot-space-4);
+  border: 1px solid var(--pilot-line);
+  border-left: 3px solid var(--pilot-accent);
+  border-radius: var(--pilot-radius-control);
+  background: var(--pilot-accent-soft);
+  color: var(--pilot-ink-soft);
+  font-size: var(--pilot-font-sm);
+}
+
+/* ── Element Plus 试点覆盖 ───────────────────────────────── */
+.patients-pilot .el-table {
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-header-bg-color: var(--pilot-surface-2);
+  --el-table-row-hover-bg-color: var(--pilot-hover);
+  --el-table-border-color: var(--pilot-line);
+  --el-table-text-color: var(--pilot-ink);
+  --el-table-header-text-color: var(--pilot-muted);
+  font-size: var(--pilot-font-sm);
+}
+.patients-pilot .el-table th.el-table__cell {
+  padding: var(--pilot-space-3) 0;
+  border-bottom: 1px solid var(--pilot-line);
+  background-color: var(--pilot-surface-2);
+  color: var(--pilot-muted);
+  font-size: var(--pilot-font-sm);
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.patients-pilot .el-table td.el-table__cell {
+  padding: var(--pilot-space-3) 0;
+  border-bottom: 1px solid var(--pilot-line);
+}
+.patients-pilot .el-table .cell { padding: 0 var(--pilot-space-4); }
+.patients-pilot .el-table__row { cursor: pointer; }
+.patients-pilot .el-table__inner-wrapper::before { display: none; }
+
+.pilot-dialog.el-dialog {
+  border: 1px solid var(--pilot-line);
+  border-radius: var(--pilot-radius-card);
+  background: var(--pilot-surface);
+  box-shadow: var(--pilot-shadow-lg);
+}
+.pilot-dialog .el-dialog__header {
+  margin: 0;
+  padding: var(--pilot-space-4) var(--pilot-space-5);
+  border-bottom: 1px solid var(--pilot-line);
+}
+.pilot-dialog .el-dialog__title { color: var(--pilot-ink); font-size: var(--pilot-font-lg); font-weight: 700; }
+.pilot-dialog .el-dialog__body { padding: var(--pilot-space-5); }
+.pilot-dialog .el-dialog__footer { padding: var(--pilot-space-4) var(--pilot-space-5); border-top: 1px solid var(--pilot-line); }
+.pilot-dialog .el-dialog__headerbtn .el-dialog__close { color: var(--pilot-muted); }
+.pilot-dialog .el-dialog__headerbtn:hover .el-dialog__close { color: var(--pilot-ink); }
+
+.pilot-dialog .el-date-editor.el-input {
+  --el-input-height: 40px;
+  width: 100%;
+  height: 40px;
+}
+.pilot-dialog .el-date-editor .el-input__wrapper {
+  min-height: 40px;
+}
+.pilot-dialog .el-date-editor .el-input__inner {
+  height: 40px;
+}
+.patients-pilot .el-date-editor.el-input {
+  --el-input-height: 40px;
+  width: 100%;
+  height: 40px;
+}
+.patients-pilot .el-date-editor .el-input__wrapper {
+  min-height: 40px;
+}
+.patients-pilot .el-date-editor .el-input__inner {
+  height: 40px;
+}
+.patients-pilot .el-input__wrapper {
+  border-radius: var(--pilot-radius-control);
+  background: var(--pilot-surface);
+  box-shadow: 0 0 0 1px var(--pilot-line) inset;
+}
+.patients-pilot .el-input__wrapper.is-focus { box-shadow: 0 0 0 1px var(--pilot-accent) inset; }
+.patients-pilot .el-input__inner { color: var(--pilot-ink); font-size: var(--pilot-font-sm); }
+.patients-pilot .el-input__prefix { color: var(--pilot-muted); }
+.patients-pilot .el-empty { --el-empty-fill-color: var(--pilot-surface-2); padding: var(--pilot-space-7) 0; }
+.patients-pilot .el-empty__description p { color: var(--pilot-muted); font-size: var(--pilot-font-sm); }

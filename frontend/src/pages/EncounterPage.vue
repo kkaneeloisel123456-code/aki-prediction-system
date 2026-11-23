@@ -1,10 +1,11 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { api, saveBlob } from '../api/client'
+import { ElMessage } from 'element-plus'
+import 'element-plus/es/components/message/style/css'
 
 const route = useRoute()
-const router = useRouter()
 const loading = ref(true)
 const error = ref('')
 const notice = ref('')
@@ -15,7 +16,6 @@ const diagnosis = ref('')
 const orders = ref('')
 const rowVersion = ref(1)
 const draftVersion = ref(0)
-const step = ref(1)
 const saving = ref(false)
 const predicting = ref(false)
 const reviewing = ref(false)
@@ -32,10 +32,10 @@ const publishError = ref('')
 const collapsed = reactive<Record<string, boolean>>({})
 
 const timings = [
-  { key: 'preop', label: '术前指标', tone: 'timing-preop', desc: '术前基线检验与血流动力学' },
-  { key: 'intraop', label: '术中指标', tone: 'timing-intraop', desc: '手术时长、液体与失血' },
-  { key: 'icu', label: 'ICU 入科', tone: 'timing-icu', desc: '入 ICU 后早期检验' },
-  { key: 'postop', label: '术后指标', tone: 'timing-postop', desc: '术后炎症、肾功能与电解质' },
+  { key: 'preop', label: '术前指标', desc: '基线检验与血流动力学' },
+  { key: 'intraop', label: '术中指标', desc: '手术时长、液体与失血' },
+  { key: 'icu', label: 'ICU 入科', desc: '入 ICU 后早期检验' },
+  { key: 'postop', label: '术后指标', desc: '炎症、肾功能与电解质' },
 ]
 const groups = computed(() => timings.map((t) => ({
   ...t,
@@ -48,33 +48,58 @@ const measuredCount = computed(() => allFeatures.value.filter((name) => {
   return v !== '' && v != null && Number.isFinite(Number(v))
 }).length)
 
-const riskClass = computed(() => {
-  const level = prediction.value?.risk_level ?? encounter.value?.latest_prediction?.risk_level
-  return level === '高' ? 'high' : level === '中' ? 'medium' : 'low'
+const riskLevel = computed(() => prediction.value?.risk_level ?? encounter.value?.latest_prediction?.risk_level ?? '')
+const riskTone = computed(() => {
+  if (riskLevel.value === '高') return 'high'
+  if (riskLevel.value === '中') return 'mid'
+  if (riskLevel.value === '低') return 'low'
+  return 'none'
 })
 const riskText = computed(() => {
-  const level = prediction.value?.risk_level ?? encounter.value?.latest_prediction?.risk_level
-  return level ? `${level}风险` : '未评估'
+  if (!riskLevel.value) return '未评估'
+  return riskLevel.value === '人工审核' ? '人工审核' : `${riskLevel.value}风险`
 })
 const probabilityText = computed(() => {
   const p = prediction.value?.probability ?? encounter.value?.latest_prediction?.probability
   return typeof p === 'number' ? `${(p * 100).toFixed(1)}%` : '—'
 })
+const binaryText = computed(() => {
+  if (riskLevel.value === '人工审核') return '—'
+  const v = prediction.value?.prediction ?? encounter.value?.latest_prediction?.prediction
+  if (v === 1) return '阳性'
+  if (v === 0) return '阴性'
+  return '—'
+})
+const calibratedText = computed(() => {
+  const v = prediction.value?.calibrated ?? encounter.value?.latest_prediction?.calibrated
+  return v ? '已校准' : '未校准'
+})
+const missingCount = computed(() => (
+  prediction.value?.missing_filled ?? encounter.value?.latest_prediction?.missing_filled ?? []
+).length)
 const shapRows = computed(() => {
   const rows = prediction.value?.shap_values ?? encounter.value?.latest_prediction?.shap_values ?? []
-  return [...rows].sort((a: any, b: any) => Math.abs(b.shap) - Math.abs(a.shap)).slice(0, 10)
+  return [...rows].sort((a: any, b: any) => Math.abs(b.shap) - Math.abs(a.shap)).slice(0, 8)
 })
 const maxShap = computed(() => Math.max(0.001, ...shapRows.value.map((r: any) => Math.abs(r.shap))))
-const currentPredictionId = computed(() => encounter.value?.current_prediction_id)
 const hasPrediction = computed(() => Boolean(prediction.value || encounter.value?.latest_prediction))
 const canEdit = computed(() => encounter.value?.can_edit !== false)
 const isPublished = computed(() => encounter.value?.status === 'published')
+const metricsLocked = computed(() => isPublished.value || reviewDone.value)
+const latestReport = computed(() => encounter.value?.latest_report ?? null)
+const reviewOptions = computed(() => hasPrediction.value
+  ? [
+      { value: 'agree', label: '采纳模型结果' },
+      { value: 'adjust', label: '调整风险判断（上调 / 下调）' },
+      { value: 'defer', label: '暂不发布，继续观察' },
+    ]
+  : [{ value: 'manual', label: '无模型结果，人工记录' }])
 
 const statusText: Record<string, string> = {
   draft: '草稿', predicted: '待复核', reviewed: '已复核', published: '已发布',
 }
 const decisionText: Record<string, string> = {
-  agree: '认可模型结果', adjust: '调整判断', defer: '暂缓采纳', manual: '人工审核',
+  agree: '采纳模型结果', adjust: '调整风险判断', defer: '暂不发布', manual: '人工记录',
 }
 const featureLabels = computed(() => Object.fromEntries(
   metas.value.map((m) => [m.name, m.label || m.name]),
@@ -127,14 +152,11 @@ async function load() {
     hydratePayload(payload)
     prediction.value = enc.latest_prediction ?? null
     reviewDone.value = Boolean(enc.latest_review)
-    if (enc.status === 'published') {
-      step.value = 4
-      checklist.value = await api.checklist(enc.id, true).catch(() => null)
-    } else if (enc.latest_review) {
-      step.value = 4
-      checklist.value = await api.checklist(enc.id, false).catch(() => null)
-    } else if (enc.latest_prediction) {
-      step.value = 3
+    reviewDecision.value = enc.latest_review?.decision ?? (enc.latest_prediction ? 'agree' : 'manual')
+    reviewReason.value = enc.latest_review?.reason ?? ''
+    missingAck.value = enc.status === 'published'
+    if (enc.status === 'published' || enc.latest_review) {
+      checklist.value = await api.checklist(enc.id, enc.status === 'published').catch(() => null)
     }
   } catch (e: any) {
     error.value = e?.message ?? '接诊记录加载失败'
@@ -146,6 +168,7 @@ async function load() {
 async function persistDraft(silent = false): Promise<boolean> {
   error.value = ''
   if (!canEdit.value) { error.value = '当前账号对该患者只有只读权限'; return false }
+  if (metricsLocked.value) { error.value = '已复核或已发布的记录不能修改指标'; return false }
   if (invalidCount() > 0) { error.value = '存在超出临床合理范围的指标，请修正后再保存'; return false }
   saving.value = true
   try {
@@ -165,7 +188,10 @@ async function persistDraft(silent = false): Promise<boolean> {
     })
     draftVersion.value = res.draft_version
     dirty.value = false
-    if (!silent) notice.value = `草稿已保存（版本 ${draftVersion.value}）`
+    if (!silent) {
+      notice.value = `草稿已保存（版本 ${draftVersion.value}）`
+      ElMessage.success('草稿已保存')
+    }
     return true
   } catch (e: any) {
     error.value = e?.message ?? '草稿保存失败'
@@ -177,6 +203,7 @@ async function persistDraft(silent = false): Promise<boolean> {
 
 async function runPrediction() {
   error.value = ''
+  if (metricsLocked.value) { error.value = '已复核或已发布的记录不能重新运行模型'; return }
   if (measuredCount.value === 0) { error.value = '至少录入一项实测指标后才能运行模型'; return }
   if (invalidCount() > 0) { error.value = '请先修正超出合理范围的指标'; return }
   const saved = await persistDraft(true)
@@ -197,8 +224,9 @@ async function runPrediction() {
     encounter.value = { ...encounter.value, ...result }
     rowVersion.value = result.row_version
     prediction.value = result.prediction
+    if (!reviewDone.value) reviewDecision.value = 'agree'
     notice.value = `模型评估完成：${result.prediction.risk_level}风险，缺失指标 ${result.prediction.missing_filled?.length ?? 0} 项已按中位数填充。`
-    step.value = 3
+    ElMessage.success('模型评估完成')
   } catch (e: any) {
     error.value = e?.message ?? '预测失败'
   } finally {
@@ -208,14 +236,13 @@ async function runPrediction() {
 
 async function submitReview() {
   error.value = ''
+  if (reviewDone.value) { error.value = '本次就诊已经完成复核'; return }
   if (reviewDecision.value !== 'agree' && !reviewReason.value.trim()) {
-    error.value = '调整、暂缓或人工审核必须填写理由'
+    error.value = '调整、暂不发布或人工记录必须填写理由'
     return
   }
-  if (!reviewDone.value) {
-    const saved = await persistDraft(true)
-    if (!saved) return
-  }
+  const saved = await persistDraft(true)
+  if (!saved) return
   reviewing.value = true
   try {
     const res = await api.review(encounter.value.id, {
@@ -227,13 +254,21 @@ async function submitReview() {
     rowVersion.value = res.row_version
     reviewDone.value = true
     checklist.value = await api.checklist(encounter.value.id, missingAck.value)
-    step.value = 4
     notice.value = '医生复核已记录，可进行发布核对。'
+    ElMessage.success('复核已记录')
   } catch (e: any) {
     error.value = e?.message ?? '复核失败'
   } finally {
     reviewing.value = false
   }
+}
+
+function startManualReview() {
+  error.value = ''
+  if (metricsLocked.value) { error.value = '已复核或已发布的记录不能修改复核结论'; return }
+  if (measuredCount.value === 0) { error.value = '至少录入一项实测指标后才能人工记录'; return }
+  reviewDecision.value = 'manual'
+  notice.value = '已切换到人工记录，填写理由后提交复核。'
 }
 
 async function refreshChecklist() {
@@ -256,6 +291,7 @@ async function publishReport() {
     })
     publishResult.value = res
     notice.value = `正式报告 ${res.report_no} 已发布`
+    ElMessage.success(`报告 ${res.report_no} 已发布`)
     await load()
   } catch (e: any) {
     publishError.value = e?.message ?? '发布失败'
@@ -265,28 +301,16 @@ async function publishReport() {
 }
 
 async function downloadPdf() {
+  const report = publishResult.value ?? latestReport.value
+  if (!report) return
   try {
-    const blob = await api.reportPdf(publishResult.value.id)
-    saveBlob(blob, `${publishResult.value.report_no}.pdf`)
+    const blob = await api.reportPdf(report.id)
+    saveBlob(blob, `${report.report_no}.pdf`)
   } catch (e: any) {
     error.value = e?.message ?? '下载失败'
   }
 }
 
-function goStep(n: number) {
-  if (n === 3 && !hasPrediction.value) { error.value = '请先运行模型评估'; return }
-  error.value = ''
-  step.value = n
-}
-function startManualReview() {
-  error.value = ''
-  if (measuredCount.value === 0) {
-    error.value = '至少录入一项实测指标后才能进入人工审核'
-    return
-  }
-  reviewDecision.value = 'manual'
-  step.value = 4
-}
 function markDirty() { dirty.value = true }
 
 function beforeUnload(event: BeforeUnloadEvent) {
@@ -297,294 +321,339 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
 </script>
 
 <template>
-  <div>
-    <div class="page-head">
-      <div>
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-          <RouterLink :to="encounter ? `/patients/${encounter.patient_id}` : '/patients'" class="btn btn-sm btn-ghost">← 患者档案</RouterLink>
-        </div>
-        <h1 class="page-title">接诊与风险报告</h1>
-        <div class="page-subtitle" v-if="encounter">
-          {{ encounter.patient_name }} · <span class="font-mono">{{ encounter.mrn }}</span> · {{ encounter.case_ref }} ·
-          <span class="status" :class="`status-${encounter.status}`">{{ statusText[encounter.status] ?? encounter.status }}</span>
-        </div>
-      </div>
-      <div class="page-actions" v-if="encounter">
-        <button v-if="!isPublished" class="btn btn-secondary" :disabled="saving || !canEdit" @click="persistDraft(false)">{{ saving ? '保存中…' : '保存草稿' }}</button>
-        <button class="btn btn-secondary" :disabled="loading" @click="load">重新载入</button>
-      </div>
-    </div>
-
-    <div v-if="error" class="error">{{ error }}</div>
-    <div v-if="notice" class="info-box">{{ notice }}</div>
-    <div v-if="loading" class="card"><div class="empty-state">正在载入接诊记录…</div></div>
-
-    <template v-else-if="encounter">
-      <div class="steps">
-        <div v-for="(s, i) in [
-          { n: 1, t: '就诊信息', d: '核对患者与本次手术' },
-          { n: 2, t: '指标录入', d: '围手术期检验与体征' },
-          { n: 3, t: '模型评估', d: '风险概率与 SHAP' },
-          { n: 4, t: '复核发布', d: '医生决策与正式报告' },
-        ]" :key="s.n" class="step" :class="{ active: step === s.n, done: step > s.n }">
-          <div class="step-num">{{ step > s.n ? '✓' : s.n }}</div>
-          <div class="step-text"><div class="t">{{ s.t }}</div><div class="s">{{ s.d }}</div></div>
-          <div v-if="i < 3" class="step-line" />
-        </div>
-      </div>
-
-      <div v-if="!canEdit" class="warning-box">当前账号对该患者只有只读权限，无法修改就诊或发布报告。</div>
-
-      <!-- STEP 1 -->
-      <div v-if="step === 1" class="grid-2-1">
-        <div class="card">
-          <div class="card-header"><span class="card-title">本次就诊信息</span></div>
-          <div class="card-body">
-            <div class="info-grid mb-12">
-              <div class="info-item"><div class="k">患者</div><div class="v">{{ encounter.patient_name }}</div></div>
-              <div class="info-item"><div class="k">病历号</div><div class="v font-mono">{{ encounter.mrn }}</div></div>
-              <div class="info-item"><div class="k">就诊编号</div><div class="v font-mono">{{ encounter.case_ref }}</div></div>
-              <div class="info-item"><div class="k">发生时间</div><div class="v">{{ fmt(encounter.occurred_at) }}</div></div>
-              <div class="info-item"><div class="k">手术类型</div><div class="v">{{ encounter.surgery_type || '未填写' }}</div></div>
-              <div class="info-item"><div class="k">创建人</div><div class="v">{{ encounter.created_by_name || encounter.created_by }}</div></div>
-            </div>
-            <div class="form-group mb-12">
-              <label>临床诊断（将写入正式报告）</label>
-              <textarea v-model="diagnosis" class="form-control" rows="3" :disabled="!canEdit || isPublished" @input="markDirty" placeholder="如：冠状动脉粥样硬化性心脏病，拟行冠脉搭桥术" />
-            </div>
-            <div class="form-group">
-              <label>医嘱 / 随访建议（将写入正式报告）</label>
-              <textarea v-model="orders" class="form-control" rows="3" :disabled="!canEdit || isPublished" @input="markDirty" placeholder="如：术后监测肌酐与尿量，必要时肾内科会诊" />
-            </div>
-          </div>
-          <div class="modal-foot" style="position:static;border-top:1px solid var(--border)">
-            <button v-if="!isPublished" class="btn btn-secondary" :disabled="saving || !canEdit" @click="persistDraft(false)">保存草稿</button>
-            <button class="btn btn-primary" @click="goStep(2)">下一步：录入指标 →</button>
-          </div>
-        </div>
+  <div class="pilot-page encounter-pilot">
+    <div class="pilot-page-inner">
+      <header class="pilot-head encounter-head">
         <div>
-          <div class="side-card">
-            <div class="side-title">填写说明</div>
-            <div class="muted" style="font-size:11px;line-height:1.8">
-              1. 本次就诊编号在同一患者下唯一。<br />
-              2. 诊断与医嘱属于正式报告内容，建议在复核前完成。<br />
-              3. 指标可分批录入，草稿不会影响正式记录。<br />
-              4. 模型允许缺失指标并按训练中位数填充，缺失项需在发布前确认。
+          <RouterLink :to="encounter ? `/patients/${encounter.patient_id}` : '/patients'" class="pilot-link pilot-back">← 患者档案</RouterLink>
+          <div class="pilot-kicker">围术期评估</div>
+          <h1 class="pilot-title">接诊与风险报告</h1>
+        </div>
+        <div class="pilot-actions" v-if="encounter">
+          <span class="pilot-chip" :class="isPublished ? 'pilot-chip-accent' : ''">{{ statusText[encounter.status] ?? encounter.status }}</span>
+          <button v-if="!metricsLocked" class="pilot-btn" type="button" :disabled="saving || !canEdit" @click="persistDraft(false)">{{ saving ? '保存中…' : '保存草稿' }}</button>
+          <button class="pilot-btn" type="button" :disabled="loading" @click="load">重新载入</button>
+        </div>
+      </header>
+
+      <div v-if="error" class="pilot-error">{{ error }}</div>
+      <div v-if="notice" class="pilot-notice">{{ notice }}</div>
+      <div v-if="loading" class="pilot-panel pilot-loading">正在载入接诊记录…</div>
+
+      <template v-else-if="encounter">
+        <section class="patient-banner">
+          <div class="banner-main">
+            <div class="banner-name">{{ encounter.patient_name }}<span class="banner-mrn pilot-mono">{{ encounter.mrn }}</span></div>
+            <div class="banner-meta">
+              <span>就诊 <b class="pilot-mono">{{ encounter.case_ref }}</b></span>
+              <span>时间 <b>{{ fmt(encounter.occurred_at) }}</b></span>
+              <span>手术 <b>{{ encounter.surgery_type || '未填写' }}</b></span>
+              <span>创建人 <b>{{ encounter.created_by_name || encounter.created_by || '—' }}</b></span>
             </div>
           </div>
-          <div class="side-card">
-            <div class="side-title">版本状态</div>
-            <div class="muted" style="font-size:11px;line-height:1.9">
-              记录版本 v{{ rowVersion }}<br />
-              草稿版本 {{ draftVersion }}<br />
-              最近预测 {{ encounter.current_prediction_id || '无' }}
-            </div>
+          <div class="banner-risk">
+            <span class="banner-risk-label">本次风险</span>
+            <span class="banner-prob">{{ probabilityText }}</span>
+            <span class="pilot-chip" :class="riskTone === 'high' ? 'pilot-chip-high' : riskTone === 'mid' ? 'pilot-chip-mid' : riskTone === 'low' ? 'pilot-chip-low' : 'pilot-chip-accent'">{{ riskText }}</span>
           </div>
-        </div>
-      </div>
+        </section>
 
-      <!-- STEP 2 -->
-      <div v-else-if="step === 2" class="card">
-        <div class="card-header">
-          <span class="card-title">围手术期指标录入</span>
-          <span class="status" :class="filledCount ? 'status-info' : 'status-draft'">已填 {{ filledCount }} / {{ allFeatures.length }}</span>
-        </div>
-        <div class="card-body">
-          <div class="metric-progress">
-            <div class="track"><div class="fill" :style="{width: `${allFeatures.length ? filledCount / allFeatures.length * 100 : 0}%`}" /></div>
-            <div class="text">{{ measuredCount }} 项有效数值</div>
-          </div>
-          <div v-if="invalidCount()" class="warning-box">有 {{ invalidCount() }} 项数值超出临床合理范围，请修正后再保存或预测。</div>
+        <div v-if="!canEdit" class="pilot-error">当前账号对该患者只有只读权限，无法修改就诊或发布报告。</div>
 
-          <div v-for="g in groups" :key="g.key" class="metric-group">
-            <div class="metric-group-head" @click="collapsed[g.key] = !collapsed[g.key]">
-              <div style="display:flex;align-items:center;gap:8px">
-                <span class="metric-group-title">{{ g.label }}</span>
-                <span class="metric-group-meta">{{ g.features.length }} 项 · {{ g.desc }}</span>
+        <div class="encounter-layout">
+          <main class="encounter-main">
+            <section class="pilot-panel">
+              <div class="pilot-panel-head">
+                <span class="pilot-panel-title">本次就诊文书</span>
+                <span class="pilot-muted">记录 v{{ rowVersion }} · 草稿 v{{ draftVersion }}</span>
               </div>
-              <span class="section-chevron" :class="{ open: !collapsed[g.key] }">›</span>
-            </div>
-            <div v-if="!collapsed[g.key]" class="metric-grid">
-              <div v-for="m in g.features" :key="m.name" class="metric-field">
-                <label>
-                  <span>{{ fieldLabel(m) }}</span>
-                  <span v-if="fieldUnit(m)" class="unit">{{ fieldUnit(m) }}</span>
-                </label>
-                <input v-model="values[m.name]" class="form-control" :class="{invalid: isInvalid(m)}" type="number" step="any" :disabled="!canEdit || isPublished" @input="markDirty" placeholder="留空表示缺失" />
-                <div class="ref">{{ fieldReference(m) }}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="modal-foot" style="position:static;border-top:1px solid var(--border)">
-          <button class="btn btn-secondary" @click="goStep(1)">← 上一步</button>
-          <button class="btn btn-secondary" :disabled="saving || !canEdit" @click="persistDraft(false)">保存草稿</button>
-          <button class="btn btn-secondary" :disabled="!canEdit || isPublished" @click="startManualReview">无模型结果，人工审核</button>
-          <button class="btn btn-primary" :disabled="predicting || !canEdit || isPublished" @click="runPrediction">
-            {{ predicting ? '模型计算中…' : '保存并运行模型 →' }}
-          </button>
-        </div>
-      </div>
-
-      <!-- STEP 3 -->
-      <div v-else-if="step === 3" class="grid-2-1">
-        <div>
-          <div class="card">
-            <div class="card-header">
-              <span class="card-title">模型评估结果</span>
-              <span class="muted" style="font-size:10px">模型 {{ encounter.latest_prediction?.model_version || 'AKI-V1' }}</span>
-            </div>
-            <div class="card-body">
-              <div class="assessment-grid">
-                <div class="prob-card" :class="riskClass">
-                  <div class="prob-label">预测 AKI 概率</div>
-                  <div class="prob-value">{{ probabilityText }}</div>
-                  <div class="prob-risk" :style="{color: `var(--${riskClass === 'high' ? 'red' : riskClass === 'medium' ? 'yellow' : 'green'})`}">{{ riskText }}</div>
-                  <div class="prob-meta">
-                    二分类判定：{{ (prediction?.prediction ?? encounter.latest_prediction?.prediction) === 1 ? '阳性' : '阴性' }}<br />
-                    概率校准：{{ (prediction?.calibrated ?? encounter.latest_prediction?.calibrated) ? '已校准' : '未校准' }}<br />
-                    实测 {{ measuredCount }} 项 / 缺失填充 {{ (prediction?.missing_filled ?? encounter.latest_prediction?.missing_filled ?? []).length }} 项
-                  </div>
+              <div class="pilot-panel-body doc-grid">
+                <div class="form-field">
+                  <label for="enc-diagnosis">临床诊断（写入正式报告）</label>
+                  <textarea id="enc-diagnosis" v-model="diagnosis" class="pilot-textarea" rows="3" :disabled="!canEdit || metricsLocked" placeholder="如：冠状动脉粥样硬化性心脏病，拟行冠脉搭桥术" @input="markDirty" />
                 </div>
-                <div>
-                  <div class="section-label" style="margin-top:0">主要影响因素（SHAP）</div>
-                  <div v-if="!shapRows.length" class="muted">当前没有解释数据</div>
-                  <div v-else class="shap-list">
-                    <div v-for="s in shapRows" :key="s.feature" class="shap-row">
-                      <div class="name" :title="s.feature">
-                        {{ shapLabel(s.feature) }}
-                        <span v-if="isFilledFeature(s.feature)" class="status status-draft">填充值</span>
+                <div class="form-field">
+                  <label for="enc-orders">医嘱 / 随访建议（写入正式报告）</label>
+                  <textarea id="enc-orders" v-model="orders" class="pilot-textarea" rows="3" :disabled="!canEdit || metricsLocked" placeholder="如：术后监测肌酐与尿量，必要时肾内科会诊" @input="markDirty" />
+                </div>
+              </div>
+            </section>
+
+            <section class="pilot-panel metrics-panel">
+              <div class="pilot-panel-head">
+                <div class="metrics-title">
+                  <span class="pilot-panel-title">围手术期指标</span>
+                  <span class="pilot-chip pilot-chip-accent">{{ measuredCount }} 项实测 / {{ allFeatures.length }} 项</span>
+                </div>
+                <span v-if="metricsLocked" class="pilot-muted">{{ isPublished ? '已发布，指标锁定' : '已复核，指标锁定' }}</span>
+              </div>
+              <div class="pilot-panel-body">
+                <div class="metric-progress">
+                  <div class="metric-track"><span :style="{ width: `${allFeatures.length ? filledCount / allFeatures.length * 100 : 0}%` }" /></div>
+                  <span>{{ invalidCount() ? `${invalidCount()} 项超范围` : '数值需在参考范围内' }}</span>
+                </div>
+                <div v-if="invalidCount()" class="pilot-error metric-error">有 {{ invalidCount() }} 项数值超出临床合理范围，请修正后再保存或预测。</div>
+
+                <div v-for="g in groups" :key="g.key" class="metric-group">
+                  <button class="metric-group-head" type="button" :aria-expanded="!collapsed[g.key]" @click="collapsed[g.key] = !collapsed[g.key]">
+                    <span class="metric-group-title">{{ g.label }}</span>
+                    <span class="metric-group-meta">{{ g.features.length }} 项 · {{ g.desc }}</span>
+                    <span class="metric-chevron" :class="{ open: !collapsed[g.key] }">›</span>
+                  </button>
+                  <div v-if="!collapsed[g.key]" class="metric-rows">
+                    <div v-for="m in g.features" :key="m.name" class="metric-row">
+                      <div class="metric-label">
+                        <span>{{ fieldLabel(m) }}</span>
+                        <span v-if="fieldUnit(m)" class="metric-unit">{{ fieldUnit(m) }}</span>
+                        <span class="metric-ref">{{ fieldReference(m) }}</span>
                       </div>
-                      <div class="bar"><span :style="{width: `${Math.abs(s.shap) / maxShap * 100}%`, background: s.shap >= 0 ? 'var(--red)' : 'var(--green)'}" /></div>
-                      <div class="effect">{{ s.shap >= 0 ? '↑ 风险' : '↓ 保护' }} {{ Math.abs(s.shap).toFixed(3) }}</div>
+                      <input v-model="values[m.name]" class="pilot-input metric-input" :class="{ 'metric-input-bad': isInvalid(m) }" type="number" step="any" :disabled="!canEdit || metricsLocked" @input="markDirty" />
+                      <span class="metric-state" :class="{ bad: isInvalid(m) }">{{ isInvalid(m) ? '超范围' : (values[m.name] ? '已填' : '缺失') }}</span>
                     </div>
                   </div>
                 </div>
               </div>
-              <div v-if="(prediction?.missing_filled ?? encounter.latest_prediction?.missing_filled ?? []).length" class="warning-box mt-12">
-                缺失指标：{{ (prediction?.missing_filled ?? encounter.latest_prediction?.missing_filled ?? []).join('、') }}。模型已按训练中位数填充，这些值不等同于实测。
-              </div>
-            </div>
-            <div class="modal-foot" style="position:static;border-top:1px solid var(--border)">
-              <button class="btn btn-secondary" @click="goStep(2)">← 返回修改指标</button>
-              <button class="btn btn-primary" @click="goStep(4)">下一步：医生复核 →</button>
-            </div>
-          </div>
-        </div>
-        <div>
-          <div class="side-card">
-            <div class="side-title">本次模型输入</div>
-            <div class="muted" style="font-size:11px;line-height:1.9">
-              患者：{{ encounter.patient_name }}<br />
-              就诊：{{ encounter.case_ref }}<br />
-              记录版本：v{{ rowVersion }}<br />
-              草稿版本：{{ draftVersion }}<br />
-              预测编号：{{ encounter.current_prediction_id }}
-            </div>
-          </div>
-          <div class="side-card">
-            <div class="side-title">重要提示</div>
-            <div class="muted" style="font-size:11px;line-height:1.8">
-              模型输出仅作为医生决策辅助，不能替代临床判断。修改指标后必须重新运行预测，否则不得发布报告。
-            </div>
-          </div>
-        </div>
-      </div>
+            </section>
+          </main>
 
-      <!-- STEP 4 -->
-      <div v-else-if="step === 4" class="grid-2-1">
-        <div>
-          <div class="card">
-            <div class="card-header">
-              <span class="card-title">医生复核</span>
-              <span class="status" :class="reviewDone ? 'status-reviewed' : 'status-pending'">{{ reviewDone ? '已复核' : '待复核' }}</span>
-            </div>
-            <div class="card-body">
-              <div v-if="!hasPrediction && !reviewDone" class="warning-box">当前没有有效模型结果。如确需继续，必须选择“人工审核”并填写理由。</div>
-              <div class="form-grid-2">
-                <div class="form-group">
-                  <label>复核结论</label>
-                  <select v-model="reviewDecision" class="form-control" :disabled="reviewDone || isPublished || !canEdit">
-                    <option v-if="hasPrediction" value="agree">认可模型结果</option>
-                    <option v-if="hasPrediction" value="adjust">调整风险判断</option>
-                    <option v-if="hasPrediction" value="defer">暂缓采纳，继续观察</option>
-                    <option v-if="!hasPrediction && !reviewDone" value="manual">人工审核（无模型结果）</option>
+          <aside class="risk-rail">
+            <section class="pilot-panel rail-panel">
+              <div class="pilot-panel-head">
+                <span class="pilot-panel-title">风险评估</span>
+                <span class="pilot-muted">{{ hasPrediction ? '已运行模型' : '尚未运行' }}</span>
+              </div>
+              <div class="pilot-panel-body">
+                <div class="risk-value" :class="`risk-${riskTone}`">
+                  <div class="risk-prob">{{ probabilityText }}</div>
+                  <div class="risk-name">{{ riskText }}</div>
+                </div>
+                <dl class="risk-meta">
+                  <div><dt>二分类</dt><dd>{{ binaryText }}</dd></div>
+                  <div><dt>概率校准</dt><dd>{{ calibratedText }}</dd></div>
+                  <div><dt>实测 / 填充</dt><dd>{{ measuredCount }} / {{ missingCount }}</dd></div>
+                  <div><dt>预测编号</dt><dd class="pilot-mono">{{ encounter.current_prediction_id || '—' }}</dd></div>
+                </dl>
+                <div class="rail-actions">
+                  <button class="pilot-btn pilot-btn-primary" type="button" :disabled="predicting || !canEdit || metricsLocked" @click="runPrediction">
+                    {{ predicting ? '计算中…' : (hasPrediction ? '重新运行模型' : '运行模型') }}
+                  </button>
+                  <button v-if="!hasPrediction && !reviewDone" class="pilot-btn" type="button" :disabled="!canEdit || measuredCount === 0" @click="startManualReview">无模型时人工记录</button>
+                  <button class="pilot-btn" type="button" :disabled="saving || !canEdit || metricsLocked" @click="persistDraft(false)">{{ saving ? '保存中…' : '保存草稿' }}</button>
+                </div>
+                <p v-if="metricsLocked" class="rail-hint">{{ isPublished ? '报告已发布，指标与复核已锁定。' : '已复核，指标已锁定；如需修改请由管理员撤销报告后重开。' }}</p>
+              </div>
+            </section>
+
+            <section v-if="shapRows.length" class="pilot-panel rail-panel">
+              <div class="pilot-panel-head"><span class="pilot-panel-title">主要影响因素</span><span class="pilot-muted">SHAP</span></div>
+              <div class="pilot-panel-body shap-list">
+                <div v-for="s in shapRows" :key="s.feature" class="shap-row">
+                  <div class="shap-name">
+                    {{ shapLabel(s.feature) }}
+                    <span v-if="isFilledFeature(s.feature)" class="pilot-chip">填充值</span>
+                  </div>
+                  <div class="shap-track"><span :style="{ width: `${Math.abs(s.shap) / maxShap * 100}%`, background: s.shap >= 0 ? 'var(--pilot-high)' : 'var(--pilot-low)' }" /></div>
+                  <div class="shap-value" :class="{ risk: s.shap >= 0 }">{{ s.shap >= 0 ? '+' : '−' }}{{ Math.abs(s.shap).toFixed(3) }}</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="pilot-panel rail-panel">
+              <div class="pilot-panel-head">
+                <span class="pilot-panel-title">医生复核</span>
+                <span class="pilot-chip" :class="reviewDone ? 'pilot-chip-low' : ''">{{ reviewDone ? '已复核' : '待复核' }}</span>
+              </div>
+              <div class="pilot-panel-body review-form">
+                <div v-if="!hasPrediction && !reviewDone" class="rail-warning">没有有效模型结果。确需继续时，选择“无模型结果，人工记录”并填写理由。</div>
+                <div class="form-field">
+                  <label for="review-decision">复核结论</label>
+                  <select id="review-decision" v-model="reviewDecision" class="pilot-select" :disabled="reviewDone || isPublished || !canEdit">
+                    <option v-for="o in reviewOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
                   </select>
                 </div>
-                <div class="form-group">
-                  <label>复核人</label>
-                  <input class="form-control" :value="encounter.latest_review?.reviewer_name || '当前登录医生'" disabled />
+                <div class="form-field">
+                  <label for="reviewer">复核人</label>
+                  <input id="reviewer" class="pilot-input" :value="encounter.latest_review?.reviewer_name || '当前登录医生'" disabled />
                 </div>
-                <div class="form-group full">
-                  <label>复核意见 {{ reviewDecision !== 'agree' ? '（必填）' : '（可选）' }}</label>
-                  <textarea v-model="reviewReason" class="form-control" rows="3" :disabled="reviewDone || isPublished || !canEdit" placeholder="说明采纳、调整或暂缓的依据" />
+                <div class="form-field">
+                  <label for="review-reason">复核意见 {{ reviewDecision !== 'agree' ? '（必填）' : '（可选）' }}</label>
+                  <textarea id="review-reason" v-model="reviewReason" class="pilot-textarea" rows="3" :disabled="reviewDone || isPublished || !canEdit" placeholder="说明采纳、调整或暂不发布的依据" />
+                </div>
+                <button v-if="!reviewDone && !isPublished" class="pilot-btn pilot-btn-primary" type="button" :disabled="reviewing || !canEdit" @click="submitReview">{{ reviewing ? '提交中…' : '记录复核' }}</button>
+                <div v-if="reviewDone && encounter.latest_review" class="review-record">
+                  已由 {{ encounter.latest_review.reviewer_name }} 于 {{ fmt(encounter.latest_review.created_at) }} 记录：{{ decisionText[encounter.latest_review.decision] || encounter.latest_review.decision }}。{{ encounter.latest_review.reason }}
                 </div>
               </div>
-              <div v-if="reviewDone && encounter.latest_review" class="info-box mt-12">
-                已由 {{ encounter.latest_review.reviewer_name }} 于 {{ fmt(encounter.latest_review.created_at) }} 完成复核：{{ decisionText[encounter.latest_review.decision] || encounter.latest_review.decision }}。{{ encounter.latest_review.reason }}
-              </div>
-            </div>
-            <div class="modal-foot" style="position:static;border-top:1px solid var(--border)">
-              <button class="btn btn-secondary" @click="goStep(3)">← 返回评估</button>
-              <button v-if="!reviewDone && !isPublished" class="btn btn-primary" :disabled="reviewing || !canEdit" @click="submitReview">{{ reviewing ? '提交中…' : '提交复核并进入发布核对' }}</button>
-            </div>
-          </div>
+            </section>
 
-          <div v-if="reviewDone" class="card">
-            <div class="card-header">
-              <span class="card-title">发布核对清单</span>
-              <button class="btn btn-sm btn-secondary" @click="refreshChecklist">重新核对</button>
-            </div>
-            <div class="card-body" v-if="checklist">
-              <div class="check-list">
-                <div v-for="item in checklist.items" :key="item.key" class="check-item">
-                  <span class="check-icon" :class="item.ok ? 'ok' : 'bad'">{{ item.ok ? '✓' : '!' }}</span>
-                  <div>
-                    <div class="ct">{{ item.label }}</div>
-                    <div v-if="item.detail" class="cd">{{ item.detail }}</div>
+            <section v-if="reviewDone && checklist" class="pilot-panel rail-panel">
+              <div class="pilot-panel-head">
+                <span class="pilot-panel-title">发布核对</span>
+                <button class="pilot-btn pilot-btn-ghost" type="button" @click="refreshChecklist">重新核对</button>
+              </div>
+              <div class="pilot-panel-body checklist-body">
+                <div v-for="item in checklist.items" :key="item.key" class="check-row">
+                  <span class="check-mark" :class="{ ok: item.ok }">{{ item.ok ? '✓' : '!' }}</span>
+                  <div><div class="check-label">{{ item.label }}</div><div v-if="item.detail" class="check-detail">{{ item.detail }}</div></div>
+                </div>
+                <label v-if="checklist.missing_count" class="check-ack">
+                  <input v-model="missingAck" type="checkbox" @change="refreshChecklist" />
+                  我已确认 {{ checklist.missing_count }} 项指标缺失，模型按训练中位数填充。
+                </label>
+                <div v-if="publishError" class="pilot-error publish-error">{{ publishError }}</div>
+                <div v-if="isPublished && latestReport" class="publish-result">
+                  正式报告已发布：<strong>{{ latestReport.report_no }}</strong>（v{{ latestReport.version }}）。
+                  <div class="publish-actions">
+                    <button class="pilot-btn pilot-btn-primary" type="button" @click="downloadPdf">下载 PDF</button>
+                    <RouterLink :to="`/reports/${latestReport.id}`" class="pilot-btn">查看报告</RouterLink>
                   </div>
                 </div>
-              </div>
-              <label v-if="checklist.missing_count" class="check-ack">
-                <input v-model="missingAck" type="checkbox" @change="refreshChecklist" />
-                我已确认 {{ checklist.missing_count }} 项指标缺失，并理解模型使用中位数填充。
-              </label>
-              <div v-if="publishError" class="error mt-12">{{ publishError }}</div>
-              <div v-if="publishResult" class="info-box mt-12">
-                正式报告已发布：<strong>{{ publishResult.report_no }}</strong>（v{{ publishResult.version }}）。
-                <div class="flex gap-8 mt-8">
-                  <button class="btn btn-sm btn-primary" @click="downloadPdf">下载 PDF</button>
-                  <RouterLink :to="`/reports/${publishResult.id}`" class="btn btn-sm btn-secondary">查看报告</RouterLink>
+                <div v-else-if="publishResult" class="publish-result">
+                  正式报告已发布：<strong>{{ publishResult.report_no }}</strong>（v{{ publishResult.version }}）。
+                  <div class="publish-actions">
+                    <button class="pilot-btn pilot-btn-primary" type="button" @click="downloadPdf">下载 PDF</button>
+                    <RouterLink :to="`/reports/${publishResult.id}`" class="pilot-btn">查看报告</RouterLink>
+                  </div>
                 </div>
+                <button v-if="!isPublished" class="pilot-btn pilot-btn-primary publish-btn" type="button" :disabled="publishing || !checklist?.can_publish || !canEdit" @click="publishReport">{{ publishing ? '发布中…' : '发布正式报告' }}</button>
               </div>
-            </div>
-            <div class="modal-foot" style="position:static;border-top:1px solid var(--border)">
-              <button v-if="!isPublished" class="btn btn-primary" :disabled="publishing || !checklist?.can_publish || !canEdit" @click="publishReport">
-                {{ publishing ? '发布中…' : '发布正式报告' }}
-              </button>
-              <RouterLink v-if="isPublished && encounter.latest_report" :to="`/reports/${encounter.latest_report.id}`" class="btn btn-secondary">查看本次报告</RouterLink>
-            </div>
-          </div>
+            </section>
+          </aside>
         </div>
-        <div>
-          <div class="side-card">
-            <div class="side-title">报告摘要</div>
-            <div class="muted" style="font-size:11px;line-height:1.9">
-              患者：{{ encounter.patient_name }}<br />
-              风险：{{ riskText }}<br />
-              概率：{{ probabilityText }}<br />
-              复核：{{ decisionText[encounter.latest_review?.decision] || encounter.latest_review?.decision || '未完成' }}<br />
-              状态：{{ statusText[encounter.status] }}
-            </div>
-          </div>
-          <div class="side-card">
-            <div class="side-title">发布规则</div>
-            <div class="muted" style="font-size:11px;line-height:1.8">
-              正式报告一旦发布不可直接修改；如发现错误，由管理员撤销后重新发布新版本。旧版本仍保留审计记录。
-            </div>
-          </div>
-        </div>
-      </div>
-    </template>
+      </template>
+    </div>
   </div>
 </template>
+
+<style scoped>
+.encounter-head { margin-bottom: var(--pilot-space-3); }
+.pilot-back { display: inline-block; margin-bottom: var(--pilot-space-2); font-size: var(--pilot-font-xs); }
+.pilot-loading { padding: var(--pilot-space-7); color: var(--pilot-muted); text-align: center; }
+
+.patient-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pilot-space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--pilot-space-4);
+  padding: var(--pilot-space-4) var(--pilot-space-5);
+  border: 1px solid var(--pilot-line);
+  border-left: 4px solid var(--pilot-accent);
+  border-radius: var(--pilot-radius-card);
+  background: var(--pilot-surface);
+  box-shadow: var(--pilot-shadow);
+}
+.banner-name { display: flex; align-items: baseline; gap: var(--pilot-space-3); flex-wrap: wrap; color: var(--pilot-ink); font-size: var(--pilot-font-lg); font-weight: 700; }
+.banner-mrn { color: var(--pilot-muted); font-size: var(--pilot-font-sm); font-weight: 500; }
+.banner-meta { display: flex; gap: var(--pilot-space-4); flex-wrap: wrap; margin-top: var(--pilot-space-2); color: var(--pilot-muted); font-size: var(--pilot-font-xs); }
+.banner-meta b { color: var(--pilot-ink-soft); font-weight: 600; }
+.banner-risk { display: flex; align-items: center; gap: var(--pilot-space-2); }
+.banner-risk-label { color: var(--pilot-muted); font-size: var(--pilot-font-xs); }
+.banner-prob { color: var(--pilot-ink); font-size: var(--pilot-font-lg); font-weight: 700; }
+
+.encounter-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: var(--pilot-space-4); align-items: start; }
+.encounter-main { display: flex; flex-direction: column; gap: var(--pilot-space-4); min-width: 0; }
+.risk-rail { position: sticky; top: var(--pilot-space-4); display: flex; flex-direction: column; gap: var(--pilot-space-4); }
+.rail-panel { margin: 0; }
+
+.doc-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--pilot-space-4); }
+.form-field { display: flex; flex-direction: column; gap: var(--pilot-space-1); }
+.form-field label { color: var(--pilot-ink-soft); font-size: var(--pilot-font-xs); font-weight: 600; }
+
+.metrics-title { display: flex; align-items: center; gap: var(--pilot-space-2); flex-wrap: wrap; }
+.metric-progress { display: flex; align-items: center; gap: var(--pilot-space-3); margin-bottom: var(--pilot-space-3); color: var(--pilot-muted); font-size: var(--pilot-font-xs); }
+.metric-track { flex: 1; height: 4px; border-radius: 999px; background: var(--pilot-surface-2); overflow: hidden; }
+.metric-track span { display: block; height: 100%; background: var(--pilot-accent); }
+.metric-error { margin-bottom: var(--pilot-space-3); }
+
+.metric-group { margin-bottom: var(--pilot-space-3); border: 1px solid var(--pilot-line); border-radius: var(--pilot-radius-control); overflow: hidden; }
+.metric-group:last-child { margin-bottom: 0; }
+.metric-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--pilot-space-3);
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--pilot-space-4);
+  border: 0;
+  border-bottom: 1px solid var(--pilot-line);
+  background: var(--pilot-surface-2);
+  color: var(--pilot-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.metric-group-title { font-weight: 700; }
+.metric-group-meta { flex: 1; color: var(--pilot-muted); font-size: var(--pilot-font-xs); }
+.metric-chevron { color: var(--pilot-muted); transition: transform .15s; }
+.metric-chevron.open { transform: rotate(90deg); }
+.metric-rows { background: var(--pilot-surface); }
+.metric-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.3fr) 128px 64px;
+  align-items: center;
+  gap: var(--pilot-space-3);
+  min-height: 56px;
+  padding: var(--pilot-space-2) var(--pilot-space-4);
+  border-bottom: 1px solid var(--pilot-line);
+}
+.metric-row:last-child { border-bottom: 0; }
+.metric-label { display: flex; align-items: baseline; gap: var(--pilot-space-2); flex-wrap: wrap; min-width: 0; }
+.metric-label > span:first-child { color: var(--pilot-ink); font-weight: 600; }
+.metric-unit { color: var(--pilot-muted); font-size: var(--pilot-font-xs); }
+.metric-ref { width: 100%; color: var(--pilot-muted); font-size: var(--pilot-font-xs); }
+.metric-input { height: 40px; text-align: right; font-variant-numeric: tabular-nums; }
+.metric-input-bad { border-color: var(--pilot-high); background: var(--pilot-high-soft); }
+.metric-state { color: var(--pilot-muted); font-size: var(--pilot-font-xs); text-align: right; }
+.metric-state.bad { color: var(--pilot-high); font-weight: 600; }
+
+.risk-value { padding: var(--pilot-space-4); border: 1px solid var(--pilot-line); border-left: 4px solid var(--pilot-line-strong); border-radius: var(--pilot-radius-control); background: var(--pilot-surface-2); }
+.risk-high { border-left-color: var(--pilot-high); background: var(--pilot-high-soft); }
+.risk-mid { border-left-color: var(--pilot-mid); background: var(--pilot-mid-soft); }
+.risk-low { border-left-color: var(--pilot-low); background: var(--pilot-low-soft); }
+.risk-none { border-left-color: var(--pilot-line-strong); }
+.risk-prob { color: var(--pilot-ink); font-size: var(--pilot-font-xl); font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.risk-name { margin-top: var(--pilot-space-1); color: var(--pilot-ink-soft); font-size: var(--pilot-font-md); font-weight: 600; }
+.risk-meta { display: grid; grid-template-columns: 1fr 1fr; gap: var(--pilot-space-3); margin: var(--pilot-space-4) 0; }
+.risk-meta div { min-width: 0; }
+.risk-meta dt { color: var(--pilot-muted); font-size: var(--pilot-font-xs); }
+.risk-meta dd { margin-top: var(--pilot-space-1); overflow: hidden; color: var(--pilot-ink); font-size: var(--pilot-font-xs); font-weight: 600; text-overflow: ellipsis; }
+.rail-actions { display: flex; flex-direction: column; gap: var(--pilot-space-2); }
+.rail-hint { margin-top: var(--pilot-space-3); color: var(--pilot-muted); font-size: var(--pilot-font-xs); line-height: 1.6; }
+
+.shap-list { display: flex; flex-direction: column; gap: var(--pilot-space-3); }
+.shap-row { display: grid; grid-template-columns: minmax(0, 1fr) 72px; gap: var(--pilot-space-2); align-items: center; }
+.shap-name { display: flex; align-items: center; gap: var(--pilot-space-2); overflow: hidden; color: var(--pilot-ink-soft); font-size: var(--pilot-font-xs); text-overflow: ellipsis; white-space: nowrap; }
+.shap-track { grid-column: 1 / -1; height: 3px; border-radius: 999px; background: var(--pilot-surface-2); overflow: hidden; }
+.shap-track span { display: block; height: 100%; }
+.shap-value { grid-row: 1; grid-column: 2; color: var(--pilot-low); font-size: var(--pilot-font-xs); text-align: right; font-variant-numeric: tabular-nums; }
+.shap-value.risk { color: var(--pilot-high); }
+
+.review-form { display: flex; flex-direction: column; gap: var(--pilot-space-3); }
+.rail-warning { padding: var(--pilot-space-2) var(--pilot-space-3); border: 1px solid var(--pilot-mid); border-radius: var(--pilot-radius-control); background: var(--pilot-mid-soft); color: var(--pilot-mid); font-size: var(--pilot-font-xs); }
+.review-record { padding: var(--pilot-space-3); border: 1px solid var(--pilot-line); border-radius: var(--pilot-radius-control); background: var(--pilot-surface-2); color: var(--pilot-ink-soft); font-size: var(--pilot-font-xs); line-height: 1.6; }
+
+.checklist-body { display: flex; flex-direction: column; gap: var(--pilot-space-2); }
+.check-row { display: flex; align-items: flex-start; gap: var(--pilot-space-2); }
+.check-mark { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex-shrink: 0; border-radius: 50%; background: var(--pilot-mid-soft); color: var(--pilot-mid); font-size: var(--pilot-font-xs); font-weight: 700; }
+.check-mark.ok { background: var(--pilot-low-soft); color: var(--pilot-low); }
+.check-label { color: var(--pilot-ink-soft); font-size: var(--pilot-font-xs); font-weight: 600; }
+.check-detail { color: var(--pilot-muted); font-size: var(--pilot-font-xs); }
+.check-ack { display: flex; align-items: flex-start; gap: var(--pilot-space-2); margin-top: var(--pilot-space-2); color: var(--pilot-ink-soft); font-size: var(--pilot-font-xs); line-height: 1.5; }
+.check-ack input { margin-top: 2px; accent-color: var(--pilot-accent); }
+.publish-error { margin: var(--pilot-space-2) 0 0; }
+.publish-result { margin-top: var(--pilot-space-2); padding: var(--pilot-space-3); border: 1px solid var(--pilot-line); border-radius: var(--pilot-radius-control); background: var(--pilot-accent-soft); color: var(--pilot-ink-soft); font-size: var(--pilot-font-xs); line-height: 1.6; }
+.publish-actions { display: flex; gap: var(--pilot-space-2); margin-top: var(--pilot-space-2); }
+.publish-btn { width: 100%; margin-top: var(--pilot-space-2); }
+
+@media (max-width: 1180px) {
+  .encounter-layout { grid-template-columns: 1fr; }
+  .risk-rail { position: static; }
+  .doc-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 720px) {
+  .metric-row { grid-template-columns: minmax(0, 1fr) 112px 56px; }
+  .banner-risk { width: 100%; justify-content: flex-start; }
+}
+</style>

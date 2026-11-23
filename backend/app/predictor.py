@@ -23,7 +23,7 @@ def risk_band(prob: float) -> str:
 def _feature_timing(name: str) -> str:
     if name.startswith("ICU"):
         return "icu"
-    if name.startswith("术中"):
+    if name.startswith("术中") or name == "手术时间":
         return "intraop"
     if name.startswith("术后"):
         return "postop"

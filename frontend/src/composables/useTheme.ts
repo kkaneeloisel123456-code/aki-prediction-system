@@ -16,6 +16,7 @@ const theme = ref<Theme>(getInitial())
 
 function apply(value: Theme) {
   document.documentElement.setAttribute('data-theme', value)
+  document.documentElement.classList.toggle('dark', value === 'dark')
 }
 apply(theme.value)
 
