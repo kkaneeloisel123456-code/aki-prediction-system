@@ -3,8 +3,11 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { api } from '../api/client'
 import { useAuth } from '../composables/useAuth'
 
+type Tab = 'overview' | 'users' | 'patients' | 'audit'
+type Tone = 'neutral' | 'low' | 'mid' | 'high' | 'accent'
+
 const auth = useAuth()
-const tab = ref<'overview' | 'users' | 'patients' | 'audit'>('overview')
+const tab = ref<Tab>('overview')
 const loading = ref(true)
 const error = ref('')
 const notice = ref('')
@@ -13,7 +16,9 @@ const users = ref<any[]>([])
 const accounts = ref<any[]>([])
 const events = ref<any[]>([])
 const auditAction = ref('')
+const auditBusy = ref(false)
 const backupBusy = ref(false)
+
 const showUser = ref(false)
 const editingUser = ref<any>(null)
 const formError = ref('')
@@ -23,18 +28,50 @@ const userForm = reactive({
   active: true,
 })
 const accountForm = reactive({ id: '', active: true, password: '' })
+const accountError = ref('')
+const accountBusy = ref(false)
 
 const isAdmin = computed(() => auth.user.value?.role === 'admin')
+const pageDescription = computed(() => loading.value
+  ? '正在读取员工账号、患者账号与审计数据…'
+  : (!isAdmin.value
+      ? '仅管理员可访问本页'
+      : `员工账号、患者账号、审计追踪与数据库备份 · ${users.value.length} 个员工 · ${events.value.length} 条审计`))
+const userDialogTitle = computed(() => editingUser.value ? '编辑员工账号' : '新建员工账号')
+const selectedAccount = computed(() => accounts.value.find((a) => a.id === accountForm.id) || null)
+
+const tabItems = computed(() => [
+  { value: 'overview', label: '系统概览' },
+  { value: 'users', label: '员工账号', count: users.value.length },
+  { value: 'patients', label: '患者账号', count: accounts.value.length },
+  { value: 'audit', label: '审计日志', count: events.value.length },
+])
 
 function fmt(value: any) {
   if (!value) return '—'
   if (typeof value === 'number') return new Date(value * 1000).toLocaleString('zh-CN')
-  return new Date(value).toLocaleString('zh-CN')
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString('zh-CN')
 }
 function bytes(n?: number) {
   if (!n) return '—'
   if (n > 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
   return `${(n / 1024).toFixed(0)} KB`
+}
+function auditDetail(detail: any) {
+  if (!detail || typeof detail !== 'object') return String(detail ?? '—')
+  const entries = Object.entries(detail)
+  if (!entries.length) return '—'
+  return entries.map(([key, value]) => `${key}: ${typeof value === 'object' ? JSON.stringify(value) : String(value)}`).join(' · ')
+}
+function userRoleLabel(role?: string) {
+  return role === 'admin' ? '管理员' : '医生'
+}
+function accountStatusLabel(active: boolean) {
+  return active ? '启用' : '停用'
+}
+function accountStatusTone(active: boolean): Tone {
+  return active ? 'low' : 'high'
 }
 
 async function load() {
@@ -55,10 +92,15 @@ async function load() {
   }
 }
 async function loadAudit() {
+  auditBusy.value = true
   try {
     const res = await api.audit(auditAction.value ? `action=${encodeURIComponent(auditAction.value)}` : '')
     events.value = res.events ?? []
-  } catch (e: any) { error.value = e?.message ?? '审计日志加载失败' }
+  } catch (e: any) {
+    error.value = e?.message ?? '审计日志加载失败'
+  } finally {
+    auditBusy.value = false
+  }
 }
 async function runBackup() {
   backupBusy.value = true
@@ -67,13 +109,19 @@ async function runBackup() {
     const res = await api.backup()
     notice.value = `数据库备份完成：${res.filename}（${bytes(res.bytes)}）`
     system.value = await api.system()
-  } catch (e: any) { error.value = e?.message ?? '备份失败' }
-  finally { backupBusy.value = false }
+  } catch (e: any) {
+    error.value = e?.message ?? '备份失败'
+  } finally {
+    backupBusy.value = false
+  }
 }
 
 function openCreateUser() {
   editingUser.value = null
-  Object.assign(userForm, { username: '', display_name: '', role: 'doctor', password: '', must_change_password: true, active: true })
+  Object.assign(userForm, {
+    username: '', display_name: '', role: 'doctor', password: '',
+    must_change_password: true, active: true,
+  })
   formError.value = ''
   showUser.value = true
 }
@@ -92,202 +140,452 @@ async function saveUser() {
   try {
     if (editingUser.value) {
       const payload: any = {
-        display_name: userForm.display_name, role: userForm.role,
-        active: Boolean(userForm.active), must_change_password: Boolean(userForm.must_change_password),
+        display_name: userForm.display_name.trim(),
+        role: userForm.role,
+        active: Boolean(userForm.active),
+        must_change_password: Boolean(userForm.must_change_password),
       }
       if (userForm.password) payload.password = userForm.password
+      if (!payload.display_name) {
+        formError.value = '显示姓名不能为空'
+        saving.value = false
+        return
+      }
       await api.updateUser(editingUser.value.id, payload)
     } else {
-      if (!userForm.username || !userForm.display_name || userForm.password.length < 12) {
+      if (!userForm.username.trim() || !userForm.display_name.trim() || userForm.password.length < 12) {
         formError.value = '账号、姓名必填，初始密码至少 12 个字符'
         saving.value = false
         return
       }
       await api.createUser({
-        username: userForm.username, display_name: userForm.display_name,
-        role: userForm.role, password: userForm.password,
+        username: userForm.username.trim(),
+        display_name: userForm.display_name.trim(),
+        role: userForm.role,
+        password: userForm.password,
         must_change_password: Boolean(userForm.must_change_password),
       })
     }
     showUser.value = false
     notice.value = editingUser.value ? '账号已更新' : '账号已创建'
     await load()
-  } catch (e: any) { formError.value = e?.message ?? '保存失败' }
-  finally { saving.value = false }
+  } catch (e: any) {
+    formError.value = e?.message ?? '保存失败'
+  } finally {
+    saving.value = false
+  }
 }
 
 function openAccount(a: any) {
   Object.assign(accountForm, { id: a.id, active: Boolean(a.active), password: '' })
-  formError.value = ''
+  accountError.value = ''
+}
+function clearAccount() {
+  accountForm.id = ''
+  accountForm.password = ''
+  accountError.value = ''
 }
 async function saveAccount() {
   if (!accountForm.id) return
-  formError.value = ''
+  accountError.value = ''
+  if (accountForm.password && accountForm.password.length < 12) {
+    accountError.value = '重置密码至少 12 个字符'
+    return
+  }
+  accountBusy.value = true
   try {
     const payload: any = { active: Boolean(accountForm.active) }
     if (accountForm.password) payload.password = accountForm.password
     await api.updatePatientAccount(accountForm.id, payload)
-    accountForm.id = ''
-    accountForm.password = ''
     notice.value = '患者账号已更新'
+    clearAccount()
     await load()
-  } catch (e: any) { formError.value = e?.message ?? '更新失败' }
+  } catch (e: any) {
+    accountError.value = e?.message ?? '更新失败'
+  } finally {
+    accountBusy.value = false
+  }
 }
-onMounted(() => { if (!isAdmin.value) { error.value = '仅管理员可访问本页'; loading.value = false } else load() })
+
+onMounted(() => {
+  if (!isAdmin.value) {
+    error.value = '仅管理员可访问本页'
+    loading.value = false
+    return
+  }
+  load()
+})
 </script>
 
 <template>
-  <div>
-    <div class="page-head">
-      <div>
-        <h1 class="page-title">账号与审计</h1>
-        <div class="page-subtitle">员工账号、患者账号、持久化审计日志与数据库备份</div>
+  <div class="pilot-page">
+    <div class="pilot-page-inner admin-page">
+      <PageHeader
+        kicker="系统 / 管理"
+        title="账号与审计"
+        :description="pageDescription"
+      >
+        <template #actions>
+          <button v-if="isAdmin" class="pilot-btn" type="button" :disabled="loading" @click="load">刷新</button>
+        </template>
+      </PageHeader>
+
+      <div v-if="error" class="pilot-error" role="alert">{{ error }}</div>
+      <div v-if="notice" class="pilot-notice" role="status">{{ notice }}</div>
+
+      <PilotTabs v-if="isAdmin" v-model="tab" label="账号与审计分区" :tabs="tabItems" />
+
+      <div v-if="loading" class="admin-loading">
+        <div class="pilot-skeleton admin-loading-line" />
+        <div class="pilot-skeleton admin-loading-line" />
+        <div class="pilot-skeleton admin-loading-line is-short" />
       </div>
-      <div class="page-actions"><button class="btn btn-secondary" :disabled="loading" @click="load">刷新</button></div>
-    </div>
-    <div v-if="error" class="error">{{ error }}</div>
-    <div v-if="notice" class="info-box">{{ notice }}</div>
 
-    <div class="tabs">
-      <button class="tab" :class="{active: tab === 'overview'}" @click="tab = 'overview'">系统概览</button>
-      <button class="tab" :class="{active: tab === 'users'}" @click="tab = 'users'">员工账号</button>
-      <button class="tab" :class="{active: tab === 'patients'}" @click="tab = 'patients'">患者账号</button>
-      <button class="tab" :class="{active: tab === 'audit'}" @click="tab = 'audit'">审计日志</button>
-    </div>
-
-    <div v-if="loading" class="card"><div class="empty-state">正在加载管理数据…</div></div>
-
-    <template v-else-if="system">
-      <div v-if="tab === 'overview'">
-        <div class="summary-strip">
-          <div class="summary-item"><div class="label">员工账号</div><div class="value">{{ system.counts.users }}</div><div class="hint">管理员与医生</div></div>
-          <div class="summary-item"><div class="label">患者档案</div><div class="value">{{ system.counts.patients }}</div><div class="hint">累计 {{ system.counts.encounters }} 次就诊</div></div>
-          <div class="summary-item"><div class="label">正式报告</div><div class="value">{{ system.counts.reports }}</div><div class="hint">审计事件 {{ system.counts.audit_events }}</div></div>
-          <div class="summary-item"><div class="label">数据库</div><div class="value" style="font-size:16px">{{ bytes(system.database.bytes) }}</div><div class="hint">{{ system.database.filename }}</div></div>
-        </div>
-        <div class="grid-2">
-          <div class="card">
-            <div class="card-header"><span class="card-title">生产环境信息</span></div>
-            <div class="card-body">
-              <div class="info-grid" style="grid-template-columns:1fr 1fr">
-                <div class="info-item"><div class="k">模型版本</div><div class="v font-mono">{{ system.model_version }}</div></div>
-                <div class="info-item"><div class="k">数据库文件</div><div class="v font-mono">{{ system.database.filename }}</div></div>
-                <div class="info-item"><div class="k">备份数量</div><div class="v">{{ system.backup_count }}</div></div>
-                <div class="info-item"><div class="k">预约 / 评价</div><div class="v">{{ system.counts.appointments }} / {{ system.counts.feedback }}</div></div>
-              </div>
-              <div class="info-box mt-12">数据库采用 WAL 模式，备份由 SQLite Backup API 生成，并写入 SHA-256 校验文件。</div>
-              <button class="btn btn-primary" :disabled="backupBusy" @click="runBackup">{{ backupBusy ? '备份中…' : '立即创建数据库备份' }}</button>
+      <template v-else-if="system">
+        <div v-if="tab === 'overview'" class="pilot-stack">
+          <div class="admin-metrics">
+            <div class="admin-metric">
+              <span>员工账号</span>
+              <strong>{{ system.counts.users }}</strong>
+              <small>管理员与医生 · {{ users.length }} 个当前可见</small>
+            </div>
+            <div class="admin-metric">
+              <span>患者档案</span>
+              <strong>{{ system.counts.patients }}</strong>
+              <small>累计 {{ system.counts.encounters }} 次就诊</small>
+            </div>
+            <div class="admin-metric">
+              <span>正式报告</span>
+              <strong>{{ system.counts.reports }}</strong>
+              <small>已发布或已撤销文书</small>
+            </div>
+            <div class="admin-metric">
+              <span>数据库</span>
+              <strong>{{ bytes(system.database.bytes) }}</strong>
+              <small class="pilot-mono">{{ system.database.filename }}</small>
             </div>
           </div>
-          <div class="card">
-            <div class="card-header"><span class="card-title">最近备份</span></div>
-            <div class="card-body">
-              <div v-if="!system.backups?.length" class="muted">还没有手动备份。</div>
-              <div v-for="b in system.backups" :key="b.name" style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px dashed var(--border)">
-                <div><div class="font-mono" style="font-size:10px;color:var(--text)">{{ b.name }}</div><div class="sub-cell">{{ fmt(b.created_at) }}</div></div>
-                <span style="font-size:10px;color:var(--text-dim)">{{ bytes(b.bytes) }}</span>
+
+          <div class="admin-overview-grid">
+            <SectionPanel title="运行环境" subtitle="数据库、模型与预约业务摘要">
+              <div class="admin-facts">
+                <div><span>模型版本</span><strong class="pilot-mono">{{ system.model_version }}</strong></div>
+                <div><span>数据库文件</span><strong class="pilot-mono">{{ system.database.filename }}</strong></div>
+                <div><span>备份数量</span><strong>{{ system.backup_count }}</strong></div>
+                <div><span>预约 / 评价</span><strong>{{ system.counts.appointments }} / {{ system.counts.feedback }}</strong></div>
               </div>
-            </div>
+              <div class="admin-note">数据库采用 WAL 模式，备份由 SQLite Backup API 生成，并写入 SHA-256 校验文件。</div>
+              <button class="pilot-btn pilot-btn-primary" type="button" :disabled="backupBusy" @click="runBackup">
+                {{ backupBusy ? '备份中…' : '立即创建数据库备份' }}
+              </button>
+            </SectionPanel>
+
+            <SectionPanel title="最近备份" :subtitle="system.backup_count ? `共 ${system.backup_count} 个备份` : '尚未创建手动备份'" flush>
+              <div v-if="!system.backups?.length" class="admin-backup-empty">
+                <EmptyState title="还没有手动备份" description="点击“立即创建数据库备份”生成第一份快照；备份文件名包含时间与校验信息。" />
+              </div>
+              <div v-else class="admin-backup-list">
+                <div v-for="b in system.backups" :key="b.name" class="admin-backup-row">
+                  <div class="admin-backup-main">
+                    <span class="pilot-mono">{{ b.name }}</span>
+                    <small>{{ fmt(b.created_at) }}</small>
+                  </div>
+                  <span class="pilot-small">{{ bytes(b.bytes) }}</span>
+                </div>
+              </div>
+            </SectionPanel>
           </div>
         </div>
-      </div>
 
-      <div v-if="tab === 'users'" class="card">
-        <div class="toolbar">
-          <span class="card-title">员工账号</span><span class="toolbar-spacer" />
-          <button class="btn btn-primary" @click="openCreateUser">＋ 新建员工账号</button>
-        </div>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead><tr><th>账号</th><th>姓名</th><th>角色</th><th>状态</th><th>首登改密</th><th>最近登录</th><th></th></tr></thead>
-            <tbody>
-              <tr v-for="u in users" :key="u.id">
-                <td class="primary-cell font-mono">{{ u.username }}</td>
-                <td>{{ u.display_name }}</td>
-                <td>{{ u.role === 'admin' ? '管理员' : '医生' }}</td>
-                <td><span class="status" :class="u.active ? 'status-active' : 'status-inactive'">{{ u.active ? '启用' : '停用' }}</span></td>
-                <td>{{ u.must_change_password ? '是' : '否' }}</td>
-                <td>{{ fmt(u.last_login_at) }}</td>
-                <td class="text-right"><button class="btn btn-sm btn-secondary" @click="openEditUser(u)">编辑</button></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div v-if="tab === 'patients'" class="grid-2-1">
-        <div class="card">
-          <div class="card-header"><span class="card-title">患者端账号</span></div>
-          <div v-if="!accounts.length" class="empty-state"><strong>暂无患者账号</strong>患者可在患者服务页面自行注册并绑定档案。</div>
-          <div v-else class="table-wrap">
-            <table class="data-table">
-              <thead><tr><th>账号</th><th>姓名</th><th>绑定档案</th><th>状态</th><th></th></tr></thead>
+        <SectionPanel
+          v-else-if="tab === 'users'"
+          title="员工账号"
+          :subtitle="`${users.length} 个账号 · 管理员与医生共用登录入口`"
+          flush
+        >
+          <template #actions>
+            <button class="pilot-btn pilot-btn-primary" type="button" @click="openCreateUser">＋ 新建员工</button>
+          </template>
+          <div v-if="!users.length" class="admin-empty">
+            <EmptyState title="还没有员工账号" description="先创建管理员或医生账号，账号才能登录临床业务。" />
+          </div>
+          <div v-else class="admin-table-scroll" role="region" aria-label="员工账号表格，窄屏可横向滚动" tabindex="0">
+            <div class="admin-mobile-hint">左右滑动查看完整表格</div>
+            <table class="pilot-table admin-users-table">
+              <thead>
+                <tr>
+                  <th scope="col">账号</th>
+                  <th scope="col">姓名</th>
+                  <th scope="col">角色</th>
+                  <th scope="col">状态</th>
+                  <th scope="col">首登改密</th>
+                  <th scope="col">最近登录</th>
+                  <th scope="col" class="cell-actions">操作</th>
+                </tr>
+              </thead>
               <tbody>
-                <tr v-for="a in accounts" :key="a.id">
-                  <td class="primary-cell font-mono">{{ a.username }}</td>
-                  <td>{{ a.display_name }}</td>
-                  <td>{{ a.patient_name || '未绑定' }}<div v-if="a.mrn" class="sub-cell font-mono">{{ a.mrn }}</div></td>
-                  <td><span class="status" :class="a.active ? 'status-active' : 'status-inactive'">{{ a.active ? '启用' : '停用' }}</span></td>
-                  <td class="text-right"><button class="btn btn-sm btn-secondary" @click="openAccount(a)">管理</button></td>
+                <tr v-for="u in users" :key="u.id">
+                  <td class="pilot-mono cell-strong">{{ u.username }}</td>
+                  <td>{{ u.display_name }}</td>
+                  <td>{{ userRoleLabel(u.role) }}</td>
+                  <td><StatusPill :label="u.active ? '启用' : '停用'" :tone="u.active ? 'low' : 'high'" /></td>
+                  <td>{{ u.must_change_password ? '是' : '否' }}</td>
+                  <td class="admin-date">{{ fmt(u.last_login_at) }}</td>
+                  <td class="cell-actions"><button class="pilot-btn pilot-btn-sm" type="button" @click="openEditUser(u)">编辑</button></td>
                 </tr>
               </tbody>
             </table>
           </div>
-        </div>
-        <div class="card">
-          <div class="card-header"><span class="card-title">账号操作</span></div>
-          <div class="card-body">
-            <div v-if="!accountForm.id" class="muted">从左侧选择一个患者账号后可启用、停用或重置密码。</div>
-            <template v-else>
-              <div class="form-group mb-12"><label>账号状态</label><select v-model="accountForm.active" class="form-control"><option :value="true">启用</option><option :value="false">停用</option></select></div>
-              <div class="form-group mb-12"><label>重置密码（留空则不修改）</label><input v-model="accountForm.password" class="form-control" type="password" placeholder="至少 12 个字符" /></div>
-              <button class="btn btn-primary" @click="saveAccount">保存账号设置</button>
-            </template>
-            <div v-if="formError" class="error mt-12">{{ formError }}</div>
-          </div>
-        </div>
-      </div>
+        </SectionPanel>
 
-      <div v-if="tab === 'audit'" class="card">
-        <div class="toolbar">
-          <input v-model="auditAction" class="form-control" placeholder="按操作类型筛选，如 report_publish…" />
-          <button class="btn btn-secondary" @click="loadAudit">查询</button>
-          <span class="toolbar-spacer" /><span class="muted" style="font-size:10px">最近 {{ events.length }} 条</span>
-        </div>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead><tr><th>时间</th><th>操作人</th><th>动作</th><th>对象</th><th>IP</th><th>详情</th></tr></thead>
-            <tbody>
-              <tr v-for="e in events" :key="e.id">
-                <td>{{ fmt(e.created_at) }}</td>
-                <td>{{ e.actor_name || e.actor_type }}</td>
-                <td class="font-mono">{{ e.action }}</td>
-                <td>{{ e.entity_type }}<div class="sub-cell font-mono">{{ e.entity_id }}</div></td>
-                <td class="font-mono">{{ e.ip || '—' }}</td>
-                <td class="wrap"><span class="font-mono" style="font-size:9px">{{ JSON.stringify(e.detail) }}</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </template>
+        <div v-else-if="tab === 'patients'" class="pilot-split admin-accounts-split">
+          <SectionPanel title="患者端账号" :subtitle="`${accounts.length} 个账号 · 绑定档案后才能查看报告`" flush>
+            <div v-if="!accounts.length" class="admin-empty">
+              <EmptyState title="暂无患者账号" description="患者可在患者服务页面自行注册并绑定档案；管理员也可在这里查看绑定状态。" />
+            </div>
+            <div v-else class="admin-table-scroll" role="region" aria-label="患者账号表格，窄屏可横向滚动" tabindex="0">
+              <div class="admin-mobile-hint">左右滑动查看完整表格</div>
+              <table class="pilot-table admin-accounts-table">
+                <thead>
+                  <tr><th scope="col">账号</th><th scope="col">姓名</th><th scope="col">绑定档案</th><th scope="col">状态</th><th scope="col" class="cell-actions">操作</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="a in accounts" :key="a.id" :class="{ 'is-selected': accountForm.id === a.id }">
+                    <td class="pilot-mono cell-strong">{{ a.username }}</td>
+                    <td>{{ a.display_name }}</td>
+                    <td>{{ a.patient_name || '未绑定' }}<div v-if="a.mrn" class="admin-sub pilot-mono">{{ a.mrn }}</div></td>
+                    <td><StatusPill :label="accountStatusLabel(a.active)" :tone="accountStatusTone(a.active)" /></td>
+                    <td class="cell-actions"><button class="pilot-btn pilot-btn-sm" type="button" @click="openAccount(a)">管理</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </SectionPanel>
 
-    <div v-if="showUser" class="modal-mask" @click.self="showUser = false">
-      <div class="modal-panel" style="max-width:560px">
-        <div class="modal-head"><div><div class="modal-title">{{ editingUser ? '编辑员工账号' : '新建员工账号' }}</div><div class="modal-sub">新账号默认要求首次登录修改密码。</div></div><button class="modal-close" @click="showUser = false">×</button></div>
-        <div class="modal-body">
-          <div class="form-grid-2">
-            <div class="form-group"><label>登录账号</label><input v-model="userForm.username" class="form-control" :disabled="Boolean(editingUser)" /></div>
-            <div class="form-group"><label>显示姓名</label><input v-model="userForm.display_name" class="form-control" /></div>
-            <div class="form-group"><label>角色</label><select v-model="userForm.role" class="form-control"><option value="doctor">医生</option><option value="admin">管理员</option></select></div>
-            <div class="form-group"><label>状态</label><select v-model="userForm.active" class="form-control"><option :value="true">启用</option><option :value="false">停用</option></select></div>
-            <div class="form-group full"><label>{{ editingUser ? '重置密码（留空不修改）' : '初始密码 *' }}</label><input v-model="userForm.password" class="form-control" type="password" /></div>
-            <label class="form-group full" style="flex-direction:row;align-items:center;gap:8px"><input v-model="userForm.must_change_password" type="checkbox" /> 首次登录必须修改密码</label>
-          </div>
-          <div v-if="formError" class="error mt-12">{{ formError }}</div>
+          <SectionPanel title="账号设置" subtitle="启用、停用或重置患者登录密码">
+            <div v-if="!selectedAccount" class="admin-account-placeholder">
+              <EmptyState title="选择一个患者账号" description="从左侧点击“管理”，可以查看绑定档案并更新账号状态。" />
+            </div>
+            <div v-else class="admin-account-form">
+              <div class="admin-account-summary">
+                <span class="pilot-section-label">当前账号</span>
+                <strong>{{ selectedAccount.display_name }}</strong>
+                <span class="pilot-mono">{{ selectedAccount.username }}</span>
+                <span class="pilot-small">{{ selectedAccount.patient_name || '未绑定档案' }}<template v-if="selectedAccount.mrn"> · {{ selectedAccount.mrn }}</template></span>
+              </div>
+              <div class="pilot-field">
+                <label for="account-active">账号状态</label>
+                <select id="account-active" v-model="accountForm.active" class="pilot-select">
+                  <option :value="true">启用</option>
+                  <option :value="false">停用</option>
+                </select>
+              </div>
+              <div class="pilot-field">
+                <label for="account-password">重置密码（留空则不修改）</label>
+                <input id="account-password" v-model="accountForm.password" class="pilot-input" type="password" placeholder="至少 12 个字符" autocomplete="new-password" />
+                <p class="pilot-field-hint">重置后该患者已有的登录会话会失效。</p>
+              </div>
+              <div class="admin-account-actions">
+                <button class="pilot-btn" type="button" @click="clearAccount">取消选择</button>
+                <button class="pilot-btn pilot-btn-primary" type="button" :disabled="accountBusy" @click="saveAccount">
+                  {{ accountBusy ? '保存中…' : '保存账号设置' }}
+                </button>
+              </div>
+              <div v-if="accountError" class="pilot-error admin-account-error" role="alert">{{ accountError }}</div>
+            </div>
+          </SectionPanel>
         </div>
-        <div class="modal-foot"><button class="btn btn-secondary" @click="showUser = false">取消</button><button class="btn btn-primary" :disabled="saving" @click="saveUser">保存</button></div>
-      </div>
+
+        <SectionPanel
+          v-else-if="tab === 'audit'"
+          title="审计日志"
+          :subtitle="`${events.length} 条记录 · 只读，不可在页面删除`"
+          flush
+        >
+          <div class="admin-audit-toolbar">
+            <label class="admin-audit-filter">
+              <span>操作类型</span>
+              <input v-model="auditAction" class="pilot-input" type="search" placeholder="如 report_publish、appointment_status…" @keydown.enter.prevent="loadAudit" />
+            </label>
+            <button class="pilot-btn" type="button" :disabled="auditBusy" @click="loadAudit">{{ auditBusy ? '查询中…' : '查询' }}</button>
+            <button v-if="auditAction" class="pilot-btn pilot-btn-ghost" type="button" @click="auditAction = ''; loadAudit()">清除</button>
+          </div>
+          <div v-if="!events.length" class="admin-empty">
+            <EmptyState title="没有审计记录" description="发布、撤销、账号变更和备份操作都会在这里留下记录。" />
+          </div>
+          <div v-else class="admin-table-scroll" role="region" aria-label="审计日志表格，窄屏可横向滚动" tabindex="0">
+            <div class="admin-mobile-hint">左右滑动查看完整表格</div>
+            <table class="pilot-table admin-audit-table">
+              <thead>
+                <tr>
+                  <th scope="col">时间</th>
+                  <th scope="col">操作人</th>
+                  <th scope="col">动作</th>
+                  <th scope="col">对象</th>
+                  <th scope="col">IP</th>
+                  <th scope="col">详情</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="e in events" :key="e.id">
+                  <td class="admin-date">{{ fmt(e.created_at) }}</td>
+                  <td>{{ e.actor_name || e.actor_type }}</td>
+                  <td class="pilot-mono">{{ e.action }}</td>
+                  <td>{{ e.entity_type }}<div class="admin-sub pilot-mono">{{ e.entity_id || '—' }}</div></td>
+                  <td class="pilot-mono">{{ e.ip || '—' }}</td>
+                  <td class="admin-audit-detail" :title="JSON.stringify(e.detail)">{{ auditDetail(e.detail) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </SectionPanel>
+      </template>
+
+      <ElDialog
+        v-model="showUser"
+        :title="userDialogTitle"
+        width="620px"
+        class="pilot-dialog"
+        :close-on-click-modal="false"
+        append-to-body
+      >
+        <p class="admin-dialog-sub">新账号默认要求首次登录修改密码；停用账号无法继续登录。</p>
+        <div class="admin-user-form">
+          <div class="pilot-field">
+            <label for="user-username">登录账号 <span class="admin-required">*</span></label>
+            <input id="user-username" v-model="userForm.username" class="pilot-input" autocomplete="off" :disabled="Boolean(editingUser)" />
+          </div>
+          <div class="pilot-field">
+            <label for="user-display-name">显示姓名 <span class="admin-required">*</span></label>
+            <input id="user-display-name" v-model="userForm.display_name" class="pilot-input" autocomplete="off" />
+          </div>
+          <div class="pilot-field">
+            <label for="user-role">角色</label>
+            <select id="user-role" v-model="userForm.role" class="pilot-select">
+              <option value="doctor">医生</option>
+              <option value="admin">管理员</option>
+            </select>
+          </div>
+          <div class="pilot-field">
+            <label for="user-active">账号状态</label>
+            <select id="user-active" v-model="userForm.active" class="pilot-select">
+              <option :value="true">启用</option>
+              <option :value="false">停用</option>
+            </select>
+          </div>
+          <div class="pilot-field admin-field-full">
+            <label for="user-password">{{ editingUser ? '重置密码（留空不修改）' : '初始密码 *' }}</label>
+            <input id="user-password" v-model="userForm.password" class="pilot-input" type="password" autocomplete="new-password" :placeholder="editingUser ? '留空保持现有密码' : '至少 12 个字符'" />
+          </div>
+          <label class="admin-check-field admin-field-full" for="user-first-login">
+            <input id="user-first-login" v-model="userForm.must_change_password" type="checkbox" />
+            <span>首次登录必须修改密码</span>
+          </label>
+        </div>
+        <div v-if="formError" class="pilot-error admin-dialog-error" role="alert">{{ formError }}</div>
+        <template #footer>
+          <div class="admin-dialog-actions">
+            <button class="pilot-btn" type="button" @click="showUser = false">取消</button>
+            <button class="pilot-btn pilot-btn-primary" type="button" :disabled="saving" @click="saveUser">
+              {{ saving ? '保存中…' : '保存' }}
+            </button>
+          </div>
+        </template>
+      </ElDialog>
     </div>
   </div>
 </template>
+
+<style scoped>
+.admin-page { max-width: 1440px; }
+.admin-loading { display: grid; gap: var(--pilot-space-3); padding: var(--pilot-space-5) 0; }
+.admin-loading-line { height: 28px; }
+.admin-loading-line.is-short { width: 40%; }
+.admin-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--pilot-space-3); }
+.admin-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--pilot-space-4) var(--pilot-space-4) var(--pilot-space-3);
+  border: 1px solid var(--pilot-line);
+  border-radius: var(--pilot-radius-card);
+  background: var(--pilot-surface);
+  box-shadow: var(--pilot-shadow);
+}
+.admin-metric > span { color: var(--pilot-muted); font-size: var(--pilot-font-xs); font-weight: 600; }
+.admin-metric > strong { color: var(--pilot-ink); font-size: var(--pilot-font-xl); font-weight: 700; line-height: 1.2; }
+.admin-metric > small { overflow: hidden; color: var(--pilot-muted); font-size: 11px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
+.admin-overview-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: var(--pilot-space-4); align-items: stretch; }
+.admin-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--pilot-space-3) var(--pilot-space-5); }
+.admin-facts > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.admin-facts span { color: var(--pilot-muted); font-size: var(--pilot-font-xs); }
+.admin-facts strong { overflow-wrap: anywhere; color: var(--pilot-ink); font-size: var(--pilot-font-sm); }
+.admin-note { margin: var(--pilot-space-4) 0; color: var(--pilot-muted); font-size: var(--pilot-font-xs); line-height: 1.65; }
+.admin-backup-list { display: grid; }
+.admin-backup-row { display: flex; align-items: center; justify-content: space-between; gap: var(--pilot-space-3); padding: var(--pilot-space-3) var(--pilot-space-4); border-bottom: 1px solid var(--pilot-line); }
+.admin-backup-row:last-child { border-bottom: 0; }
+.admin-backup-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.admin-backup-main > span { overflow-wrap: anywhere; color: var(--pilot-ink-soft); font-size: var(--pilot-font-xs); }
+.admin-backup-main > small { color: var(--pilot-muted); font-size: 11px; }
+.admin-backup-empty { padding: var(--pilot-space-2) 0; }
+.admin-table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.admin-mobile-hint { display: none; }
+.admin-users-table { min-width: 900px; }
+.admin-accounts-table { min-width: 540px; }
+.admin-audit-table { min-width: 1000px; }
+.admin-empty { padding: var(--pilot-space-4) 0; }
+.admin-date { color: var(--pilot-ink-soft); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.admin-sub { margin-top: 2px; color: var(--pilot-muted); font-size: 11px; }
+.admin-audit-toolbar { display: flex; align-items: flex-end; gap: var(--pilot-space-2); flex-wrap: wrap; padding: var(--pilot-space-4); border-bottom: 1px solid var(--pilot-line); }
+.admin-audit-filter { display: flex; flex-direction: column; gap: var(--pilot-space-1); width: min(360px, 100%); }
+.admin-audit-filter > span { color: var(--pilot-muted); font-size: var(--pilot-font-xs); font-weight: 600; }
+.admin-audit-detail { max-width: 320px; overflow-wrap: anywhere; color: var(--pilot-muted); font-size: 11px; line-height: 1.55; }
+.admin-accounts-split { align-items: stretch; }
+.admin-accounts-split .pilot-panel { min-width: 0; }
+tr.is-selected td { background: var(--pilot-accent-soft); }
+tr.is-selected td:first-child { box-shadow: inset 3px 0 0 var(--pilot-accent); }
+.admin-account-placeholder { padding: var(--pilot-space-2) 0; }
+.admin-account-form { display: grid; gap: var(--pilot-space-4); }
+.admin-account-summary { display: flex; flex-direction: column; gap: 2px; padding: var(--pilot-space-3); border: 1px solid var(--pilot-line); background: var(--pilot-surface-2); border-radius: var(--pilot-radius-control); }
+.admin-account-summary strong { color: var(--pilot-ink); font-size: var(--pilot-font-md); }
+.admin-account-summary .pilot-small { overflow-wrap: anywhere; }
+.admin-account-actions { display: flex; justify-content: flex-end; gap: var(--pilot-space-2); flex-wrap: wrap; padding-top: var(--pilot-space-2); }
+.admin-account-error { margin: 0; }
+.admin-dialog-sub { margin: 0 0 var(--pilot-space-4); color: var(--pilot-muted); font-size: var(--pilot-font-sm); line-height: 1.6; }
+.admin-user-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--pilot-space-4); }
+.admin-field-full { grid-column: 1 / -1; }
+.admin-required { color: var(--pilot-high); }
+.admin-check-field { display: flex; align-items: center; gap: var(--pilot-space-2); color: var(--pilot-ink-soft); font-size: var(--pilot-font-sm); }
+.admin-check-field input { accent-color: var(--pilot-accent); }
+.admin-dialog-error { margin: var(--pilot-space-4) 0 0; }
+.admin-dialog-actions { display: flex; justify-content: flex-end; gap: var(--pilot-space-2); }
+
+@media (max-width: 1024px) {
+  .admin-overview-grid,
+  .admin-accounts-split { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 800px) {
+  .admin-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-facts { grid-template-columns: minmax(0, 1fr); }
+  .admin-user-form { grid-template-columns: minmax(0, 1fr); }
+  .admin-field-full { grid-column: auto; }
+}
+@media (max-width: 650px) {
+  .admin-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-metric > small { overflow: visible; text-overflow: clip; white-space: normal; }
+  .admin-audit-toolbar { align-items: stretch; flex-direction: column; }
+  .admin-audit-filter { width: 100%; }
+  .admin-mobile-hint {
+    display: block;
+    position: sticky;
+    left: 0;
+    width: 100%;
+    padding: var(--pilot-space-2) var(--pilot-space-4);
+    border-bottom: 1px dashed var(--pilot-line);
+    background: var(--pilot-surface);
+    color: var(--pilot-muted);
+    font-size: var(--pilot-font-xs);
+  }
+}
+</style>
