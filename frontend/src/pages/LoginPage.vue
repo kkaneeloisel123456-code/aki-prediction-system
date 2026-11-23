@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useTheme } from '../composables/useTheme'
 import { useAuth } from '../composables/useAuth'
+import { useTheme } from '../composables/useTheme'
+import ThemeSwitch from '../components/ThemeSwitch.vue'
 import darkVisual from '../assets/login-visual-dark.webp'
 import lightVisual from '../assets/login-visual-light.webp'
 
 const router = useRouter()
 const route = useRoute()
-const { theme, toggle } = useTheme()
 const auth = useAuth()
+const { theme } = useTheme()
+const visual = computed(() => theme.value === 'dark' ? darkVisual : lightVisual)
 
 const username = ref('')
 const password = ref('')
@@ -18,9 +20,6 @@ const loading = ref(false)
 const error = ref('')
 const notice = ref('')
 const accountInput = ref<HTMLInputElement | null>(null)
-
-const visual = computed(() => theme.value === 'dark' ? darkVisual : lightVisual)
-const themeLabel = computed(() => theme.value === 'dark' ? '切换浅色' : '夜间模式')
 
 onMounted(() => accountInput.value?.focus())
 
@@ -72,91 +71,94 @@ function forgotPassword() {
 </script>
 
 <template>
-  <main class="login-page" :class="theme">
-    <section
-      class="login-visual"
-      :style="{ backgroundImage: `url(${visual})` }"
-      aria-label="肾脏医学主视觉"
-    >
-      <div class="visual-copy">
-        <p class="visual-eyebrow">AKI CLINICAL INTELLIGENCE</p>
-        <h1>让每一次评估，都更有依据</h1>
-        <p class="visual-subtitle">急性肾损伤智能风险评估 · SHAP 可解释性分析</p>
+  <main class="login-page">
+    <section class="login-visual" aria-label="肾脏与围术期评估示意">
+      <div class="login-visual-image" :style="{ backgroundImage: `url(${visual})` }" />
+      <div class="login-visual-shade" />
+      <div class="login-visual-caption">
+        <span class="login-visual-kicker">围术期指标链路</span>
+        <div class="login-phases">
+          <span>术前</span><i aria-hidden="true" /><span>术中</span><i aria-hidden="true" /><span>ICU</span><i aria-hidden="true" /><span>术后</span>
+        </div>
       </div>
     </section>
 
-    <section class="login-panel">
+    <section class="login-stage" aria-labelledby="login-title">
       <div class="login-card">
-        <div class="login-card-top">
-          <div class="login-logo" aria-label="AKI">AKI</div>
-          <button class="theme-toggle" type="button" @click="toggle" :aria-label="themeLabel">
-            <svg v-if="theme === 'dark'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-              <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"/>
-            </svg>
-            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-            </svg>
-            <span>{{ themeLabel }}</span>
-          </button>
-        </div>
+        <header class="login-card-head">
+          <div class="login-brand">
+            <span class="login-logo" aria-hidden="true">AKI</span>
+            <span class="login-brand-name">围术期 AKI 风险评估</span>
+          </div>
+          <ThemeSwitch />
+        </header>
 
         <div class="login-heading">
-          <h2>欢迎登录</h2>
-          <p>使用授权账号进入临床智能评估工作台</p>
+          <p class="login-kicker">临床工作台</p>
+          <h1 id="login-title">登录</h1>
+          <p>使用授权账号进入评估、文书与复查流程。</p>
         </div>
 
-        <div v-if="auth.statusError.value" class="login-message error" role="alert">
+        <div v-if="auth.statusError.value" class="pilot-error" role="alert">
           无法连接后端服务，请确认后端已启动。
         </div>
-        <div v-else-if="!auth.configured.value" class="login-message error" role="alert">
+        <div v-else-if="!auth.configured.value" class="pilot-error" role="alert">
           尚未初始化授权账号，请先运行 scripts/init_auth.py。
         </div>
 
         <form class="login-form" @submit.prevent="submit">
-          <label class="field-label" for="login-username">账号</label>
-          <input
-            id="login-username"
-            ref="accountInput"
-            v-model="username"
-            class="login-input"
-            type="text"
-            inputmode="text"
-            autocomplete="username"
-            placeholder="请输入医生或管理员账号"
-            :disabled="loading"
-            maxlength="64"
-          >
+          <div class="login-field">
+            <label for="login-username">账号</label>
+            <input
+              id="login-username"
+              ref="accountInput"
+              v-model="username"
+              class="pilot-input"
+              type="text"
+              inputmode="text"
+              autocomplete="username"
+              placeholder="医生或管理员账号"
+              :disabled="loading"
+              maxlength="64"
+            >
+          </div>
 
-          <label class="field-label" for="login-password">密码</label>
-          <input
-            id="login-password"
-            v-model="password"
-            class="login-input"
-            type="password"
-            autocomplete="current-password"
-            placeholder="请输入密码"
-            :disabled="loading"
-            maxlength="1024"
-          >
+          <div class="login-field">
+            <label for="login-password">密码</label>
+            <input
+              id="login-password"
+              v-model="password"
+              class="pilot-input"
+              type="password"
+              autocomplete="current-password"
+              placeholder="登录密码"
+              :disabled="loading"
+              maxlength="1024"
+            >
+          </div>
 
-          <div class="form-options">
-            <label class="remember-option">
+          <div class="login-options">
+            <label class="login-remember">
               <input v-model="remember" type="checkbox" :disabled="loading">
               <span>记住登录状态</span>
             </label>
-            <button class="forgot-button" type="button" @click="forgotPassword">忘记密码？</button>
+            <button class="login-text-button" type="button" @click="forgotPassword">忘记密码</button>
           </div>
 
-          <div v-if="error" class="login-message error" role="alert">{{ error }}</div>
-          <div v-if="notice" class="login-message notice" role="status">{{ notice }}</div>
+          <div class="login-message-slot">
+            <div v-if="error" class="pilot-error login-message" role="alert">{{ error }}</div>
+            <div v-else-if="notice" class="pilot-notice login-message" role="status">{{ notice }}</div>
+          </div>
 
-          <button class="login-submit" type="submit" :disabled="loading || !auth.configured.value">
-            <span>{{ loading ? '正在登录…' : '登录系统' }}</span>
-            <span v-if="!loading" aria-hidden="true">→</span>
+          <button class="pilot-btn pilot-btn-primary login-submit" type="submit" :disabled="loading || !auth.configured.value">
+            {{ loading ? '正在登录…' : '登录' }}
           </button>
         </form>
 
-        <p class="login-footnote">仅限授权医务人员使用</p>
+        <footer class="login-foot">
+          <span>仅限授权医务人员使用</span>
+          <RouterLink to="/portal" class="pilot-link">患者查询入口</RouterLink>
+        </footer>
       </div>
     </section>
   </main>
@@ -164,202 +166,214 @@ function forgotPassword() {
 
 <style scoped>
 .login-page {
-  --login-panel: #080f1c;
-  --login-card: #101b2e;
-  --login-border: #1a2a40;
-  --login-input: #0c1422;
-  --login-heading: #eef4ff;
-  --login-copy: #7898bc;
-  --login-dim: #4a6788;
-  --login-primary: #38bdf8;
-  --login-button: #0ea5e9;
-  --login-visual-fallback: #080f1c;
-  --login-left-title: #eef4ff;
   display: grid;
-  grid-template-columns: minmax(0, 58fr) minmax(430px, 42fr);
+  grid-template-columns: minmax(0, 1.15fr) minmax(440px, .85fr);
   min-height: 100vh;
-  background: var(--login-panel);
-  color: var(--login-copy);
-}
-.login-page.light {
-  --login-panel: #f0f4f8;
-  --login-card: #ffffff;
-  --login-border: #dde5ef;
-  --login-input: #ffffff;
-  --login-heading: #0c1a2e;
-  --login-copy: #4d6a8a;
-  --login-dim: #7a9bc0;
-  --login-primary: #0284c7;
-  --login-button: #0284c7;
-  --login-visual-fallback: #eaf3f8;
-  --login-left-title: #0c1a2e;
+  background: var(--pilot-bg);
+  color: var(--pilot-ink);
 }
 .login-visual {
   position: relative;
   min-height: 100vh;
-  background-color: var(--login-visual-fallback);
+  overflow: hidden;
+  border-right: 1px solid var(--pilot-line);
+  background: var(--pilot-surface-2);
+}
+.login-visual-image {
+  position: absolute;
+  inset: 0;
   background-position: center;
   background-size: cover;
-  background-repeat: no-repeat;
-  overflow: hidden;
+  filter: saturate(.72) sepia(.18) brightness(1.03);
+  transform: scale(1.02);
 }
-.visual-copy {
+:global(html[data-theme="dark"]) .login-visual-image {
+  filter: saturate(.85) brightness(.82);
+}
+.login-visual-shade {
   position: absolute;
-  left: clamp(28px, 4vw, 72px);
-  right: clamp(28px, 4vw, 72px);
-  bottom: clamp(30px, 5vh, 58px);
-  color: var(--login-left-title);
+  inset: 0;
+  background:
+    linear-gradient(180deg, transparent 34%, var(--pilot-bg) 100%),
+    linear-gradient(90deg, transparent 55%, color-mix(in srgb, var(--pilot-bg) 30%, transparent) 100%);
 }
-.visual-eyebrow {
-  margin: 0 0 18px;
-  color: var(--login-primary);
-  font-size: 12px;
+.login-visual-caption {
+  position: absolute;
+  right: 40px;
+  bottom: 40px;
+  left: 40px;
+  z-index: 2;
+}
+.login-visual-kicker {
+  display: block;
+  margin-bottom: var(--pilot-space-3);
+  color: var(--pilot-muted);
+  font-size: var(--pilot-font-xs);
   font-weight: 600;
-  letter-spacing: .22em;
+  letter-spacing: .08em;
 }
-.visual-copy h1 {
-  margin: 0;
-  color: var(--login-left-title);
-  font-size: clamp(28px, 2.4vw, 40px);
-  line-height: 1.25;
-  letter-spacing: -.02em;
+.login-phases {
+  display: flex;
+  align-items: center;
+  gap: var(--pilot-space-2);
+  flex-wrap: wrap;
 }
-.visual-subtitle {
-  margin: 18px 0 0;
-  color: var(--login-copy);
-  font-size: 14px;
-  line-height: 1.6;
+.login-phases span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 var(--pilot-space-3);
+  border: 1px solid var(--pilot-line);
+  border-radius: var(--pilot-radius-control);
+  background: color-mix(in srgb, var(--pilot-surface) 82%, transparent);
+  color: var(--pilot-ink-soft);
+  font-size: var(--pilot-font-xs);
+  font-weight: 600;
+  backdrop-filter: blur(8px);
 }
-.login-panel {
-  min-height: 100vh;
+.login-phases i {
+  width: 18px;
+  height: 1px;
+  background: var(--pilot-line-strong);
+}
+.login-stage {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 40px 0;
-  background: var(--login-panel);
+  min-height: 100vh;
+  padding: var(--pilot-space-6) var(--pilot-space-5);
 }
 .login-card {
-  width: min(500px, calc(100% - 64px));
-  padding: 44px 44px 32px;
-  border: 1px solid var(--login-border);
-  border-radius: 18px;
-  background: var(--login-card);
-  box-shadow: 0 20px 55px rgba(0, 0, 0, .14);
+  width: min(420px, 100%);
+  padding: var(--pilot-space-6);
+  border: 1px solid var(--pilot-line);
+  border-radius: var(--pilot-radius-card);
+  background: var(--pilot-surface);
+  box-shadow: var(--pilot-shadow);
 }
-.login-card-top {
+.login-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  margin-bottom: 42px;
+  gap: var(--pilot-space-3);
+  margin-bottom: var(--pilot-space-5);
+}
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--pilot-space-2);
+  min-width: 0;
 }
 .login-logo {
-  color: var(--login-primary);
-  font-size: 34px;
-  font-weight: 800;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--pilot-line-strong);
+  border-radius: var(--pilot-radius-control);
+  color: var(--pilot-accent);
+  font-size: 11px;
+  font-weight: 700;
   letter-spacing: .06em;
 }
-.theme-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 8px 11px;
-  border: 1px solid var(--login-border);
-  border-radius: 7px;
-  background: transparent;
-  color: var(--login-copy);
-  font-size: 12px;
-  cursor: pointer;
+.login-brand-name {
+  color: var(--pilot-ink);
+  font-size: var(--pilot-font-sm);
+  font-weight: 700;
 }
-.theme-toggle:hover { color: var(--login-primary); border-color: var(--login-primary); }
-.theme-toggle svg { width: 16px; height: 16px; }
-.login-heading { margin-bottom: 34px; }
-.login-heading h2 {
-  margin: 0 0 12px;
-  color: var(--login-heading);
-  font-size: 30px;
-  line-height: 1.3;
+.login-heading { margin-bottom: var(--pilot-space-5); }
+.login-kicker {
+  margin: 0 0 var(--pilot-space-1);
+  color: var(--pilot-muted);
+  font-size: var(--pilot-font-xs);
+  font-weight: 600;
+  letter-spacing: .04em;
 }
-.login-heading p { margin: 0; color: var(--login-copy); font-size: 14px; line-height: 1.7; }
-.login-form { display: flex; flex-direction: column; }
-.field-label {
-  margin: 0 0 8px;
-  color: var(--login-copy);
-  font-size: 14px;
+.login-heading h1 {
+  margin: 0;
+  color: var(--pilot-ink);
+  font-size: var(--pilot-font-xl);
+  font-weight: 700;
+  line-height: 1.2;
+}
+.login-heading p {
+  margin: var(--pilot-space-2) 0 0;
+  color: var(--pilot-muted);
+  font-size: var(--pilot-font-sm);
+  line-height: 1.6;
+}
+.login-form { display: flex; flex-direction: column; gap: var(--pilot-space-4); }
+.login-field { display: flex; flex-direction: column; gap: var(--pilot-space-2); }
+.login-field label {
+  color: var(--pilot-ink-soft);
+  font-size: var(--pilot-font-xs);
   font-weight: 600;
 }
-.field-label:not(:first-child) { margin-top: 22px; }
-.login-input {
-  width: 100%;
-  height: 50px;
-  padding: 0 15px;
-  border: 1px solid var(--login-border);
-  border-radius: 7px;
-  outline: none;
-  background: var(--login-input);
-  color: var(--login-heading);
-  font-size: 14px;
-  transition: border-color .2s, box-shadow .2s;
-}
-.login-input::placeholder { color: var(--login-dim); }
-.login-input:focus { border-color: var(--login-primary); box-shadow: 0 0 0 3px rgba(56, 189, 248, .14); }
-.login-input:disabled { opacity: .6; }
-.form-options {
+.login-options {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin: 20px 0 26px;
-  font-size: 13px;
+  gap: var(--pilot-space-3);
+  font-size: var(--pilot-font-xs);
 }
-.remember-option { display: inline-flex; align-items: center; gap: 8px; color: var(--login-copy); cursor: pointer; }
-.remember-option input { width: 16px; height: 16px; accent-color: var(--login-primary); }
-.forgot-button {
+.login-remember {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pilot-space-2);
+  color: var(--pilot-muted);
+  cursor: pointer;
+}
+.login-remember input { width: 16px; height: 16px; accent-color: var(--pilot-accent); }
+.login-text-button {
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--login-primary);
-  font-size: 13px;
+  color: var(--pilot-accent);
+  font: inherit;
   cursor: pointer;
 }
-.login-submit {
-  display: inline-flex;
+.login-text-button:hover { color: var(--pilot-accent-hover); text-decoration: underline; }
+.login-text-button:focus-visible { outline: 2px solid var(--pilot-accent); outline-offset: 2px; }
+.login-message-slot { min-height: 0; }
+.login-message { margin: 0; }
+.login-submit { width: 100%; height: 44px; }
+.login-foot {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 50px;
-  border: 0;
-  border-radius: 7px;
-  background: var(--login-button);
-  color: #fff;
-  font-size: 15px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: filter .2s, transform .2s;
+  justify-content: space-between;
+  gap: var(--pilot-space-3);
+  margin-top: var(--pilot-space-5);
+  padding-top: var(--pilot-space-4);
+  border-top: 1px solid var(--pilot-line);
+  color: var(--pilot-muted);
+  font-size: var(--pilot-font-xs);
 }
-.login-submit:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); }
-.login-submit:disabled { opacity: .55; cursor: not-allowed; }
-.login-footnote { margin: 30px 0 0; color: var(--login-dim); font-size: 12px; text-align: center; }
-.login-message { margin: 0 0 18px; padding: 10px 12px; border-radius: 6px; font-size: 12px; line-height: 1.6; }
-.login-message.error { border-left: 3px solid var(--red); background: rgba(248, 113, 113, .08); color: var(--red); }
-.login-message.notice { border-left: 3px solid var(--login-primary); background: rgba(56, 189, 248, .08); color: var(--login-primary); }
 @media (max-width: 1050px) {
-  .login-page { grid-template-columns: minmax(0, 48fr) minmax(410px, 52fr); }
-  .login-card { width: calc(100% - 48px); padding: 36px 34px 28px; }
-  .visual-copy h1 { font-size: 28px; }
+  .login-page { grid-template-columns: minmax(0, 1fr) minmax(430px, .95fr); }
 }
-@media (max-width: 760px) {
+@media (max-width: 820px) {
   .login-page { display: block; }
-  .login-visual { display: none; }
-  .login-panel { min-height: 100vh; padding: 24px 0; }
-  .login-card { width: min(460px, calc(100% - 32px)); padding: 30px 24px 24px; border-radius: 14px; }
-  .login-card-top { margin-bottom: 30px; }
-  .login-heading { margin-bottom: 26px; }
-  .login-heading h2 { font-size: 26px; }
+  .login-visual {
+    height: clamp(180px, 26vh, 230px);
+    min-height: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--pilot-line);
+  }
+  .login-visual-caption { right: 16px; bottom: 14px; left: 16px; }
+  .login-visual-kicker { margin-bottom: var(--pilot-space-2); }
+  .login-stage {
+    align-items: flex-start;
+    min-height: 0;
+    padding: var(--pilot-space-5) var(--pilot-space-4) var(--pilot-space-6);
+  }
 }
-@media (max-width: 390px) {
-  .form-options { align-items: flex-start; gap: 10px; font-size: 12px; }
-  .theme-toggle { padding: 7px 9px; }
+@media (max-width: 650px) {
+  .login-card { padding: var(--pilot-space-5); }
+  .login-brand-name { font-size: var(--pilot-font-xs); }
+  .login-card-head { flex-direction: row; align-items: center; }
+  .login-phases span { min-height: 28px; padding: 0 var(--pilot-space-2); }
+}
+@media (max-width: 380px) {
+  .login-card-head { align-items: flex-start; flex-direction: column; }
 }
 </style>

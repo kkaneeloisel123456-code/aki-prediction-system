@@ -8,8 +8,8 @@ function getInitial(): Theme {
   try {
     const saved = localStorage.getItem(STORAGE_KEY)
     if (saved === 'light' || saved === 'dark') return saved
-  } catch { /* storage blocked (private mode) — fall back to dark */ }
-  return 'dark'
+  } catch { /* storage blocked (private mode) — fall back to light */ }
+  return 'light'
 }
 
 const theme = ref<Theme>(getInitial())
@@ -26,8 +26,9 @@ watch(theme, (v) => {
 })
 
 export function useTheme() {
+  const setTheme = (value: Theme) => { theme.value = value }
   const toggle = () => {
     theme.value = theme.value === 'dark' ? 'light' : 'dark'
   }
-  return { theme, toggle }
+  return { theme, toggle, setTheme }
 }

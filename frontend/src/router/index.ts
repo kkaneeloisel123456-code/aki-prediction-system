@@ -1,5 +1,4 @@
 import { createRouter, createWebHistory } from "vue-router";
-import { defineComponent, h } from "vue";
 import Dashboard from "../pages/DashboardPage.vue";
 import Patients from "../pages/PatientsPage.vue";
 import PatientDetail from "../pages/PatientDetailPage.vue";
@@ -13,39 +12,28 @@ import Performance from "../pages/PerformancePage.vue";
 import Batch from "../pages/BatchPage.vue";
 import Governance from "../pages/GovernancePage.vue";
 import Login from "../pages/LoginPage.vue";
+import NotFound from "../pages/NotFoundPage.vue";
 import { useAuth } from "../composables/useAuth";
-
-const NotFound = defineComponent({
-  name: "NotFound",
-  setup() {
-    return () =>
-      h("div", { style: "text-align:center;padding:60px 0" }, [
-        h("div", { style: "font-size:42px;font-weight:800;color:var(--text-dim)" }, "404"),
-        h("p", { style: "margin:10px 0 18px;color:var(--text-muted);font-size:13px" }, "页面不存在或链接已失效"),
-        h("a", { href: "/", style: "color:var(--primary);font-size:13px" }, "返回工作台"),
-      ]);
-  },
-});
 
 const routes = [
   { path: "/login", component: Login, meta: { title: "登录", public: true } },
   { path: "/portal", component: Portal, meta: { title: "患者服务", public: true } },
-  { path: "/", component: Dashboard, meta: { title: "临床工作台" } },
-  { path: "/patients", component: Patients, meta: { title: "患者档案" } },
-  { path: "/patients/:id", component: PatientDetail, meta: { title: "患者详情" } },
-  { path: "/encounters/:id", component: Encounter, meta: { title: "接诊与报告" } },
-  { path: "/reports", component: Reports, meta: { title: "报告中心" } },
+  { path: "/", component: Dashboard, meta: { title: "待评估" } },
+  { path: "/patients", component: Patients, meta: { title: "患者" } },
+  { path: "/patients/:id", component: PatientDetail, meta: { title: "患者病历" } },
+  { path: "/encounters/:id", component: Encounter, meta: { title: "接诊与评估" } },
+  { path: "/reports", component: Reports, meta: { title: "文书" } },
   { path: "/reports/:id", component: ReportDetail, meta: { title: "正式报告" } },
-  { path: "/schedule", component: Schedule, meta: { title: "预约与反馈" } },
+  { path: "/schedule", component: Schedule, meta: { title: "复查" } },
   { path: "/admin", component: Admin, meta: { title: "账号与审计", adminOnly: true } },
-  { path: "/batch", component: Batch, meta: { title: "批量导入" } },
-  { path: "/performance", component: Performance, meta: { title: "模型性能" } },
+  { path: "/batch", component: Batch, meta: { title: "录入" } },
+  { path: "/performance", component: Performance, meta: { title: "模型说明" } },
   { path: "/governance", component: Governance, meta: { title: "数据治理" } },
   // Backward-compatible redirects for bookmarks from the research prototype.
   { path: "/dashboard", redirect: "/" },
   { path: "/workstation", redirect: "/patients" },
   { path: "/report", redirect: "/reports" },
-  { path: "/:catchAll(.*)", component: NotFound, meta: { title: "页面不存在" } },
+  { path: "/:catchAll(.*)", component: NotFound, meta: { title: "页面不存在", public: true } },
 ];
 const router = createRouter({ history: createWebHistory(), routes });
 

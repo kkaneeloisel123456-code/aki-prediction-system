@@ -16,7 +16,13 @@ declare module 'vue' {
     ElEmpty: typeof import('element-plus/es')['ElEmpty']
     ElTable: typeof import('element-plus/es')['ElTable']
     ElTableColumn: typeof import('element-plus/es')['ElTableColumn']
+    EmptyState: typeof import('./components/EmptyState.vue')['default']
+    FormField: typeof import('./components/FormField.vue')['default']
+    PageHeader: typeof import('./components/PageHeader.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    SectionPanel: typeof import('./components/SectionPanel.vue')['default']
+    StatusPill: typeof import('./components/StatusPill.vue')['default']
+    ThemeSwitch: typeof import('./components/ThemeSwitch.vue')['default']
   }
 }
