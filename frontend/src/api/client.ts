@@ -132,7 +132,7 @@ function saveBlob(blob: Blob, filename: string) {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
 export const api = {
@@ -238,9 +238,11 @@ export const api = {
       body: JSON.stringify({ status }),
     }),
 
-  importPreview: async (file: File) => {
+  importPreview: async (file: File, options: { sheet_name?: string; mapping?: Record<string, string> } = {}) => {
     const form = new FormData();
     form.append("file", file);
+    if (options.sheet_name) form.append("sheet_name", options.sheet_name);
+    if (options.mapping) form.append("mapping", JSON.stringify(options.mapping));
     const res = await fetch("/api/imports/preview", {
       method: "POST",
       credentials: "same-origin",
@@ -257,6 +259,16 @@ export const api = {
   },
   importCommit: (payload: any) =>
     request<any>("/api/imports/commit", { method: "POST", body: JSON.stringify(payload) }),
+  importErrors: async (batchId: string) => {
+    const res = await fetch(`/api/imports/${encodeURIComponent(batchId)}/errors.xlsx`, {
+      credentials: "same-origin",
+    });
+    if (!res.ok) {
+      notifyUnauthorized(`/api/imports/${batchId}/errors.xlsx`, res.status);
+      throw await blobError(res, "错误行导出失败");
+    }
+    return res.blob();
+  },
 
   portal: {
     status: () => request<any>("/api/portal/status"),

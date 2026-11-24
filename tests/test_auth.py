@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import os
+from datetime import date, datetime
 import shutil
 import sys
 import tempfile
@@ -320,7 +322,7 @@ def test_predictions_migration_rebuilds_table():
     check = sqlite3.connect(migration_db)
     try:
         version = check.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 3
+        assert version == 4
         columns = {row[1]: row for row in check.execute("PRAGMA table_info(predictions)")}
         assert "origin" in columns
         for nullable in ("probability", "model_version", "model_hash"):
@@ -551,3 +553,166 @@ def test_restore_removes_stale_wal_and_shm(client):
     restore_database(snapshot, confirm=True)
     for suffix in ("-wal", "-shm"):
         assert not Path(str(DB_PATH) + suffix).exists()
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 import tests: XLSX, sheet choice, mapping, batch id and error export
+# ---------------------------------------------------------------------------
+FIXTURES = ROOT / "tests" / "fixtures"
+
+
+def _switch_login(client: TestClient, username: str, password: str = "DoctorPass123!") -> None:
+    if client.cookies.get("aki_session"):
+        client.post("/api/auth/logout")
+    client.cookies.clear()
+    client.headers.pop("x-csrf-token", None)
+    login(client, username, password)
+
+
+def _preview_fixture(
+    client: TestClient, name: str, *, sheet_name: str = "", mapping: dict | None = None,
+):
+    path = FIXTURES / name
+    suffix = path.suffix.lower()
+    media = (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        if suffix == ".xlsx" else "text/csv"
+    )
+    data = {}
+    if sheet_name:
+        data["sheet_name"] = sheet_name
+    if mapping:
+        data["mapping"] = json.dumps(mapping, ensure_ascii=False)
+    return client.post(
+        "/api/imports/preview",
+        files={"file": (name, path.read_bytes(), media)},
+        data=data,
+    )
+
+
+def test_xlsx_template_contains_mapping_columns(client):
+    login(client)
+    response = client.get("/api/imports/template.xlsx")
+    assert response.status_code == 200, response.text
+    assert "spreadsheetml" in response.headers["content-type"]
+    from openpyxl import load_workbook
+    workbook = load_workbook(io.BytesIO(response.content))
+    sheet = workbook["导入模板"]
+    headers = [cell.value for cell in sheet[1]]
+    assert "负责人ID" in headers
+    assert "术前Scr" in headers
+    assert "病历号" in headers
+
+
+def test_xlsx_requires_sheet_choice_mapping_and_batch_commit(client):
+    login(client)
+    create_doctor(client, "doctor1")
+    raw = (FIXTURES / "phase3_two_sheets.xlsx").read_bytes()
+    initial = client.post(
+        "/api/imports/preview",
+        files={"file": ("phase3_two_sheets.xlsx", raw, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert initial.status_code == 200, initial.text
+    payload = initial.json()
+    assert payload["requires_sheet"] is True
+    assert payload["sheet_names"] == ["有效数据", "错误数据"]
+    assert not payload.get("batch_id")
+
+    auto_preview = _preview_fixture(client, "phase3_two_sheets.xlsx", sheet_name="有效数据")
+    assert auto_preview.status_code == 200, auto_preview.text
+    auto_payload = auto_preview.json()
+    assert auto_payload["columns"]["病历编号"] == "mrn"
+    assert auto_payload["columns"]["患者姓名"] == "name"
+    assert auto_payload["summary"]["valid"] == 2
+
+    mapping = {
+        "病历编号": "mrn", "患者姓名": "name", "性别": "sex", "出生年份": "birth_year",
+        "就诊编号": "case_ref", "发生时间": "occurred_at", "负责人ID": "owner_id",
+        "术前肌酐": "术前Scr", "术前 eGFR": "术前eGFR",
+    }
+    preview = _preview_fixture(client, "phase3_two_sheets.xlsx", sheet_name="有效数据", mapping=mapping)
+    assert preview.status_code == 200, preview.text
+    payload = preview.json()
+    assert payload["batch_id"].startswith("IMP-")
+    assert payload["sheet_name"] == "有效数据"
+    assert payload["summary"]["valid"] == 2
+    assert not payload["header_errors"]
+    assert payload["columns"]["病历编号"] == "mrn"
+    assert datetime.fromisoformat(payload["rows"][0]["occurred_at"]).astimezone().date() == date(2026, 11, 20)
+    assert payload["rows"][0]["values"]["术前Scr"] == 88
+
+    commit = client.post("/api/imports/commit", json={"batch_id": payload["batch_id"]})
+    assert commit.status_code == 200, commit.text
+    assert commit.json()["imported"] == 2
+    duplicate_batch = client.post("/api/imports/commit", json={"batch_id": payload["batch_id"]})
+    assert duplicate_batch.status_code == 409, duplicate_batch.text
+    duplicate_file = _preview_fixture(
+        client, "phase3_two_sheets.xlsx", sheet_name="有效数据", mapping=mapping,
+    )
+    assert duplicate_file.status_code == 409, duplicate_file.text
+
+
+def test_xlsx_merged_cells_serial_dates_errors_and_export(client):
+    login(client)
+    create_doctor(client, "doctor1")
+    preview = _preview_fixture(client, "phase3_two_sheets.xlsx", sheet_name="错误数据")
+    assert preview.status_code == 200, preview.text
+    payload = preview.json()
+    rows = {row["index"]: row for row in payload["rows"]}
+    assert payload["summary"]["invalid"] >= 3
+    assert datetime.fromisoformat(rows[2]["occurred_at"]).astimezone().date() == date(2026, 11, 20)
+    assert rows[2]["values"]["术中晶体液量"] == 9500
+    assert rows[3]["name"] == "合并患者"
+    messages = " ".join(
+        message for row in payload["rows"] for message in row["errors"]
+    )
+    assert "姓名不一致" in messages
+    assert "性别" in messages
+    assert "相同" in messages
+    exported = client.get(f"/api/imports/{payload['batch_id']}/errors.xlsx")
+    assert exported.status_code == 200, exported.text
+    from openpyxl import load_workbook
+    workbook = load_workbook(io.BytesIO(exported.content))
+    sheet = workbook["错误行"]
+    headers = [cell.value for cell in sheet[1]]
+    assert headers[:3] == ["行号", "错误", "提示"]
+    assert "病历号" in headers
+    assert "术中晶体液量" in headers
+    assert sheet.max_row == len([row for row in payload["rows"] if row["errors"]]) + 1
+
+
+def test_gbk_csv_preview_and_batch_commit(client):
+    login(client)
+    create_doctor(client, "doctor1")
+    preview = _preview_fixture(client, "phase3_gbk.csv")
+    assert preview.status_code == 200, preview.text
+    payload = preview.json()
+    assert payload["summary"]["valid"] == 2
+    assert payload["rows"][0]["name"] == "张建国"
+    assert any("未映射" in warning for warning in payload["header_warnings"])
+    commit = client.post("/api/imports/commit", json={"batch_id": payload["batch_id"]})
+    assert commit.status_code == 200, commit.text
+    assert commit.json()["imported"] == 2
+    with db.reader() as conn:
+        names = {row["name"] for row in conn.execute("SELECT name FROM patients")}
+    assert {"张建国", "李秀兰"} <= names
+
+
+def test_doctor_cannot_assign_new_patient_to_another_doctor(client):
+    login(client)
+    create_doctor(client, "doctor1")
+    create_doctor(client, "doctor2")
+    _switch_login(client, "doctor1")
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["病历号", "姓名", "性别", "就诊编号", "发生时间", "负责人ID"])
+    writer.writerow(["RBAC-IMP-1", "越权患者", "男", "RBAC-CASE-1", "2026-11-20 09:00", "doctor2"])
+    raw = buffer.getvalue().encode("utf-8-sig")
+    preview = client.post(
+        "/api/imports/preview",
+        files={"file": ("rbac.csv", raw, "text/csv")},
+    )
+    assert preview.status_code == 200, preview.text
+    payload = preview.json()
+    assert payload["summary"]["valid"] == 0
+    assert "医生只能把新患者建在自己名下" in payload["rows"][0]["errors"]

@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, saveBlob } from '../api/client'
 import { ElMessage } from 'element-plus'
@@ -30,6 +30,12 @@ const missingAck = ref(false)
 const publishResult = ref<any>(null)
 const publishError = ref('')
 const collapsed = reactive<Record<string, boolean>>({})
+const previousEncounter = ref<any>(null)
+const previousLoading = ref(false)
+const showPaste = ref(false)
+const pasteText = ref('')
+const pasteOverwrite = ref(false)
+const pasteError = ref('')
 
 const timings = [
   { key: 'preop', label: '术前指标', desc: '基线检验与血流动力学' },
@@ -127,9 +133,172 @@ function isInvalid(meta: any) {
 }
 function invalidCount() { return metas.value.filter(isInvalid).length }
 
+type PasteEntry = { token: string; value: string; meta: any | null; invalid: boolean }
+
+function normalizeToken(text: string) {
+  return (text || '')
+    .replace(/\s+/g, '')
+    .replace(/[（(].*?[）)]/g, '')
+    .toLowerCase()
+}
+const featureLookup = computed(() => {
+  const lookup = new Map<string, any>()
+  for (const meta of metas.value) {
+    lookup.set(normalizeToken(meta.name), meta)
+    lookup.set(normalizeToken(meta.label || ''), meta)
+    lookup.set(normalizeToken(String(meta.label || '').replace(/[（(].*?[）)]/g, '')), meta)
+  }
+  return lookup
+})
+const previousLabel = computed(() => previousEncounter.value
+  ? `上次 ${previousEncounter.value.case_ref} · ${fmt(previousEncounter.value.occurred_at)}`
+  : '暂无上次就诊')
+const pasteEntries = computed<PasteEntry[]>(() => parsePaste(pasteText.value))
+const pasteMatched = computed(() => pasteEntries.value.filter((entry) => entry.meta && !entry.invalid))
+const pasteUnmatched = computed(() => pasteEntries.value.filter((entry) => !entry.meta || entry.invalid))
+
+function splitPasteLine(line: string): string[] {
+  if (line.includes('\t')) return line.split('\t').map((cell) => cell.trim())
+  if (line.includes('，')) return line.split('，').map((cell) => cell.trim())
+  if (line.includes(',')) return line.split(',').map((cell) => cell.trim())
+  return [line.trim()]
+}
+function parseNumeric(raw: string): number | null {
+  const text = (raw || '').replace(/,/g, '')
+  const match = text.match(/[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?/)
+  if (!match) return null
+  const value = Number(match[0])
+  return Number.isFinite(value) ? value : null
+}
+function pasteEntry(token: string, raw: string): PasteEntry {
+  const meta = featureLookup.value.get(normalizeToken(token)) || null
+  const number = parseNumeric(raw)
+  return {
+    token: token.trim(),
+    value: number === null ? String(raw || '').trim() : String(number),
+    meta,
+    invalid: !meta || number === null,
+  }
+}
+function parsePaste(text: string): PasteEntry[] {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim())
+  if (!lines.length) return []
+  const firstCells = splitPasteLine(lines[0])
+  const headerMatches = firstCells.filter((cell) => featureLookup.value.get(normalizeToken(cell))).length
+  // Horizontal mode: a header row with at least two recognizable metric names.
+  if (firstCells.length >= 2 && headerMatches >= 2) {
+    const valueCells = splitPasteLine(lines[1] || '')
+    return firstCells.map((token, index) => pasteEntry(token, valueCells[index] || ''))
+  }
+  const entries: PasteEntry[] = []
+  const headerTokens = new Set(['指标', '项目', '名称', '指标名称'])
+  for (const line of lines) {
+    let cells = splitPasteLine(line)
+    let token = ''
+    let raw = ''
+    if (cells.length >= 2) {
+      token = cells[0]
+      raw = cells[1]
+    } else {
+      const match = line.match(/^(.*?)[\s:：]+([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?.*)$/)
+      if (match) {
+        token = match[1]
+        raw = match[2]
+      } else {
+        token = line
+      }
+    }
+    if (headerTokens.has(normalizeToken(token))) continue
+    if (!token.trim() && !raw.trim()) continue
+    entries.push(pasteEntry(token, raw))
+  }
+  return entries
+}
+
+function openPaste() {
+  pasteText.value = ''
+  pasteError.value = ''
+  pasteOverwrite.value = false
+  showPaste.value = true
+  nextTick(() => {
+    (document.getElementById('paste-metrics') as HTMLTextAreaElement | null)?.focus()
+  })
+}
+function applyPaste() {
+  pasteError.value = ''
+  if (!pasteText.value.trim()) { pasteError.value = '请先粘贴表格内容'; return }
+  if (!pasteMatched.value.length) { pasteError.value = '未识别到可填写的指标，请检查指标名称和数值'; return }
+  let applied = 0
+  let skipped = 0
+  for (const entry of pasteMatched.value) {
+    if (!entry.meta) continue
+    const current = values[entry.meta.name]
+    if (!pasteOverwrite.value && current !== '' && current != null) {
+      skipped += 1
+      continue
+    }
+    values[entry.meta.name] = entry.value
+    applied += 1
+  }
+  if (!applied) {
+    pasteError.value = skipped
+      ? `已填写的 ${skipped} 项未覆盖，请勾选“覆盖已填写项”后重试`
+      : '没有可应用的指标'
+    return
+  }
+  markDirty()
+  showPaste.value = false
+  notice.value = `已从粘贴表格填入 ${applied} 项指标${skipped ? `，跳过 ${skipped} 项已填写项` : ''}。`
+  ElMessage.success('指标已填入')
+}
+
+async function loadPrevious(current: any) {
+  previousLoading.value = true
+  previousEncounter.value = null
+  try {
+    const list = await api.encounters(current.patient_id)
+    const currentTime = new Date(current.occurred_at).getTime()
+    const prior = (list.encounters ?? [])
+      .filter((item: any) => item.id !== current.id)
+      .filter((item: any) => {
+        const time = new Date(item.occurred_at).getTime()
+        return Number.isFinite(time) && (!Number.isFinite(currentTime) || time < currentTime)
+      })[0]
+    if (prior) previousEncounter.value = await api.encounter(prior.id)
+  } catch {
+    previousEncounter.value = null
+  } finally {
+    previousLoading.value = false
+  }
+}
+
+function copyPrevious() {
+  error.value = ''
+  if (!previousEncounter.value) { error.value = '没有可复制的上次就诊'; return }
+  if (!canEdit.value || metricsLocked.value) { error.value = '当前记录不能修改指标'; return }
+  let copied = 0
+  let kept = 0
+  for (const meta of metas.value) {
+    const raw = previousEncounter.value.values?.[meta.name]
+    if (raw === null || raw === undefined || raw === '') continue
+    const current = values[meta.name]
+    if (current !== '' && current != null) { kept += 1; continue }
+    values[meta.name] = String(raw)
+    copied += 1
+  }
+  if (!copied) {
+    notice.value = kept ? `上次就诊的指标已全部存在，未覆盖当前 ${kept} 项已填值。` : '上次就诊没有可复制的指标。'
+    return
+  }
+  markDirty()
+  notice.value = `已从上次就诊填入 ${copied} 项指标${kept ? `，保留 ${kept} 项已填值` : ''}。`
+  ElMessage.success('已填入上次指标')
+}
+
 function hydratePayload(payload: any) {
+  const sourceValues = payload?.values ?? encounter.value?.values ?? {}
   for (const name of allFeatures.value) {
-    const v = payload?.values?.[name]
+    const v = sourceValues?.[name]
     values[name] = v === null || v === undefined ? '' : String(v)
   }
   diagnosis.value = payload?.diagnosis ?? encounter.value?.diagnosis ?? ''
@@ -158,6 +327,7 @@ async function load() {
     if (enc.status === 'published' || enc.latest_review) {
       checklist.value = await api.checklist(enc.id, enc.status === 'published').catch(() => null)
     }
+    await loadPrevious(enc)
   } catch (e: any) {
     error.value = e?.message ?? '接诊记录加载失败'
   } finally {
@@ -380,17 +550,37 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
             </section>
 
             <section class="pilot-panel metrics-panel">
-              <div class="pilot-panel-head">
+              <div class="pilot-panel-head metrics-head">
                 <div class="metrics-title">
                   <span class="pilot-panel-title">围手术期指标</span>
                   <span class="pilot-chip pilot-chip-accent">{{ measuredCount }} 项实测 / {{ allFeatures.length }} 项</span>
                 </div>
-                <span v-if="metricsLocked" class="pilot-muted">{{ isPublished ? '已发布，指标锁定' : '已复核，指标锁定' }}</span>
+                <div class="metrics-head-side">
+                  <span v-if="metricsLocked" class="pilot-muted">{{ isPublished ? '已发布，指标锁定' : '已复核，指标锁定' }}</span>
+                  <div class="metric-tools">
+                    <button
+                      class="pilot-btn pilot-btn-sm"
+                      type="button"
+                      :disabled="!canEdit || metricsLocked || !previousEncounter || previousLoading"
+                      :title="previousLabel"
+                      @click="copyPrevious"
+                    >
+                      {{ previousLoading ? '查找上次…' : '复制上次就诊' }}
+                    </button>
+                    <button class="pilot-btn pilot-btn-sm" type="button" :disabled="!canEdit || metricsLocked" @click="openPaste">
+                      粘贴表格
+                    </button>
+                  </div>
+                </div>
               </div>
               <div class="pilot-panel-body">
                 <div class="metric-progress">
                   <div class="metric-track"><span :style="{ width: `${allFeatures.length ? filledCount / allFeatures.length * 100 : 0}%` }" /></div>
                   <span>{{ invalidCount() ? `${invalidCount()} 项超范围` : '数值需在参考范围内' }}</span>
+                </div>
+                <div class="metric-source">
+                  <span class="pilot-muted">{{ previousLabel }}</span>
+                  <span class="pilot-muted">复制上次就诊只补空项，不覆盖已填值。</span>
                 </div>
                 <div v-if="invalidCount()" class="pilot-error metric-error">有 {{ invalidCount() }} 项数值超出临床合理范围，请修正后再保存或预测。</div>
 
@@ -522,6 +712,55 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
         </div>
       </template>
     </div>
+
+    <ElDialog
+      v-model="showPaste"
+      title="粘贴表格填指标"
+      width="680px"
+      class="pilot-dialog"
+      :close-on-click-modal="false"
+      append-to-body
+    >
+      <p class="paste-copy">支持两列（指标名称 + 数值），也支持一行表头 + 一行数值；可直接从 Excel 复制。识别中文指标名或英文特征名，数值可带单位。</p>
+      <textarea
+        id="paste-metrics"
+        v-model="pasteText"
+        class="pilot-textarea paste-input"
+        rows="8"
+        placeholder="术前肌酐&#9;88&#10;术前 eGFR&#9;92&#10;或：&#10;术前肌酐&#9;术前 eGFR&#10;88&#9;92"
+      />
+      <label class="paste-overwrite">
+        <input v-model="pasteOverwrite" type="checkbox" />
+        覆盖当前已填写的指标
+      </label>
+      <div v-if="pasteText.trim()" class="paste-result">
+        <div v-if="pasteMatched.length" class="paste-matched">
+          <div class="paste-result-head"><span>可填入 {{ pasteMatched.length }} 项</span><span class="pilot-muted">数值已自动截取</span></div>
+          <div class="paste-tags">
+            <span v-for="entry in pasteMatched" :key="`${entry.token}-${entry.meta?.name}`" class="paste-tag">
+              {{ entry.meta?.label || entry.token }} <b>{{ entry.value }}</b>
+            </span>
+          </div>
+        </div>
+        <div v-if="pasteUnmatched.length" class="paste-unmatched">
+          <div class="paste-result-head"><span>未识别 {{ pasteUnmatched.length }} 项</span><span class="pilot-muted">请检查名称或数值</span></div>
+          <div class="paste-tags">
+            <span v-for="entry in pasteUnmatched" :key="`${entry.token}-${entry.value}`" class="paste-tag is-bad">
+              {{ entry.token || '空名称' }} <b>{{ entry.value || '无数值' }}</b>
+            </span>
+          </div>
+        </div>
+      </div>
+      <div v-if="pasteError" class="pilot-error paste-error" role="alert">{{ pasteError }}</div>
+      <template #footer>
+        <div class="dialog-actions">
+          <button class="pilot-btn" type="button" @click="showPaste = false">取消</button>
+          <button class="pilot-btn pilot-btn-primary" type="button" :disabled="!pasteMatched.length" @click="applyPaste">
+            填入 {{ pasteMatched.length }} 项
+          </button>
+        </div>
+      </template>
+    </ElDialog>
   </div>
 </template>
 
@@ -562,9 +801,14 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
 .form-field label { color: var(--pilot-ink-soft); font-size: var(--pilot-font-xs); font-weight: 600; }
 
 .metrics-title { display: flex; align-items: center; gap: var(--pilot-space-2); flex-wrap: wrap; }
-.metric-progress { display: flex; align-items: center; gap: var(--pilot-space-3); margin-bottom: var(--pilot-space-3); color: var(--pilot-muted); font-size: var(--pilot-font-xs); }
+.metrics-head { align-items: flex-start; }
+.metrics-head-side { display: flex; flex-direction: column; align-items: flex-end; gap: var(--pilot-space-2); }
+.metric-tools { display: flex; gap: var(--pilot-space-2); flex-wrap: wrap; justify-content: flex-end; }
+.metric-progress { display: flex; align-items: center; gap: var(--pilot-space-3); margin-bottom: var(--pilot-space-2); color: var(--pilot-muted); font-size: var(--pilot-font-xs); }
 .metric-track { flex: 1; height: 4px; border-radius: 999px; background: var(--pilot-surface-2); overflow: hidden; }
 .metric-track span { display: block; height: 100%; background: var(--pilot-accent); }
+.metric-source { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--pilot-space-1) var(--pilot-space-3); margin-bottom: var(--pilot-space-3); font-size: var(--pilot-font-xs); }
+.metric-source .pilot-muted:last-child { text-align: right; }
 .metric-error { margin-bottom: var(--pilot-space-3); }
 
 .metric-group { margin-bottom: var(--pilot-space-3); border: 1px solid var(--pilot-line); border-radius: var(--pilot-radius-control); overflow: hidden; }
@@ -646,6 +890,19 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
 .publish-result { margin-top: var(--pilot-space-2); padding: var(--pilot-space-3); border: 1px solid var(--pilot-line); border-radius: var(--pilot-radius-control); background: var(--pilot-accent-soft); color: var(--pilot-ink-soft); font-size: var(--pilot-font-xs); line-height: 1.6; }
 .publish-actions { display: flex; gap: var(--pilot-space-2); margin-top: var(--pilot-space-2); }
 .publish-btn { width: 100%; margin-top: var(--pilot-space-2); }
+
+.paste-copy { margin: 0 0 var(--pilot-space-3); color: var(--pilot-ink-soft); font-size: var(--pilot-font-sm); line-height: 1.6; }
+.paste-input { width: 100%; min-height: 180px; font-family: "SFMono-Regular", Consolas, monospace; font-size: var(--pilot-font-xs); line-height: 1.6; resize: vertical; }
+.paste-overwrite { display: inline-flex; align-items: center; gap: var(--pilot-space-2); margin-top: var(--pilot-space-2); color: var(--pilot-ink-soft); font-size: var(--pilot-font-xs); }
+.paste-overwrite input { accent-color: var(--pilot-accent); }
+.paste-result { margin-top: var(--pilot-space-3); padding-top: var(--pilot-space-3); border-top: 1px dashed var(--pilot-line); }
+.paste-matched + .paste-unmatched { margin-top: var(--pilot-space-3); }
+.paste-result-head { display: flex; justify-content: space-between; gap: var(--pilot-space-2); margin-bottom: var(--pilot-space-2); color: var(--pilot-ink-soft); font-size: var(--pilot-font-xs); font-weight: 600; }
+.paste-tags { display: flex; flex-wrap: wrap; gap: var(--pilot-space-2); }
+.paste-tag { padding: 3px 8px; border: 1px solid var(--pilot-line); border-radius: 999px; background: var(--pilot-surface-2); color: var(--pilot-ink-soft); font-size: 11px; }
+.paste-tag b { color: var(--pilot-ink); font-weight: 700; }
+.paste-tag.is-bad { border-color: var(--pilot-high); color: var(--pilot-high); }
+.paste-error { margin-top: var(--pilot-space-2); }
 
 @media (max-width: 1180px) {
   .encounter-layout { grid-template-columns: 1fr; }

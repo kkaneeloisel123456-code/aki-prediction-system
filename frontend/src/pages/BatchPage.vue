@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { api } from '../api/client'
+import { computed, reactive, ref } from 'vue'
+import { api, saveBlob } from '../api/client'
 
 type Tone = 'neutral' | 'low' | 'mid' | 'high' | 'accent'
 
@@ -9,22 +9,43 @@ const result = ref<any>(null)
 const busy = ref(false)
 const error = ref('')
 const fileName = ref('')
+const currentFile = ref<File | null>(null)
+const sheetNames = ref<string[]>([])
+const needsSheet = ref(false)
+const selectedSheet = ref('')
 const showCommit = ref(false)
 const commitError = ref('')
+const mappingOpen = ref(false)
+const mappingDraft = reactive<Record<string, string>>({})
 
 const validRows = computed(() => (preview.value?.rows ?? []).filter((r: any) => !r.errors.length))
-const canCommit = computed(() => Boolean(validRows.value.length) && !preview.value?.header_errors?.length && !busy.value)
+const validCount = computed(() => Number(preview.value?.summary?.valid ?? validRows.value.length))
+const invalidCount = computed(() => Number(preview.value?.summary?.invalid ?? 0))
+const canCommit = computed(() => Boolean(preview.value?.batch_id && validRows.value.length) && !preview.value?.header_errors?.length && !busy.value)
 const pageDescription = computed(() => {
   if (busy.value) return '正在解析并校验文件…'
   if (result.value) return `批次 ${result.value.batch_id} 已记录 · ${result.value.imported} 行进入草稿就诊`
-  if (preview.value) return '预览通过后可提交；导入只建立草稿，不直接发布报告'
-  return '用 CSV 建立患者档案与草稿就诊，逐行错误定位，不覆盖已有报告'
+  if (preview.value) return '核对映射和错误行后，按批次号提交；导入只建立草稿，不直接发布报告'
+  return '支持 XLSX / CSV，多工作表手选、列映射和错误行导出；导入只建立草稿'
 })
-const previewSubtitle = computed(() => preview.value
-  ? `${preview.value.filename || fileName.value} · 共 ${preview.value.summary?.total ?? preview.value.rows.length} 行`
-  : '')
-const validCount = computed(() => Number(preview.value?.summary?.valid ?? validRows.value.length))
-const invalidCount = computed(() => Number(preview.value?.summary?.invalid ?? 0))
+const previewSubtitle = computed(() => {
+  if (!preview.value) return ''
+  const sheet = preview.value.sheet_name ? ` · 工作表 ${preview.value.sheet_name}` : ''
+  return `${preview.value.filename || fileName.value}${sheet} · 共 ${preview.value.summary?.total ?? preview.value.rows.length} 行`
+})
+const mappingGroups = computed(() => {
+  const groups = ['患者信息', '就诊信息', '模型指标']
+  const options = preview.value?.field_options ?? []
+  return groups
+    .map((label) => ({ label, options: options.filter((option: any) => option.group === label) }))
+    .filter((group) => group.options.length)
+})
+const mappingStats = computed(() => {
+  const columns = preview.value?.columns ?? {}
+  const mapped = Object.values(columns).filter((value) => value && value !== '__ignore__').length
+  return { mapped, ignored: Object.keys(columns).length - mapped }
+})
+const formatLabel = computed(() => preview.value?.file_type === 'xlsx' ? 'XLSX' : 'CSV')
 
 function fieldCount(row: any) { return Object.keys(row.values ?? {}).length }
 function statusLabel(row: any) {
@@ -51,13 +72,28 @@ function onZoneKeydown(event: KeyboardEvent) {
   event.preventDefault()
   chooseFile()
 }
+function clearMapping() {
+  for (const key of Object.keys(mappingDraft)) delete mappingDraft[key]
+}
+function loadMapping(columns: Record<string, string>) {
+  clearMapping()
+  for (const header of preview.value?.headers ?? []) {
+    mappingDraft[header] = columns?.[header] || '__ignore__'
+  }
+}
 function reset() {
   preview.value = null
   result.value = null
   fileName.value = ''
+  currentFile.value = null
+  sheetNames.value = []
+  needsSheet.value = false
+  selectedSheet.value = ''
   error.value = ''
   commitError.value = ''
   showCommit.value = false
+  mappingOpen.value = false
+  clearMapping()
   const input = document.getElementById('import-file') as HTMLInputElement | null
   if (input) input.value = ''
 }
@@ -66,50 +102,95 @@ async function onFile(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
-  await processFile(file)
+  await handleFile(file)
 }
 async function onDrop(event: DragEvent) {
   const file = event.dataTransfer?.files?.[0]
   if (!file) return
-  await processFile(file)
+  await handleFile(file)
 }
-async function processFile(file: File) {
+async function handleFile(file: File) {
+  currentFile.value = file
   fileName.value = file.name
   preview.value = null
   result.value = null
   error.value = ''
   commitError.value = ''
+  showCommit.value = false
+  sheetNames.value = []
+  needsSheet.value = false
+  selectedSheet.value = ''
+  clearMapping()
+  await processFile(file)
+}
+
+async function processFile(file: File, options: { sheet_name?: string; mapping?: Record<string, string> } = {}) {
   busy.value = true
+  error.value = ''
+  commitError.value = ''
   try {
-    preview.value = await api.importPreview(file)
+    const res = await api.importPreview(file, options)
+    if (res.requires_sheet) {
+      preview.value = null
+      needsSheet.value = true
+      sheetNames.value = res.sheet_names ?? []
+      selectedSheet.value = ''
+      return
+    }
+    needsSheet.value = false
+    preview.value = res
+    selectedSheet.value = res.sheet_name || options.sheet_name || ''
+    loadMapping(res.columns ?? {})
   } catch (err: any) {
+    preview.value = null
     error.value = err?.message ?? '预览失败'
   } finally {
     busy.value = false
   }
 }
 
+async function chooseSheet(name: string) {
+  if (!currentFile.value) return
+  selectedSheet.value = name
+  needsSheet.value = false
+  await processFile(currentFile.value, { sheet_name: name })
+}
+
+function openMapping() {
+  if (!preview.value) return
+  loadMapping(preview.value.columns ?? {})
+  mappingOpen.value = true
+}
+
+async function applyMapping() {
+  if (!currentFile.value || !preview.value) return
+  const mapping = { ...mappingDraft }
+  mappingOpen.value = false
+  await processFile(currentFile.value, {
+    sheet_name: selectedSheet.value || preview.value.sheet_name || '',
+    mapping,
+  })
+}
+
 async function downloadTemplate() {
   error.value = ''
   try {
-    const response = await fetch('/api/imports/template.csv', { credentials: 'include' })
+    const response = await fetch('/api/imports/template.xlsx', { credentials: 'same-origin' })
     if (!response.ok) throw new Error('模板下载失败')
-    const text = await response.text()
-    const lines = text.split(/\r?\n/)
-    if (lines[0] && !lines[0].includes('负责人ID')) {
-      lines[0] = `${lines[0]},负责人ID`
-      for (let index = 1; index < lines.length; index += 1) {
-        if (lines[index].trim()) lines[index] = `${lines[index]},`
-      }
-    }
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' })
-    const link = document.createElement('a')
-    link.href = URL.createObjectURL(blob)
-    link.download = 'AKI_import_template.csv'
-    link.click()
-    window.setTimeout(() => URL.revokeObjectURL(link.href), 1000)
+    saveBlob(await response.blob(), 'AKI_import_template.xlsx')
   } catch (e: any) {
     error.value = e?.message ?? '模板下载失败'
+  }
+}
+
+async function downloadErrors() {
+  if (!preview.value?.batch_id) return
+  error.value = ''
+  try {
+    const blob = await api.importErrors(preview.value.batch_id)
+    saveBlob(blob, `AKI_import_errors_${preview.value.batch_id}.xlsx`)
+  } catch (e: any) {
+    error.value = e?.message ?? '错误行导出失败'
   }
 }
 
@@ -119,14 +200,11 @@ function askCommit() {
   showCommit.value = true
 }
 async function confirmCommit() {
-  if (!preview.value || !validRows.value.length) return
+  if (!preview.value?.batch_id) return
   busy.value = true
   commitError.value = ''
   try {
-    result.value = await api.importCommit({
-      filename: preview.value.filename || fileName.value,
-      rows: validRows.value,
-    })
+    result.value = await api.importCommit({ batch_id: preview.value.batch_id })
     preview.value = null
     showCommit.value = false
   } catch (e: any) {
@@ -146,15 +224,15 @@ async function confirmCommit() {
         :description="pageDescription"
       >
         <template #actions>
-          <button class="pilot-btn" type="button" @click="downloadTemplate">下载导入模板</button>
-          <button v-if="preview || result" class="pilot-btn" type="button" @click="reset">重新选择文件</button>
+          <button class="pilot-btn" type="button" @click="downloadTemplate">下载 XLSX 模板</button>
+          <button v-if="currentFile || preview || result || needsSheet" class="pilot-btn" type="button" @click="reset">重新选择文件</button>
         </template>
       </PageHeader>
 
       <div v-if="error" class="pilot-error" role="alert">{{ error }}</div>
 
       <SectionPanel
-        v-if="!preview && !result"
+        v-if="!preview && !result && !needsSheet"
         title="选择导入文件"
         subtitle="最大 5 MB · 最多 500 行 · 预览阶段不写入数据库"
       >
@@ -162,12 +240,12 @@ async function confirmCommit() {
           <div class="import-intro-copy">
             <span class="pilot-section-label">导入范围</span>
             <strong>患者身份、就诊信息与模型指标</strong>
-            <p>模板包含 35 项模型指标。导入前会逐行校验病历号、时间、指标范围与档案权限；提交后只建立草稿就诊，仍需医生预测、复核与发布。</p>
-            <p>管理员导入新患者时，需在 CSV 中填写“负责人ID”（医生登录名）；医生导入时自动归属本人。</p>
+            <p>支持 XLSX 与 CSV。XLSX 有多个工作表时必须先选数据表；导入前可改列映射，逐行校验病历号、时间、指标范围与档案权限。</p>
+            <p>管理员导入新患者时需填写“负责人ID”（医生登录名）；医生导入时只能归属本人。提交只建立草稿就诊，仍需预测、复核与发布。</p>
           </div>
           <div class="import-format">
-            <span class="import-format-mark">CSV</span>
-            <span>UTF-8 或 GBK<br>首行必须为列名</span>
+            <span class="import-format-mark">XLSX</span>
+            <span>XLSX / CSV<br>首行必须为列名</span>
           </div>
         </div>
 
@@ -182,15 +260,36 @@ async function confirmCommit() {
           @dragenter.prevent
           @drop.prevent="onDrop"
         >
-          <span class="import-zone-mark">CSV</span>
+          <span class="import-zone-mark">XLSX</span>
           <span class="import-zone-copy">
-            <strong>{{ busy ? `正在解析 ${fileName} …` : '选择 CSV 文件' }}</strong>
+            <strong>{{ busy ? `正在解析 ${fileName} …` : '选择 XLSX 或 CSV 文件' }}</strong>
             <span>点击浏览，或把文件拖到这里后选择</span>
           </span>
           <span class="import-zone-action">浏览文件</span>
-          <input id="import-file" type="file" accept=".csv,text/csv" class="import-file-input" :disabled="busy" @change="onFile" />
+          <input id="import-file" type="file" accept=".xlsx,.xlsm,.csv" class="import-file-input" :disabled="busy" @change="onFile" />
         </label>
         <p class="import-zone-hint">文件只用于预览校验，不会在预览阶段写入数据库。</p>
+      </SectionPanel>
+
+      <SectionPanel
+        v-if="needsSheet && !preview"
+        title="选择工作表"
+        :subtitle="`${fileName} 包含多个工作表，请选择一个作为导入数据表`"
+      >
+        <div class="sheet-choice-list">
+          <button
+            v-for="name in sheetNames"
+            :key="name"
+            class="sheet-choice"
+            type="button"
+            :disabled="busy"
+            @click="chooseSheet(name)"
+          >
+            <span class="sheet-choice-name">{{ name }}</span>
+            <span class="sheet-choice-arrow">读取此表 →</span>
+          </button>
+        </div>
+        <p class="import-zone-hint">未选中的工作表不会参与解析，也不会写入数据库。</p>
       </SectionPanel>
 
       <SectionPanel
@@ -200,21 +299,39 @@ async function confirmCommit() {
         flush
       >
         <template #actions>
+          <button class="pilot-btn pilot-btn-sm" type="button" @click="openMapping">编辑列映射</button>
+          <button v-if="invalidCount" class="pilot-btn pilot-btn-sm" type="button" @click="downloadErrors">导出错误行</button>
           <button class="pilot-btn pilot-btn-sm" type="button" @click="reset">清除预览</button>
         </template>
         <div class="import-body">
           <div class="import-summary">
-            <div class="import-summary-cell"><span>有效行</span><strong class="is-low">{{ preview.summary?.valid ?? validRows.length }}</strong><small>可提交导入</small></div>
-            <div class="import-summary-cell"><span>错误行</span><strong :class="invalidCount ? 'is-high' : 'is-muted'">{{ invalidCount }}</strong><small>{{ invalidCount ? '需修正后重传' : '没有错误' }}</small></div>
+            <div class="import-summary-cell"><span>有效行</span><strong class="is-low">{{ validCount }}</strong><small>可提交导入</small></div>
+            <div class="import-summary-cell"><span>错误行</span><strong :class="invalidCount ? 'is-high' : 'is-muted'">{{ invalidCount }}</strong><small>{{ invalidCount ? '可导出后修正重传' : '没有错误' }}</small></div>
             <div class="import-summary-cell"><span>新建档案</span><strong>{{ preview.summary?.new_patients ?? 0 }}</strong><small>将创建患者档案</small></div>
             <div class="import-summary-cell"><span>关联已有档案</span><strong>{{ preview.summary?.existing_patients ?? 0 }}</strong><small>按病历号匹配</small></div>
           </div>
 
-          <div v-if="preview.ignored_headers?.length" class="import-note">已忽略列：{{ preview.ignored_headers.join('、') }}</div>
+          <div class="import-file-meta">
+            <span><span class="pilot-section-label">文件</span> {{ preview.filename || fileName }}</span>
+            <span><span class="pilot-section-label">格式</span> {{ formatLabel }}</span>
+            <span v-if="preview.sheet_name"><span class="pilot-section-label">工作表</span> {{ preview.sheet_name }}</span>
+            <span class="pilot-mono"><span class="pilot-section-label">批次</span> {{ preview.batch_id }}</span>
+          </div>
+
+          <div class="import-mapping-strip">
+            <div>
+              <span class="pilot-section-label">列映射</span>
+              <strong>{{ mappingStats.mapped }} 列已映射</strong>
+              <span v-if="mappingStats.ignored" class="pilot-muted"> · {{ mappingStats.ignored }} 列忽略</span>
+            </div>
+            <button class="pilot-btn pilot-btn-sm" type="button" @click="openMapping">调整映射</button>
+          </div>
+
           <div v-for="msg in preview.header_errors" :key="msg" class="pilot-error import-alert" role="alert">{{ msg }}</div>
           <div v-if="preview.header_errors?.length" class="import-alert import-alert-warn">
-            请修正表头后重新上传；当前文件不允许提交。
+            请修正列映射后重新校验；当前批次不允许提交。
           </div>
+          <div v-for="msg in preview.header_warnings" :key="msg" class="import-note">{{ msg }}</div>
 
           <div class="import-table-scroll" role="region" aria-label="导入预览表格，窄屏可横向滚动" tabindex="0">
             <div class="import-mobile-hint">左右滑动查看完整表格</div>
@@ -252,10 +369,13 @@ async function confirmCommit() {
         </div>
         <template #footer>
           <div class="import-footer">
-            <span class="pilot-small">仅导入无错误的 {{ validCount }} 行。导入后生成草稿就诊，仍需医生预测、复核与发布。</span>
-            <button class="pilot-btn pilot-btn-primary" type="button" :disabled="!canCommit" @click="askCommit">
-              确认导入 {{ validCount }} 行
-            </button>
+            <span class="pilot-small">提交时只发送批次号 {{ preview.batch_id }}。仅导入无错误的 {{ validCount }} 行；导入后生成草稿就诊，仍需医生预测、复核与发布。</span>
+            <div class="import-footer-actions">
+              <button v-if="invalidCount" class="pilot-btn" type="button" @click="downloadErrors">导出错误行</button>
+              <button class="pilot-btn pilot-btn-primary" type="button" :disabled="!canCommit" @click="askCommit">
+                确认导入 {{ validCount }} 行
+              </button>
+            </div>
           </div>
         </template>
       </SectionPanel>
@@ -298,6 +418,49 @@ async function confirmCommit() {
       </SectionPanel>
 
       <ElDialog
+        v-model="mappingOpen"
+        title="列映射"
+        width="760px"
+        class="pilot-dialog mapping-dialog"
+        :close-on-click-modal="false"
+        append-to-body
+      >
+        <div class="mapping-copy">
+          <p>源文件列已自动匹配，可在这里改为患者字段、就诊字段或 35 项模型指标。未映射列会被忽略，不影响导入。</p>
+          <span class="pilot-muted">当前 {{ mappingStats.mapped }} 列已映射 · {{ mappingStats.ignored }} 列忽略</span>
+        </div>
+        <div class="mapping-table-scroll">
+          <table class="pilot-table mapping-table">
+            <thead>
+              <tr><th scope="col">源列</th><th scope="col">示例值</th><th scope="col">导入字段</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="header in preview?.headers ?? []" :key="header">
+                <td class="cell-strong">{{ header }}</td>
+                <td class="pilot-mono mapping-sample">{{ preview?.samples?.[header] || '—' }}</td>
+                <td>
+                  <select v-model="mappingDraft[header]" class="pilot-select mapping-select">
+                    <option value="__ignore__">忽略此列</option>
+                    <optgroup v-for="group in mappingGroups" :key="group.label" :label="group.label">
+                      <option v-for="option in group.options" :key="option.value" :value="option.value">{{ option.label }}</option>
+                    </optgroup>
+                  </select>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <template #footer>
+          <div class="dialog-actions">
+            <button class="pilot-btn" type="button" @click="mappingOpen = false">取消</button>
+            <button class="pilot-btn pilot-btn-primary" type="button" :disabled="busy" @click="applyMapping">
+              {{ busy ? '重新校验中…' : '应用映射并重新校验' }}
+            </button>
+          </div>
+        </template>
+      </ElDialog>
+
+      <ElDialog
         v-model="showCommit"
         title="确认导入"
         width="520px"
@@ -305,9 +468,10 @@ async function confirmCommit() {
         :close-on-click-modal="false"
         append-to-body
       >
-        <p class="import-confirm-copy">将导入 {{ validCount }} 行有效数据并建立草稿就诊。预览阶段未写入的档案与就诊会在提交后写入数据库。</p>
+        <p class="import-confirm-copy">将按批次 <b class="pilot-mono">{{ preview?.batch_id }}</b> 提交 {{ validCount }} 行有效数据，并建立草稿就诊。预览阶段未写入的档案与就诊会在提交后写入数据库。</p>
         <div class="import-confirm-meta">
           <div><span>文件</span><strong>{{ preview?.filename || fileName }}</strong></div>
+          <div v-if="preview?.sheet_name"><span>工作表</span><strong>{{ preview.sheet_name }}</strong></div>
           <div><span>有效行</span><strong>{{ validCount }}</strong></div>
           <div><span>错误行</span><strong>{{ invalidCount }}</strong></div>
         </div>
@@ -350,7 +514,7 @@ async function confirmCommit() {
 .import-format-mark {
   display: grid;
   place-items: center;
-  width: 38px;
+  width: 46px;
   height: 38px;
   border: 1px solid var(--pilot-line-strong);
   border-radius: var(--pilot-radius-control);
@@ -383,7 +547,7 @@ async function confirmCommit() {
   background: var(--pilot-surface);
   color: var(--pilot-accent);
   font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
 }
 .import-zone-copy { display: flex; flex-direction: column; gap: var(--pilot-space-1); flex: 1; min-width: 0; }
@@ -393,7 +557,7 @@ async function confirmCommit() {
 .import-file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .import-zone-hint { margin: var(--pilot-space-2) 0 0; color: var(--pilot-muted); font-size: var(--pilot-font-xs); }
 .import-body { padding: var(--pilot-space-4); }
-.import-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--pilot-space-2); margin-bottom: var(--pilot-space-4); }
+.import-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--pilot-space-2); margin-bottom: var(--pilot-space-3); }
 .import-summary-cell {
   display: flex;
   flex-direction: column;
@@ -409,7 +573,23 @@ async function confirmCommit() {
 .import-summary-cell > strong.is-low { color: var(--pilot-low); }
 .import-summary-cell > strong.is-high { color: var(--pilot-high); }
 .import-summary-cell > strong.is-muted { color: var(--pilot-muted); }
-.import-note { margin: var(--pilot-space-3) 0 0; color: var(--pilot-muted); font-size: var(--pilot-font-xs); line-height: 1.6; }
+.import-file-meta { display: flex; flex-wrap: wrap; gap: var(--pilot-space-2) var(--pilot-space-4); margin-bottom: var(--pilot-space-3); color: var(--pilot-ink-soft); font-size: var(--pilot-font-xs); }
+.import-file-meta > span { display: inline-flex; align-items: center; gap: var(--pilot-space-1); min-width: 0; overflow-wrap: anywhere; }
+.import-mapping-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pilot-space-3);
+  margin-bottom: var(--pilot-space-3);
+  padding: var(--pilot-space-2) var(--pilot-space-3);
+  border: 1px solid var(--pilot-line);
+  border-radius: var(--pilot-radius-control);
+  background: var(--pilot-surface-2);
+  color: var(--pilot-muted);
+  font-size: var(--pilot-font-xs);
+}
+.import-mapping-strip strong { color: var(--pilot-ink); font-size: var(--pilot-font-sm); }
+.import-note { margin: var(--pilot-space-2) 0 0; color: var(--pilot-muted); font-size: var(--pilot-font-xs); line-height: 1.6; }
 .import-alert { margin: var(--pilot-space-3) 0 0; }
 .import-alert-warn {
   padding: var(--pilot-space-3) var(--pilot-space-4);
@@ -429,12 +609,43 @@ async function confirmCommit() {
 .import-issue.is-mid { color: var(--pilot-mid); }
 .import-pass { color: var(--pilot-low); font-size: var(--pilot-font-xs); font-weight: 600; }
 .import-footer { display: flex; align-items: center; justify-content: space-between; gap: var(--pilot-space-4); }
+.import-footer-actions { display: flex; align-items: center; gap: var(--pilot-space-2); flex-shrink: 0; }
 .import-confirm-copy { margin: 0 0 var(--pilot-space-4); color: var(--pilot-ink-soft); line-height: 1.6; }
 .import-confirm-meta { display: grid; gap: var(--pilot-space-2); margin-bottom: var(--pilot-space-4); padding: var(--pilot-space-3) var(--pilot-space-4); border: 1px solid var(--pilot-line); background: var(--pilot-surface-2); border-radius: var(--pilot-radius-control); }
 .import-confirm-meta > div { display: flex; justify-content: space-between; gap: var(--pilot-space-4); font-size: var(--pilot-font-sm); }
 .import-confirm-meta span { color: var(--pilot-muted); }
 .import-confirm-meta strong { color: var(--pilot-ink); overflow-wrap: anywhere; text-align: right; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: var(--pilot-space-2); }
+
+.sheet-choice-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--pilot-space-3); }
+.sheet-choice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pilot-space-3);
+  min-height: 64px;
+  padding: var(--pilot-space-3) var(--pilot-space-4);
+  border: 1px solid var(--pilot-line);
+  border-radius: var(--pilot-radius-control);
+  background: var(--pilot-surface-2);
+  color: var(--pilot-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.sheet-choice:hover,
+.sheet-choice:focus-visible { border-color: var(--pilot-accent); background: var(--pilot-accent-soft); outline: none; }
+.sheet-choice-name { font-weight: 700; overflow-wrap: anywhere; }
+.sheet-choice-arrow { color: var(--pilot-accent); font-size: var(--pilot-font-xs); white-space: nowrap; }
+
+.mapping-copy { margin-bottom: var(--pilot-space-3); color: var(--pilot-ink-soft); font-size: var(--pilot-font-sm); line-height: 1.6; }
+.mapping-copy p { margin: 0 0 var(--pilot-space-1); }
+.mapping-table-scroll { max-height: 52vh; overflow: auto; border: 1px solid var(--pilot-line); border-radius: var(--pilot-radius-control); }
+.mapping-table { min-width: 0; }
+.mapping-table th { position: sticky; top: 0; z-index: 1; }
+.mapping-table td { padding: var(--pilot-space-2) var(--pilot-space-3); }
+.mapping-sample { max-width: 180px; overflow: hidden; color: var(--pilot-muted); text-overflow: ellipsis; white-space: nowrap; }
+.mapping-select { width: 100%; min-width: 190px; }
 
 @media (max-width: 800px) {
   .import-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -443,6 +654,8 @@ async function confirmCommit() {
   .import-zone-copy { flex-basis: calc(100% - 68px); }
   .import-zone-action { margin-left: 68px; }
   .import-footer { align-items: flex-start; flex-direction: column; }
+  .import-footer-actions { width: 100%; justify-content: flex-end; }
+  .sheet-choice-list { grid-template-columns: 1fr; }
 }
 @media (max-width: 650px) {
   .import-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -459,5 +672,6 @@ async function confirmCommit() {
     color: var(--pilot-muted);
     font-size: var(--pilot-font-xs);
   }
+  .mapping-dialog { width: calc(100vw - 24px) !important; }
 }
 </style>

@@ -22,7 +22,7 @@ from .config import BACKEND_DIR
 _INIT_LOCK = threading.Lock()
 _INITIALIZED: set[str] = set()
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Prediction rows come from two origins:
 #   model  - produced by the deployed model; probability/model_version/model_hash set
@@ -328,6 +328,11 @@ CREATE TABLE IF NOT EXISTS import_batches (
     failed INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'completed',
     detail_json TEXT NOT NULL DEFAULT '{}',
+    preview_json TEXT NOT NULL DEFAULT '{}',
+    mapping_json TEXT NOT NULL DEFAULT '{}',
+    file_hash TEXT NOT NULL DEFAULT '',
+    sheet_name TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_import_batches_created ON import_batches(created_at);
@@ -402,6 +407,33 @@ def _migrate_predictions_v3(conn: sqlite3.Connection, target: Path) -> bool:
     return True
 
 
+def _migrate_import_batches_v4(conn: sqlite3.Connection) -> bool:
+    """Add the preview/mapping metadata used by the XLSX import flow.
+
+    The columns are additive and nullable by default, so existing completed
+    batches remain readable without a table rebuild.
+    """
+    columns = _table_columns(conn, "import_batches")
+    if not columns:
+        return False
+    additions = {
+        "preview_json": "TEXT NOT NULL DEFAULT '{}'",
+        "mapping_json": "TEXT NOT NULL DEFAULT '{}'",
+        "file_hash": "TEXT NOT NULL DEFAULT ''",
+        "sheet_name": "TEXT NOT NULL DEFAULT ''",
+        "updated_at": "TEXT NOT NULL DEFAULT ''",
+    }
+    changed = False
+    for name, declaration in additions.items():
+        if name not in columns:
+            conn.execute(f"ALTER TABLE import_batches ADD COLUMN {name} {declaration}")
+            changed = True
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_import_batches_hash ON import_batches(file_hash)"
+    )
+    return changed
+
+
 def initialize_database(path: Path | None = None) -> Path:
     target = Path(path or database_path())
     key = str(target)
@@ -412,6 +444,7 @@ def initialize_database(path: Path | None = None) -> Path:
         try:
             conn.executescript(_SCHEMA)
             _migrate_predictions_v3(conn, target)
+            _migrate_import_batches_v4(conn)
             conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         finally:
             conn.close()
