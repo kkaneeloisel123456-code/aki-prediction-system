@@ -43,6 +43,38 @@ uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
 
 开发模式（前端热重载）：另开一个终端进入 `frontend` 目录后执行 `npm run dev`，访问 [http://localhost:5173](http://localhost:5173) ，Vite 会把 `/api` 代理到 8000 端口的后端。
 
+### 方式三：Docker（容器部署）
+
+镜像分两阶段构建：Node 阶段构建 `frontend/dist`，Python 运行阶段只复制 `backend/`、`app_data/`、`outputs/`、`scripts/` 和前端产物。`.dockerignore` 会排除 `backend/clinical.db`、`backend/clinical.db-*`、`backend/auth_config.json`、`backend/backups/` 和日志，因此患者数据库与认证配置不会进入镜像层。
+
+```bash
+# 1. 构建镜像
+docker build -t aki-prediction-system .
+
+# 2. 创建持久化数据卷（数据库、认证配置、备份都放在 /data）
+docker volume create aki-data
+
+# 3. 首次初始化：生成管理员随机密码（只在终端显示一次）
+docker run --rm -v aki-data:/data aki-prediction-system \
+  python scripts/init_auth.py --username admin --role admin --generate-password
+
+# 4. 把管理员导入 SQLite，并生成首份一致性备份
+docker run --rm -v aki-data:/data aki-prediction-system \
+  python scripts/init_clinical_db.py
+
+# 5. 启动服务（容器内默认 AKI_DB_PATH=/data/clinical.db）
+docker run -d --name aki-web -p 8000:8000 -v aki-data:/data aki-prediction-system
+```
+
+浏览器访问 [http://localhost:8000](http://localhost:8000)。生产环境必须把 `/data` 挂载到持久卷；容器重建不会带走数据库。若通过 HTTPS 反向代理发布，追加 `-e AKI_AUTH_SECURE_COOKIE=1`。健康检查 `/api/health` 会同时校验模型资产与 `clinical.db` 是否可读，数据库不可读时返回 HTTP 503，容器 `HEALTHCHECK` 和 Render/Railway 的健康检查都会因此失败。Render/Railway 等平台也必须给 `/data` 配置持久磁盘；未配置时容器重建会丢失数据库，不能用于真实患者数据。
+
+验证镜像内不含敏感文件：
+
+```bash
+docker run --rm aki-prediction-system sh -c \
+  'test ! -e backend/clinical.db && test ! -e backend/auth_config.json && test ! -d backend/backups && echo image-clean'
+```
+
 ### 本地登录、数据库与账号管理
 
 - 一键启动器首次运行时会在缺少认证配置的情况下创建 `admin` 并生成随机初始密码；随后自动初始化 `backend/clinical.db`、导入管理员并生成首份一致性备份。
@@ -52,7 +84,7 @@ uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
 - 患者数据、WAL/SHM、备份和恢复临时文件均已加入 `.gitignore`，不要提交到仓库。
 - 生产环境建议启用 HTTPS，并设置 `AKI_AUTH_SECURE_COOKIE=1` 为会话 Cookie 增加 `Secure` 属性；整个系统应部署在受控内网或经医院批准的服务器上。
 - 备份与恢复：管理员页面可手动创建一致性备份（含 SHA-256 校验）；命令行恢复示例：
-  `python -m backend.app.backup restore backend/backups/clinical-YYYYMMDDTHHMMSSZ.db --confirm`。恢复前系统会自动保留一份紧急副本。
+  `python -m backend.app.backup restore backend/backups/clinical-YYYYMMDDTHHMMSSZ.db --confirm`。恢复应在服务停止后执行。恢复前系统会用同一套 SQLite 备份 API 保留一份紧急副本，未合并的 WAL 页也会包含在副本中；替换主库后会删除旧的 `-wal/-shm`，避免旧日志回放到恢复后的数据库。
 
 ---
 

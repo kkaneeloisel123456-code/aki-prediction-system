@@ -951,7 +951,7 @@ def publish_report(encounter_id: str, req: ReportPublishRequest, request: Reques
             (user["id"], encounter_id),
         ).fetchone()
         if draft:
-            if req.draft_version and draft["draft_version"] != req.draft_version:
+            if req.draft_version != draft["draft_version"]:
                 raise _err("草稿已更新，请重新核对", 409)
             payload = json_load(draft["payload_json"], {})
             values = payload.get("values", {})
@@ -984,7 +984,7 @@ def publish_report(encounter_id: str, req: ReportPublishRequest, request: Reques
         failed = [item["label"] for item in checklist["items"] if not item["ok"]]
         if failed:
             raise _err("发布核对未完成：" + "；".join(failed), 422)
-        patient = _require_patient(conn, user, row["patient_id"])
+        patient = _require_patient(conn, user, row["patient_id"], write=True)
         version = conn.execute(
             "SELECT COALESCE(MAX(version),0)+1 FROM reports WHERE encounter_id=?",
             (encounter_id,),

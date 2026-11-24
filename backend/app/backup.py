@@ -12,6 +12,26 @@ from pathlib import Path
 from .database import connect, database_path, initialize_database
 
 
+def _consistent_copy(source: Path, target: Path) -> None:
+    """Copy a SQLite database through the backup API.
+
+    A plain file copy of the main database can miss committed pages that still
+    live in ``-wal``.  The backup API reads the main file and WAL together and
+    writes a standalone destination, so the result is consistent even when the
+    source has not checkpointed yet.
+    """
+    src = connect(source)
+    target.unlink(missing_ok=True)
+    for suffix in ("-wal", "-shm"):
+        Path(str(target) + suffix).unlink(missing_ok=True)
+    dest = sqlite3.connect(target)
+    try:
+        src.backup(dest)
+    finally:
+        dest.close()
+        src.close()
+
+
 def backup_database(target_dir: Path | None = None, *, source_path: Path | None = None) -> Path:
     source = Path(source_path or database_path())
     if not source.exists():
@@ -19,13 +39,7 @@ def backup_database(target_dir: Path | None = None, *, source_path: Path | None 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     target = Path(target_dir or (source.parent / "backups")) / f"clinical-{stamp}.db"
     target.parent.mkdir(parents=True, exist_ok=True)
-    src = connect(source)
-    dest = sqlite3.connect(target)
-    try:
-        src.backup(dest)
-    finally:
-        dest.close()
-        src.close()
+    _consistent_copy(source, target)
     # Integrity-check the produced snapshot instead of trusting file size.
     check = sqlite3.connect(target)
     try:
@@ -63,9 +77,17 @@ def restore_database(source: Path, *, confirm: bool = False) -> Path:
         emergency = target.with_name(
             target.name + ".pre-restore-" + datetime.now().strftime("%Y%m%d%H%M%S")
         )
-        shutil.copy2(target, emergency)
+        try:
+            # Include committed WAL pages in the emergency copy; copying only
+            # the main file would silently discard the most recent writes.
+            _consistent_copy(target, emergency)
+        except sqlite3.DatabaseError:
+            # A stale or corrupt sidecar must not block the requested restore.
+            # Keep a best-effort main-file copy so the operator still has it.
+            shutil.copy2(target, emergency)
     temp = target.with_name(target.name + ".restoring")
-    shutil.copy2(source, temp)
+    temp.unlink(missing_ok=True)
+    _consistent_copy(source, temp)
     temp.replace(target)
     # WAL/SHM belong to the replaced main file; leaving them would replay the
     # old log into the restored database on the next open.

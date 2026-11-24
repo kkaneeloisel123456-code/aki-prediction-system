@@ -6,6 +6,7 @@ import csv
 import io
 import json
 import os
+import sqlite3
 from datetime import date, datetime
 import shutil
 import sys
@@ -553,6 +554,163 @@ def test_restore_removes_stale_wal_and_shm(client):
     restore_database(snapshot, confirm=True)
     for suffix in ("-wal", "-shm"):
         assert not Path(str(DB_PATH) + suffix).exists()
+
+
+def test_restore_with_unmerged_wal_matches_backup_and_keeps_emergency_copy(client):
+    """A committed-but-uncheckpointed WAL must not survive a restore."""
+    login(client)
+    backup = client.post("/api/admin/backup")
+    assert backup.status_code in (200, 201), backup.text
+    snapshot = TEST_ROOT / "backups" / backup.json()["filename"]
+    for path in TEST_ROOT.glob("clinical.db.pre-restore-*"):
+        path.unlink()
+
+    # Write an audit marker in WAL mode and copy the main file + WAL while the
+    # connection is still open, so the copied pair genuinely has an unmerged
+    # committed transaction. Closing the writer afterwards would checkpoint it
+    # into the main file and defeat the purpose of this test.
+    live = sqlite3.connect(DB_PATH, isolation_level=None, timeout=30)
+    try:
+        live.execute("PRAGMA journal_mode=WAL")
+        live.execute("PRAGMA wal_autocheckpoint=0")
+        # isolation_level=None makes this statement autocommit, leaving the
+        # new page only in WAL until a checkpoint (or last-connection close).
+        live.execute(
+            """INSERT INTO audit_events
+               (id,actor_type,actor_id,action,entity_type,entity_id,detail_json,ip,created_at)
+               VALUES('AUD-WAL-MARKER','system',NULL,'wal_marker','system',NULL,'{}',NULL,'2026-11-24T10:00:00+08:00')"""
+        )
+        wal = Path(str(DB_PATH) + "-wal")
+        assert wal.exists() and wal.stat().st_size > 0
+        main_copy = TEST_ROOT / "unmerged-main.db"
+        wal_copy = TEST_ROOT / "unmerged-main.db-wal"
+        shutil.copy2(DB_PATH, main_copy)
+        shutil.copy2(wal, wal_copy)
+    finally:
+        live.close()
+
+    for suffix in ("-wal", "-shm"):
+        path = Path(str(DB_PATH) + suffix)
+        if path.exists():
+            path.unlink()
+    shutil.copy2(main_copy, DB_PATH)
+    shutil.copy2(wal_copy, Path(str(DB_PATH) + "-wal"))
+
+    restore_database(snapshot, confirm=True)
+
+    with db.reader() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM audit_events WHERE action='wal_marker'"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM users WHERE username='admin'"
+        ).fetchone()[0] == 1
+    emergencies = sorted(TEST_ROOT.glob("clinical.db.pre-restore-*"))
+    assert len(emergencies) == 1
+    # The emergency copy is taken before replacement and must include the
+    # latest WAL commit, otherwise it is not a usable rollback.
+    emergency = sqlite3.connect(emergencies[0])
+    try:
+        assert emergency.execute(
+            "SELECT COUNT(*) FROM audit_events WHERE action='wal_marker'"
+        ).fetchone()[0] == 1
+    finally:
+        emergency.close()
+
+
+def test_publish_requires_exact_draft_version(client):
+    login(client)
+    doctor_id = create_doctor(client, "draft_doc")
+    patient = client.post("/api/patients", json={
+        "mrn": "DRAFT-1", "name": "草稿并发患者", "sex": "男", "birth_year": 1960,
+        "owner_id": doctor_id,
+    })
+    assert patient.status_code == 201, patient.text
+    patient_id = patient.json()["id"]
+    encounter = client.post(f"/api/patients/{patient_id}/encounters", json={
+        "case_ref": "DRAFT-CASE", "occurred_at": "2026-11-20T09:00:00+08:00",
+        "values": {}, "diagnosis": "待评估", "orders": "监测",
+    })
+    assert encounter.status_code == 201, encounter.text
+    encounter_id = encounter.json()["id"]
+    detail = client.get(f"/api/encounters/{encounter_id}").json()
+    features = _model_features()
+
+    first = client.put(f"/api/encounters/{encounter_id}/draft", json={
+        "row_version": detail["row_version"], "draft_version": 0,
+        "values": features, "diagnosis": "待评估", "orders": "监测",
+    })
+    assert first.status_code == 200, first.text
+    second = client.put(f"/api/encounters/{encounter_id}/draft", json={
+        "row_version": detail["row_version"], "draft_version": first.json()["draft_version"],
+        "values": features, "diagnosis": "待评估", "orders": "监测",
+    })
+    assert second.status_code == 200, second.text
+    assert second.json()["draft_version"] == 2
+
+    prediction = client.post(f"/api/encounters/{encounter_id}/predict", json={
+        "row_version": detail["row_version"], "features": features,
+    })
+    assert prediction.status_code == 200, prediction.text
+    detail = client.get(f"/api/encounters/{encounter_id}").json()
+    review = client.post(f"/api/encounters/{encounter_id}/review", json={
+        "row_version": detail["row_version"], "decision": "agree", "reason": "同意",
+    })
+    assert review.status_code == 200, review.text
+    detail = client.get(f"/api/encounters/{encounter_id}").json()
+    checklist = client.get(f"/api/encounters/{encounter_id}/checklist").json()
+    assert checklist["can_publish"] is True, checklist
+    assert checklist["draft_version"] == 2
+
+    base = {"row_version": detail["row_version"], "missing_ack": False}
+    stale = client.post(f"/api/encounters/{encounter_id}/publish", json={
+        **base, "draft_version": 1,
+    })
+    assert stale.status_code == 409, stale.text
+    # draft_version=0 used to be treated as "no version supplied" and silently
+    # bypassed an existing draft version.
+    bypass = client.post(f"/api/encounters/{encounter_id}/publish", json={
+        **base, "draft_version": 0,
+    })
+    assert bypass.status_code == 409, bypass.text
+    published = client.post(f"/api/encounters/{encounter_id}/publish", json={
+        **base, "draft_version": checklist["draft_version"],
+    })
+    assert published.status_code == 200, published.text
+
+
+def test_portal_list_does_not_expose_clinical_values(client):
+    login(client)
+    case = _published_case(client, mrn="PORTAL-MASK")
+    code = client.post(f"/api/patients/{case['patient_id']}/query-code").json()["query_code"]
+    ok = client.post("/api/portal/query", json={
+        "mrn": "PORTAL-MASK", "name": "测试患者", "query_code": code,
+        "certificate_last4": "1234",
+    })
+    assert ok.status_code == 200, ok.text
+    listed = client.get("/api/portal/reports").json()["reports"]
+    assert listed
+    encounter = listed[0]["encounter"]
+    assert set(encounter) == {"id", "case_ref", "occurred_at", "surgery_type"}
+    for key in ("values", "diagnosis", "orders"):
+        assert key not in encounter
+    detail = client.get(f"/api/portal/reports/{case['report_id']}").json()["report"]
+    assert "values" not in detail["snapshot"]["encounter"]
+
+
+def test_health_fails_when_database_is_unreadable(client, monkeypatch):
+    healthy = client.get("/api/health")
+    assert healthy.status_code == 200, healthy.text
+    assert healthy.json()["database_ok"] is True
+    assert healthy.json()["status"] == "ok"
+
+    broken = TEST_ROOT / "broken.db"
+    broken.write_bytes(b"this is not a sqlite database")
+    monkeypatch.setenv("AKI_DB_PATH", str(broken))
+    response = client.get("/api/health")
+    assert response.status_code == 503, response.text
+    assert response.json()["database_ok"] is False
+    assert response.json()["status"] == "unavailable"
 
 
 # ---------------------------------------------------------------------------

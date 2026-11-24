@@ -577,6 +577,23 @@ def list_my_feedback(request: Request):
         return {"feedback": [dict(r) for r in rows]}
 
 
+def _portal_encounter_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Return only visit metadata safe for the patient-facing report list.
+
+    The stored snapshot keeps the full clinical payload (including all 35
+    measured values and diagnosis text) for the detail view and PDF.  The list
+    must not become a side channel that exposes those values before the
+    patient opens a report.
+    """
+    encounter = snapshot.get("encounter", {}) or {}
+    return {
+        "id": encounter.get("id"),
+        "case_ref": encounter.get("case_ref"),
+        "occurred_at": encounter.get("occurred_at"),
+        "surgery_type": encounter.get("surgery_type"),
+    }
+
+
 def _portal_reports(conn: Any, patient_id: str) -> list[dict[str, Any]]:
     rows = conn.execute(
         """SELECT r.* FROM reports r WHERE r.patient_id=? AND r.status='published'
@@ -591,7 +608,7 @@ def _portal_reports(conn: Any, patient_id: str) -> list[dict[str, Any]]:
             "id": row["id"], "report_no": row["report_no"], "version": row["version"],
             "published_at": row["published_at"], "risk_level": prediction.get("risk_level"),
             "probability": prediction.get("probability"),
-            "encounter": snapshot.get("encounter", {}),
+            "encounter": _portal_encounter_summary(snapshot),
         })
     return result
 

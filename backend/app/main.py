@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import logging
 import math
+import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -47,7 +48,7 @@ from .clinical_api import router as clinical_router
 from .admin_api import router as admin_router
 from .patient_portal_api import router as portal_router
 from .import_api import router as import_router
-from .database import ensure_initialized, utc_now
+from .database import database_path, ensure_initialized, utc_now
 from .schemas import (
     AuthStatusResponse,
     AuthUser,
@@ -269,14 +270,42 @@ def auth_status(request: Request) -> AuthStatusResponse:
 
 
 @app.get("/api/health", response_model=HealthResponse)
-def health() -> HealthResponse:
+def health(response: Response) -> HealthResponse:
+    model_loaded = False
+    n_features = 0
     try:
         assets = load_assets()
-        return HealthResponse(status="ok", model_loaded=True,
-                             n_features=len(assets["features"]))
+        model_loaded = True
+        n_features = len(assets["features"])
     except Exception as exc:
-        logger.error("Health check failed: %s", exc)
-        return HealthResponse(status="degraded", model_loaded=False, n_features=0)
+        logger.error("Health check model load failed: %s", exc)
+
+    database_ok = False
+    path = database_path()
+    if path.is_file():
+        try:
+            # Read-only URI: a health probe must never create or migrate the
+            # database.  Touching the users table proves the file is a readable
+            # clinical store, not merely a file that happens to open.
+            probe = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=5.0)
+            try:
+                probe.execute("SELECT 1 FROM users LIMIT 1").fetchone()
+            finally:
+                probe.close()
+            database_ok = True
+        except sqlite3.Error as exc:
+            logger.error("Health check database probe failed for %s: %s", path, exc)
+
+    if not database_ok:
+        response.status_code = 503
+        return HealthResponse(
+            status="unavailable", model_loaded=model_loaded,
+            n_features=n_features, database_ok=False,
+        )
+    return HealthResponse(
+        status="ok" if model_loaded else "degraded",
+        model_loaded=model_loaded, n_features=n_features, database_ok=True,
+    )
 
 
 @app.post("/api/predict", response_model=PredictResponse)

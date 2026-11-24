@@ -1,5 +1,5 @@
 export interface ShapContribution { feature: string; value: number; shap: number; direction: string }
-export interface HealthResponse { status: string; model_loaded: boolean; n_features: number }
+export interface HealthResponse { status: string; model_loaded: boolean; n_features: number; database_ok: boolean }
 export interface FeatureMeta {
   name: string
   median: number

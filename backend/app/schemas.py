@@ -70,6 +70,7 @@ class HealthResponse(BaseModel):
     status: str
     model_loaded: bool
     n_features: int
+    database_ok: bool = True
 
 
 class LoginRequest(BaseModel):
