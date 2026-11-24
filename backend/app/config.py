@@ -83,4 +83,5 @@ AUTH_COOKIE_SECURE = os.environ.get("AKI_AUTH_SECURE_COOKIE", "0").strip().lower
 AUTH_SESSION_HOURS = max(1, int(os.environ.get("AKI_AUTH_SESSION_HOURS", "12")))
 AUTH_REMEMBER_DAYS = max(1, int(os.environ.get("AKI_AUTH_REMEMBER_DAYS", "7")))
 PATIENT_PORTAL_TTL_MINUTES = max(5, int(os.environ.get("AKI_PORTAL_TTL_MINUTES", "720")))
-PATIENT_QUERY_TTL_MINUTES = max(5, int(os.environ.get("AKI_QUERY_TTL_MINUTES", "10")))
+PATIENT_QUERY_TTL_MINUTES = max(5, int(os.environ.get("AKI_QUERY_TTL_MINUTES", "1440")))
+PATIENT_QUERY_SESSION_MINUTES = max(1, int(os.environ.get("AKI_QUERY_SESSION_MINUTES", "30")))

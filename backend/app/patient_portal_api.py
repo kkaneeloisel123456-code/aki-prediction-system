@@ -24,7 +24,7 @@ from .auth_service import (
 from .config import (
     AUTH_COOKIE_SECURE,
     PATIENT_PORTAL_TTL_MINUTES,
-    PATIENT_QUERY_TTL_MINUTES,
+    PATIENT_QUERY_SESSION_MINUTES,
 )
 from .database import json_load, new_id, record_audit, row_to_dict, utc_now
 from .pdf import generate_clinical_report
@@ -380,7 +380,7 @@ def query_reports(req: PortalQueryRequest, request: Request, response: Response)
             conn, req.mrn, req.name, req.query_code, key,
             req.certificate_last4, req.phone_last4,
         )
-    ttl = PATIENT_QUERY_TTL_MINUTES * 60
+    ttl = PATIENT_QUERY_SESSION_MINUTES * 60
     token = _create_portal_session(
         account_id=None, patient_id=patient["id"], ttl_seconds=ttl, ip=_ip(request)
     )

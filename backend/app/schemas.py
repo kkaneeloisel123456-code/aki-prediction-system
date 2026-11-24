@@ -252,5 +252,3 @@ class PatientAccountAdminUpdate(BaseModel):
 
 class ImportCommitRequest(BaseModel):
     batch_id: Optional[str] = Field(default=None, max_length=80)
-    filename: str = Field(default="import.csv", max_length=200)
-    rows: list[dict[str, Any]] = Field(default_factory=list)

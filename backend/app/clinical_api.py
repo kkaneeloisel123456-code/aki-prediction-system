@@ -357,7 +357,7 @@ def _checklist(
         {"key": "diagnosis", "label": "已填写临床诊断", "ok": bool(encounter["diagnosis"].strip())},
         {"key": "orders", "label": "已填写医嘱或随访建议", "ok": bool(encounter["orders"].strip())},
         {"key": "review", "label": "医生复核有效", "ok": review_valid,
-         "detail": "调整、暂缓或人工审核必须填写理由"},
+         "detail": "调整、暂不发布或人工记录必须填写理由"},
         {"key": "missing", "label": "缺失指标已确认",
          "ok": not missing or missing_ack, "detail": f"缺失 {len(missing)} 项"},
     ]
@@ -560,13 +560,19 @@ def revoke_patient_access(patient_id: str, doctor_id: str, request: Request):
 @router.post("/patients/{patient_id}/query-code")
 def issue_query_code(patient_id: str, request: Request):
     user = _user(request)
+    ttl_minutes = PATIENT_QUERY_TTL_MINUTES
+    ttl_label = (
+        f"{ttl_minutes // 60} 小时"
+        if ttl_minutes % 60 == 0
+        else f"{ttl_minutes} 分钟"
+    )
     with db.transaction(immediate=True) as conn:
         patient = _require_patient(conn, user, patient_id)
         if user["role"] != "admin" and patient["owner_id"] != user["id"]:
             raise _err("仅档案负责人或管理员可生成查询码", 403)
         code = "".join(secrets.choice("23456789ABCDEFGHJKLMNPQRSTUVWXYZ") for _ in range(8))
         now = int(time.time())
-        expires = now + PATIENT_QUERY_TTL_MINUTES * 60
+        expires = now + ttl_minutes * 60
         conn.execute(
             "UPDATE patient_query_codes SET revoked_at=? WHERE patient_id=? AND revoked_at IS NULL",
             (utc_now(), patient_id),
@@ -583,7 +589,7 @@ def issue_query_code(patient_id: str, request: Request):
             entity_type="patient", entity_id=patient_id, ip=_ip(request),
         )
         return {"query_code": code, "expires_at": expires,
-                "notice": "查询码仅显示一次，请交给患者本人；重新生成会使旧码立即失效。"}
+                "notice": f"查询码 {ttl_label}内有效，请交给患者本人；重新生成会使旧码立即失效。"}
 
 
 # ---------------------------------------------------------------------------
@@ -828,7 +834,7 @@ def review_encounter(encounter_id: str, req: ClinicalReviewRequest, request: Req
         raise _err("复核结论无效")
     reason = req.reason.strip()
     if req.decision in {"adjust", "defer", "manual"} and not reason:
-        raise _err("调整判断、暂缓采纳或人工审核时必须填写理由")
+        raise _err("调整风险判断、暂不发布或人工记录时必须填写理由")
     with db.transaction(immediate=True) as conn:
         row = _get_encounter(conn, user, encounter_id, write=True)
         if req.row_version != row["row_version"]:
@@ -850,9 +856,9 @@ def review_encounter(encounter_id: str, req: ClinicalReviewRequest, request: Req
         ).fetchone()
         if req.decision == "manual":
             if prediction:
-                raise _err("已有有效模型结果，请选择认可、调整或暂缓")
+                raise _err("已有有效模型结果，请选择采纳、调整或暂不发布")
         elif prediction is None:
-            raise _err("请先完成有效预测，或明确选择人工审核并填写理由")
+            raise _err("请先完成有效预测，或明确选择人工记录并填写理由")
         if prediction is None:
             pid = new_id("PD-MANUAL")
             fingerprint = hashlib.sha256(
@@ -967,7 +973,7 @@ def publish_report(encounter_id: str, req: ReportPublishRequest, request: Reques
             (row["current_prediction_id"],),
         ).fetchone() if row["current_prediction_id"] else None
         if not prediction:
-            raise _err("发布正式报告前必须取得当前预测，或完成明确的人工审核")
+            raise _err("发布正式报告前必须取得当前预测，或完成明确的人工记录")
         pred_obj = {
             "id": prediction["id"],
             "model": {"hash": prediction["model_hash"],

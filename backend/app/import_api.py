@@ -2,9 +2,7 @@
 """Tabular intake: XLSX/CSV preview, column mapping and transactional import.
 
 The new path stores an immutable preview snapshot in ``import_batches`` and
-commits with only the batch id.  The legacy ``rows`` commit path is retained
-for one release so clients that still send rows keep working; it is no longer
-used by the batch page.
+commits with only the batch id.
 """
 from __future__ import annotations
 
@@ -804,9 +802,9 @@ def _insert_row(
 def commit_import(req: ImportCommitRequest, request: Request):
     user = _user(request)
     db.ensure_initialized()
-    if req.batch_id:
-        return _commit_preview_batch(req.batch_id, user, request)
-    return _commit_legacy_rows(req, user, request)
+    if not req.batch_id:
+        raise _err("请先预览并提交批次号", 400)
+    return _commit_preview_batch(req.batch_id, user, request)
 
 
 def _commit_preview_batch(batch_id: str, user: dict[str, Any], request: Request):
@@ -909,63 +907,6 @@ def _commit_preview_batch(batch_id: str, user: dict[str, Any], request: Request)
         "batch_id": batch_id, "total": len(rows), "imported": imported,
         "failed": failed, "results": results,
     }
-
-
-def _commit_legacy_rows(req: ImportCommitRequest, user: dict[str, Any], request: Request):
-    """One-release compatibility path for clients that still post rows."""
-    if not req.rows:
-        raise _err("没有可导入的数据")
-    if len(req.rows) > MAX_ROWS:
-        raise _err(f"单批最多 {MAX_ROWS} 行", 413)
-    results: list[dict[str, Any]] = []
-    imported = 0
-    failed = 0
-    batch_id = new_id("IMP")
-    for position, row in enumerate(req.rows):
-        index = row.get("index", position + 1)
-        try:
-            with db.transaction(immediate=True) as conn:
-                patient_id, encounter_id = _insert_row(
-                    conn, row, user, request, req.filename, batch_id,
-                )
-            imported += 1
-            results.append({"index": index, "ok": True, "patient_id": patient_id,
-                            "encounter_id": encounter_id})
-        except (ValueError, HTTPException) as exc:
-            failed += 1
-            message = exc.detail if isinstance(exc, HTTPException) else str(exc)
-            results.append({"index": index, "ok": False, "error": str(message)})
-        except Exception as exc:
-            failed += 1
-            message = str(exc)
-            if "UNIQUE constraint failed: encounters" in message:
-                message = "同一患者下就诊编号已存在，该行未导入"
-            elif "UNIQUE constraint failed: patients.mrn" in message:
-                message = "病历号已存在，该行未导入"
-            results.append({"index": index, "ok": False, "error": f"数据库写入失败：{message}"})
-
-    with db.transaction(immediate=True) as conn:
-        conn.execute(
-            """INSERT INTO import_batches
-               (id,filename,created_by,total,imported,failed,status,detail_json,
-                preview_json,mapping_json,file_hash,sheet_name,updated_at,created_at)
-               VALUES(?,?,?,?,?,?,'completed',?,'{}','{}','','',?,?)""",
-            (
-                batch_id, req.filename[:200], user["id"], len(req.rows), imported,
-                failed,
-                json_dump({"failures": [r for r in results if not r["ok"]][:100]}),
-                utc_now(), utc_now(),
-            ),
-        )
-        record_audit(
-            conn, actor_type="user", actor_id=user["id"], action="import_commit",
-            entity_type="import_batch", entity_id=batch_id,
-            detail={"filename": req.filename, "total": len(req.rows),
-                    "imported": imported, "failed": failed, "legacy_rows": True},
-            ip=request.client.host if request.client else None,
-        )
-    return {"batch_id": batch_id, "total": len(req.rows), "imported": imported,
-            "failed": failed, "results": results}
 
 
 @router.get("/{batch_id}/errors.xlsx")

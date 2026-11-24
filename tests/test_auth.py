@@ -7,6 +7,7 @@ import io
 import json
 import os
 import sqlite3
+import time
 from datetime import date, datetime
 import shutil
 import sys
@@ -52,6 +53,13 @@ def login(client: TestClient, username="admin", password="AdminPass123!") -> Non
     })
     assert response.status_code == 200, response.text
     client.headers["x-csrf-token"] = client.cookies.get("aki_csrf")
+
+
+def _pdf_text(content: bytes) -> str:
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(content))
+    return "".join(page.extract_text() or "" for page in reader.pages)
 
 
 def create_doctor(client: TestClient, username="doctor1", must_change=False) -> str:
@@ -161,6 +169,7 @@ def test_clinical_publish_pdf_and_backup(client):
     pdf = client.get(f"/api/reports/{report_id}/pdf")
     assert pdf.status_code == 200, pdf.text
     assert pdf.content[:4] == b"%PDF"
+    assert "采纳模型结果" in "".join(_pdf_text(pdf.content).split())
     backup = client.post("/api/admin/backup")
     assert backup.status_code in (200, 201), backup.text
     snapshot = TEST_ROOT / "backups" / backup.json()["filename"]
@@ -186,8 +195,9 @@ def test_csv_import_accepts_metric_less_draft(client):
         files={"file": ("import.csv", raw, "text/csv")},
     )
     assert preview.status_code == 200, preview.text
-    assert preview.json()["summary"]["valid"] == 1
-    commit = client.post("/api/imports/commit", json={"rows": preview.json()["rows"]})
+    payload = preview.json()
+    assert payload["summary"]["valid"] == 1
+    commit = client.post("/api/imports/commit", json={"batch_id": payload["batch_id"]})
     assert commit.status_code == 200, commit.text
     assert commit.json()["imported"] == 1
     assert commit.json()["results"][0]["encounter_id"]
@@ -388,6 +398,24 @@ def test_manual_review_without_prediction_succeeds(client):
         ).fetchone()
         assert db.json_load(enc["values_json"], {}) == {"术前eGFR": 40}
 
+    detail = client.get(f"/api/encounters/{encounter_id}").json()
+    checklist = client.get(
+        f"/api/encounters/{encounter_id}/checklist", params={"missing_ack": True},
+    ).json()
+    assert checklist["can_publish"] is True, checklist
+    publish = client.post(f"/api/encounters/{encounter_id}/publish", json={
+        "row_version": detail["row_version"],
+        "draft_version": checklist["draft_version"],
+        "missing_ack": True,
+    })
+    assert publish.status_code == 200, publish.text
+    pdf = client.get(f"/api/reports/{publish.json()['id']}/pdf")
+    assert pdf.status_code == 200, pdf.text
+    pdf_text = "".join(_pdf_text(pdf.content).split())
+    assert "人工记录" in pdf_text
+    assert "暂缓采纳" not in pdf_text
+    assert "人工审核" in pdf_text
+
 
 def test_portal_report_detail_matches_list_and_requires_second_factor(client):
     login(client)
@@ -422,6 +450,47 @@ def test_portal_report_detail_matches_list_and_requires_second_factor(client):
     assert result["risk_level"] == listed[0]["risk_level"]
     assert abs(result["probability"] - listed[0]["probability"]) < 1e-9
     assert report["sha256"]
+
+
+def test_query_code_and_portal_session_have_separate_ttls(client):
+    login(client)
+    case = _published_case(client, mrn="TTL-1")
+    issued = client.post(f"/api/patients/{case['patient_id']}/query-code")
+    assert issued.status_code == 200, issued.text
+    issued_payload = issued.json()
+    code = issued_payload["query_code"]
+    assert "24 小时" in issued_payload["notice"]
+    assert abs(int(issued_payload["expires_at"]) - int(time.time()) - 1440 * 60) <= 60
+
+    verified = client.post("/api/portal/query", json={
+        "mrn": "TTL-1", "name": "测试患者", "query_code": code,
+        "certificate_last4": "1234",
+    })
+    assert verified.status_code == 200, verified.text
+    assert abs(int(verified.json()["expires_in"]) - 30 * 60) <= 2
+    with db.reader() as conn:
+        portal_session = conn.execute(
+            """SELECT expires_at FROM portal_sessions
+               WHERE patient_id=? ORDER BY created_at DESC LIMIT 1""",
+            (case["patient_id"],),
+        ).fetchone()
+    assert portal_session is not None
+    assert abs(int(portal_session["expires_at"]) - int(time.time()) - 30 * 60) <= 60
+
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE portal_sessions SET expires_at=? WHERE patient_id=?",
+            (int(time.time()) - 1, case["patient_id"]),
+        )
+    expired = client.get("/api/portal/reports")
+    assert expired.status_code == 401, expired.text
+
+    # The 30-minute view session expired, but the 24-hour code can be used again.
+    again = client.post("/api/portal/query", json={
+        "mrn": "TTL-1", "name": "测试患者", "query_code": code,
+        "certificate_last4": "1234",
+    })
+    assert again.status_code == 200, again.text
 
 
 def test_deactivate_account_and_last_admin_protection(client):
@@ -499,27 +568,45 @@ def test_view_only_grant_cannot_publish(client):
 def test_import_rejects_invalid_sex_with_chinese_reason(client):
     login(client)
     create_doctor(client, "import_doc")
-    bad = client.post("/api/imports/commit", json={"rows": [{
-        "index": 1, "mrn": "SEX-BAD", "name": "错误性别", "sex": "X",
-        "case_ref": "SEX-1", "occurred_at": "2026-11-20T10:00:00+08:00",
-        "owner_id": "import_doc", "values": {},
-    }]})
-    assert bad.status_code == 200, bad.text
-    assert bad.json()["failed"] == 1
-    assert "性别" in bad.json()["results"][0]["error"]
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["病历号", "姓名", "性别", "出生年份", "就诊编号", "发生时间", "负责人ID"])
+    writer.writerow(["SEX-BAD", "错误性别", "X", "1970", "SEX-1", "2026-11-20T10:00:00+08:00", "import_doc"])
+    writer.writerow(["sex-good", "别名性别", "M", "1970", "SEX-2", "2026-11-20T10:00:00+08:00", "import_doc"])
+    preview = client.post(
+        "/api/imports/preview",
+        files={"file": ("import.csv", buffer.getvalue().encode("utf-8-sig"), "text/csv")},
+    )
+    assert preview.status_code == 200, preview.text
+    payload = preview.json()
+    assert payload["summary"]["valid"] == 1
+    assert payload["summary"]["invalid"] == 1
+    bad_row = next(row for row in payload["rows"] if row["mrn"] == "SEX-BAD")
+    assert any("性别" in message for message in bad_row["errors"])
 
-    good = client.post("/api/imports/commit", json={"rows": [{
-        "index": 1, "mrn": "sex-good", "name": "别名性别", "sex": "M",
-        "case_ref": "SEX-2", "occurred_at": "2026-11-20T10:00:00+08:00",
-        "owner_id": "import_doc", "values": {},
-    }]})
-    assert good.status_code == 200, good.text
-    assert good.json()["imported"] == 1
+    commit = client.post("/api/imports/commit", json={"batch_id": payload["batch_id"]})
+    assert commit.status_code == 200, commit.text
+    assert commit.json()["imported"] == 1
+    assert commit.json()["failed"] == 1
     with db.reader() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM patients WHERE mrn='SEX-BAD'").fetchone()[0] == 0
         row = conn.execute(
             "SELECT sex,mrn FROM patients WHERE mrn='SEX-GOOD'"
         ).fetchone()
         assert row and row["sex"] == "男"
+
+    with db.reader() as conn:
+        before = conn.execute("SELECT COUNT(*) FROM patients").fetchone()[0]
+    legacy = client.post("/api/imports/commit", json={"rows": [{
+        "index": 1, "mrn": "LEGACY-ROW", "name": "旧入口患者", "sex": "男",
+        "case_ref": "LEGACY-1", "occurred_at": "2026-11-20T10:00:00+08:00",
+        "owner_id": "import_doc", "values": {},
+    }]})
+    assert legacy.status_code == 400, legacy.text
+    assert "批次号" in legacy.json()["detail"]
+    with db.reader() as conn:
+        after = conn.execute("SELECT COUNT(*) FROM patients").fetchone()[0]
+    assert after == before
 
 
 def test_diagnosis_length_limit(client):

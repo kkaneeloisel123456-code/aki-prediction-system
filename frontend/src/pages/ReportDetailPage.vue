@@ -113,7 +113,7 @@ const decisionLabels: Record<string, string> = {
   agree: '采纳模型结果',
   adjust: '调整风险判断',
   defer: '暂不发布',
-  manual: '人工审核',
+  manual: '人工记录',
 }
 const reviewDecisionText = computed(() => {
   const value = review.value.decision
