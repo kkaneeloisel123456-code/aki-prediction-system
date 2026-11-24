@@ -243,6 +243,7 @@ html.dark[data-theme="dark"] {
   margin-top: var(--pilot-space-2);
   color: var(--pilot-muted);
   font-size: var(--pilot-font-sm);
+  text-wrap: pretty;
 }
 .pilot-actions { display: flex; align-items: center; gap: var(--pilot-space-2); flex-wrap: wrap; }
 
