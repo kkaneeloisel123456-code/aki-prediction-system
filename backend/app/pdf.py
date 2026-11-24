@@ -348,9 +348,16 @@ def generate_clinical_report(snapshot: Dict[str, Any]) -> bytes:
     pdf.cell(width, 14, banner, align="C", fill=True, new_x="LMARGIN", new_y="NEXT")
     pdf.set_font(font, "", 8)
     pdf.set_text_color(80, 85, 92)
-    note = "概率已校准" if calibrated else "概率未校准"
-    pdf.cell(width, 5, f"分层阈值：低 < {0.30:.2f} / 中 {0.30:.2f}–{0.70:.2f} / 高 ≥ {0.70:.2f}  ·  {note}",
-             align="C", new_x="LMARGIN", new_y="NEXT")
+    if result.get("manual"):
+        note = "本次未使用模型，无概率"
+        pdf.cell(width, 5, note, align="C", new_x="LMARGIN", new_y="NEXT")
+    else:
+        note = "概率已校准" if calibrated else "概率未校准"
+        pdf.cell(
+            width, 5,
+            f"分层阈值：低 < {0.30:.2f} / 中 {0.30:.2f}–{0.70:.2f} / 高 ≥ {0.70:.2f}  ·  {note}",
+            align="C", new_x="LMARGIN", new_y="NEXT",
+        )
     pdf.ln(3)
 
     heading("患者与就诊")
@@ -429,19 +436,25 @@ def generate_clinical_report(snapshot: Dict[str, Any]) -> bytes:
     line("复核说明", review.get("reason") or "未填写")
     line("复核时间", review.get("created_at") or "未记录")
     line("发布人", published_by.get("name") or "未记录")
-    line("模型版本", prediction.get("model_version") or "人工审核 / 不适用")
+    line("模型版本", "本次未使用模型" if result.get("manual")
+         else (prediction.get("model_version") or "未记录"))
     line("发布时间", snapshot.get("generated_at") or "")
 
     pdf.ln(3)
     pdf.set_font(font, "", 8)
     pdf.set_text_color(125, 130, 138)
-    pdf.multi_cell(
-        width, 4.2,
-        "【声明】本报告由 AKI 临床智能评估系统根据已保存的预测快照生成，"
-        "仅供具备资质的医疗专业人员参考，不能替代临床诊断和治疗决策。"
-        "报告内容与模型版本已固化存档，后续数据修改不会改变本版本。",
-        align="C",
-    )
+    if result.get("manual"):
+        declaration = (
+            "【声明】本报告由医生人工记录，未使用预测模型，"
+            "不能替代临床判断。"
+        )
+    else:
+        declaration = (
+            "【声明】本报告由 AKI 临床智能评估系统根据已保存的预测快照生成，"
+            "仅供具备资质的医疗专业人员参考，不能替代临床诊断和治疗决策。"
+            "报告内容与模型版本已固化存档，后续数据修改不会改变本版本。"
+        )
+    pdf.multi_cell(width, 4.2, declaration, align="C")
     pdf.set_y(-16)
     pdf.set_font(font, "", 7)
     pdf.cell(width, 4, f"{report_no}  ·  第 {version} 版", align="L")

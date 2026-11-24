@@ -58,11 +58,142 @@ function bytes(n?: number) {
   if (n > 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
   return `${(n / 1024).toFixed(0)} KB`
 }
+const AUDIT_ACTION_LABELS: Record<string, string> = {
+  report_publish: '发布报告',
+  report_revoke: '撤销报告',
+  report_pdf_download: '下载报告 PDF',
+  patient_create: '新建患者',
+  patient_update: '更新患者',
+  patient_grant: '添加患者授权',
+  patient_grant_revoke: '撤销患者授权',
+  query_code_issue: '生成查询码',
+  encounter_create: '新建接诊',
+  encounter_update: '更新接诊',
+  draft_save: '保存草稿',
+  draft_delete: '删除草稿',
+  prediction_run: '运行模型',
+  clinical_review: '记录复核',
+  user_create: '新建账号',
+  user_update: '更新账号',
+  password_change: '修改密码',
+  import_preview: '预览导入',
+  import_commit: '提交导入',
+  import_row_create: '导入患者',
+  appointment_staff_create: '新建现场预约',
+  slot_create: '创建号源',
+  slot_update: '更新号源',
+  appointment_status: '更新预约状态',
+  feedback_moderate: '审核评价',
+  database_backup: '数据库备份',
+  patient_account_update: '更新患者账号',
+  portal_register: '患者注册',
+  portal_login: '患者登录',
+  portal_bind_patient: '患者绑定档案',
+  portal_query: '患者查询码核验',
+  appointment_book: '患者预约',
+  appointment_cancel: '取消预约',
+  feedback_create: '提交评价',
+  portal_report_view: '患者查看报告',
+  portal_report_pdf: '患者下载报告 PDF',
+}
+const AUDIT_DETAIL_LABELS: Record<string, string> = {
+  patient_id: '患者',
+  filename: '文件名',
+  model_version: '模型版本',
+  report_id: '报告',
+  encounter_id: '就诊',
+  prediction_id: '预测',
+  appointment_id: '预约',
+  slot_id: '号源',
+  doctor_id: '医生',
+  patient_account_id: '患者账号',
+  action: '动作',
+  status: '状态',
+  reason: '原因',
+  role: '角色',
+  active: '账号状态',
+  batch_id: '批次号',
+  valid: '有效行',
+  invalid: '错误行',
+  imported: '已导入',
+  failed: '失败',
+  mrn: '病历号',
+  username: '账号',
+  must_change_password: '要求修改密码',
+  password_reset: '已重置密码',
+  rows: '行数',
+  missing_ack: '缺失指标确认',
+  sheet_name: '工作表',
+  sha256: '文件摘要',
+  review_id: '复核记录',
+  decision: '复核结论',
+  draft_version: '草稿版本',
+  row_version: '记录版本',
+  base_row_version: '基线版本',
+  appointment_type: '预约类型',
+  starts_at: '开始时间',
+  capacity: '号源容量',
+  target_id: '目标记录',
+  owner_id: '负责医生',
+  version: '版本',
+  total: '总行数',
+  measured: '实测指标',
+  missing: '缺失指标',
+  case_ref: '就诊编号',
+  row: '源文行号',
+}
+const SENSITIVE_AUDIT_KEYS = ['password', 'query_code', 'certificate', 'phone', 'token', 'secret']
+const AUDIT_ENTITY_LABELS: Record<string, string> = {
+  report: '报告',
+  patient: '患者',
+  encounter: '就诊',
+  prediction: '预测',
+  appointment: '预约',
+  slot: '号源',
+  user: '员工账号',
+  patient_account: '患者账号',
+  feedback: '评价',
+  import_batch: '导入批次',
+  backup: '数据库备份',
+  system: '系统',
+}
+function auditActionLabel(action: string) {
+  return AUDIT_ACTION_LABELS[action] ?? action
+}
+function auditEntityLabel(entityType?: string) {
+  if (!entityType) return '—'
+  return AUDIT_ENTITY_LABELS[entityType] ?? entityType
+}
+function auditActorLabel(event: any) {
+  if (event.actor_name) return event.actor_name
+  if (event.actor_type === 'user') return '员工'
+  if (event.actor_type === 'query_code') return '查询码会话'
+  if (event.actor_type === 'system') return '系统'
+  return event.actor_type || '系统'
+}
 function auditDetail(detail: any) {
   if (!detail || typeof detail !== 'object') return String(detail ?? '—')
   const entries = Object.entries(detail)
   if (!entries.length) return '—'
-  return entries.map(([key, value]) => `${key}: ${typeof value === 'object' ? JSON.stringify(value) : String(value)}`).join(' · ')
+  return entries.slice(0, 12).map(([key, value]) => {
+    const label = AUDIT_DETAIL_LABELS[key] ?? key
+    const sensitive = SENSITIVE_AUDIT_KEYS.some((fragment) => key.toLowerCase().includes(fragment))
+    let display: string
+    if (sensitive) {
+      display = '已隐藏'
+    } else if (value === null || value === undefined) {
+      display = '无'
+    } else if (typeof value === 'boolean') {
+      display = value ? '是' : '否'
+    } else if (Array.isArray(value)) {
+      display = `共 ${value.length} 项`
+    } else if (typeof value === 'object') {
+      display = '已记录'
+    } else {
+      display = String(value).slice(0, 120)
+    }
+    return `${label}：${display}`
+  }).join(' · ')
 }
 function userRoleLabel(role?: string) {
   return role === 'admin' ? '管理员' : '医生'
@@ -136,6 +267,12 @@ function openEditUser(u: any) {
 }
 async function saveUser() {
   formError.value = ''
+  if (editingUser.value && Boolean(editingUser.value.active) && !Boolean(userForm.active)) {
+    const confirmed = window.confirm(
+      `停用账号“${editingUser.value.display_name || editingUser.value.username}”后，该账号将立即退出登录且无法继续使用。确认停用？`,
+    )
+    if (!confirmed) return
+  }
   saving.value = true
   try {
     if (editingUser.value) {
@@ -188,6 +325,12 @@ function clearAccount() {
 async function saveAccount() {
   if (!accountForm.id) return
   accountError.value = ''
+  if (selectedAccount.value?.active && !Boolean(accountForm.active)) {
+    const confirmed = window.confirm(
+      `停用患者账号“${selectedAccount.value.display_name}”后，该账号将无法继续登录。确认停用？`,
+    )
+    if (!confirmed) return
+  }
   if (accountForm.password && accountForm.password.length < 12) {
     accountError.value = '重置密码至少 12 个字符'
     return
@@ -429,11 +572,11 @@ onMounted(() => {
               <tbody>
                 <tr v-for="e in events" :key="e.id">
                   <td class="admin-date">{{ fmt(e.created_at) }}</td>
-                  <td>{{ e.actor_name || e.actor_type }}</td>
-                  <td class="pilot-mono">{{ e.action }}</td>
-                  <td>{{ e.entity_type }}<div class="admin-sub pilot-mono">{{ e.entity_id || '—' }}</div></td>
+                  <td>{{ auditActorLabel(e) }}</td>
+                  <td class="audit-action">{{ auditActionLabel(e.action) }}</td>
+                  <td>{{ auditEntityLabel(e.entity_type) }}<div class="admin-sub pilot-mono">{{ e.entity_id || '—' }}</div></td>
                   <td class="pilot-mono">{{ e.ip || '—' }}</td>
-                  <td class="admin-audit-detail" :title="JSON.stringify(e.detail)">{{ auditDetail(e.detail) }}</td>
+                  <td class="admin-audit-detail" :title="auditDetail(e.detail)">{{ auditDetail(e.detail) }}</td>
                 </tr>
               </tbody>
             </table>

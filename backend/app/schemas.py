@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class PredictRequest(BaseModel):
@@ -178,6 +178,19 @@ class ReportPublishRequest(BaseModel):
     row_version: int
     draft_version: int = 0
     missing_ack: bool = False
+
+
+class ReportRevokeRequest(BaseModel):
+    """Reason supplied by an administrator when revoking a published report."""
+    reason: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("reason")
+    @classmethod
+    def normalise_reason(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("撤销原因不能为空")
+        return value
 
 
 class PortalRegisterRequest(BaseModel):

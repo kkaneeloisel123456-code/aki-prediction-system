@@ -10,8 +10,9 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Body, HTTPException, Request, Response
 from fastapi.responses import FileResponse
+from pydantic import ValidationError
 
 from . import database as db
 from . import predictor
@@ -29,6 +30,7 @@ from .schemas import (
     PatientGrantRequest,
     PatientUpdateRequest,
     ReportPublishRequest,
+    ReportRevokeRequest,
 )
 
 router = APIRouter(prefix="/api", tags=["clinical"])
@@ -179,9 +181,18 @@ def _encounter_dict(row: Any, *, include_values: bool = True) -> dict[str, Any]:
     if include_values:
         result["values"] = values
     if "prediction_json" in row.keys() and row["prediction_json"]:
+        prediction = json_load(row["prediction_json"], {})
+        if (
+            "prediction_risk_level" in row.keys()
+            and not prediction.get("risk_level")
+            and row["prediction_risk_level"]
+        ):
+            prediction["risk_level"] = row["prediction_risk_level"]
+        if "prediction_origin" in row.keys() and row["prediction_origin"]:
+            prediction["origin"] = row["prediction_origin"]
         result["latest_prediction"] = {
             "id": row["current_prediction_id"],
-            **json_load(row["prediction_json"], {}),
+            **prediction,
         }
     if "review_json" in row.keys() and row["review_json"]:
         result["latest_review"] = json_load(row["review_json"], {})
@@ -200,6 +211,8 @@ _ENCOUNTER_SELECT = """
     SELECT e.*, p.name AS patient_name, p.mrn,
            (SELECT u.display_name FROM users u WHERE u.id=e.created_by) AS created_by_name,
            pr.result_json AS prediction_json,
+           pr.risk_level AS prediction_risk_level,
+           pr.origin AS prediction_origin,
            (SELECT rv.decision || '|' || rv.reason || '|' || rv.created_at || '|' || rv.reviewer_id
             FROM clinical_reviews rv WHERE rv.encounter_id=e.id
             ORDER BY rv.created_at DESC LIMIT 1) AS review_json,
@@ -348,19 +361,26 @@ def _checklist(
         {"key": "identity", "label": "患者身份完整",
          "ok": bool(patient["name"] and patient["mrn"]), "detail": "姓名与病历号必须完整"},
         {"key": "values", "label": "至少一项合法实测指标",
-         "ok": bool(numeric) and not invalid, "detail": f"已录入 {len(numeric)} 项"},
-        {"key": "prediction", "label": "模型预测或明确人工审核",
+         "ok": bool(numeric) and not invalid,
+         "detail": f"已录入 {len(numeric)} 项，仍有格式或范围错误" if numeric else "请至少录入一项合法实测指标"},
+        {"key": "prediction",
+         "label": "已完成人工记录" if manual_review else "模型预测或明确人工审核",
          "ok": model_prediction_valid or manual_review,
          "detail": "全空或超出合理范围不能预测" if not numeric else "需取得模型概率或完成人工审核"},
         {"key": "prediction_current", "label": "预测与当前指标一致",
          "ok": fingerprint_match, "detail": "指标已修改，请重新预测或重新人工审核"},
-        {"key": "diagnosis", "label": "已填写临床诊断", "ok": bool(encounter["diagnosis"].strip())},
-        {"key": "orders", "label": "已填写医嘱或随访建议", "ok": bool(encounter["orders"].strip())},
+        {"key": "diagnosis", "label": "已填写临床诊断", "ok": bool(encounter["diagnosis"].strip()),
+         "detail": "请填写临床诊断"},
+        {"key": "orders", "label": "已填写医嘱或随访建议",
+         "ok": bool(encounter["orders"].strip()), "detail": "请填写医嘱或随访建议"},
         {"key": "review", "label": "医生复核有效", "ok": review_valid,
          "detail": "调整、暂不发布或人工记录必须填写理由"},
         {"key": "missing", "label": "缺失指标已确认",
-         "ok": not missing or missing_ack, "detail": f"缺失 {len(missing)} 项"},
+         "ok": not missing or missing_ack, "detail": f"缺失 {len(missing)} 项，请确认后再发布"},
     ]
+    for item in items:
+        if item["ok"]:
+            item.pop("detail", None)
     return {
         "can_publish": all(i["ok"] for i in items),
         "items": items,
@@ -1171,11 +1191,19 @@ def download_report_pdf(report_id: str, request: Request):
 
 
 @router.post("/reports/{report_id}/revoke")
-def revoke_report(report_id: str, request: Request, reason: str = ""):
+def revoke_report(
+    report_id: str, request: Request,
+    payload: dict[str, Any] | None = Body(default=None),
+):
     user = _user(request)
     _admin(user)
-    if not reason.strip():
-        raise _err("撤销正式报告必须填写原因")
+    try:
+        req = ReportRevokeRequest.model_validate(payload or {})
+    except ValidationError as exc:
+        if any(error.get("type") in {"string_too_long", "too_long"} for error in exc.errors()):
+            raise _err("撤销原因不能超过 1000 字") from None
+        raise _err("撤销正式报告必须填写原因") from None
+    reason = req.reason
     with db.transaction(immediate=True) as conn:
         row = _require_report(conn, user, report_id)
         if row["status"] != "published":
@@ -1183,7 +1211,7 @@ def revoke_report(report_id: str, request: Request, reason: str = ""):
         conn.execute(
             """UPDATE reports SET status='revoked',revoked_at=?,revoke_reason=?
                WHERE id=?""",
-            (utc_now(), reason.strip()[:1000], report_id),
+            (utc_now(), reason, report_id),
         )
         encounter = conn.execute(
             "SELECT * FROM encounters WHERE id=?", (row["encounter_id"],)
@@ -1203,7 +1231,7 @@ def revoke_report(report_id: str, request: Request, reason: str = ""):
         record_audit(
             conn, actor_type="user", actor_id=user["id"], action="report_revoke",
             entity_type="report", entity_id=report_id,
-            detail={"reason": reason.strip()}, ip=_ip(request),
+            detail={"reason": reason}, ip=_ip(request),
         )
         return {"ok": True}
 

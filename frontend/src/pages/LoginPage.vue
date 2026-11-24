@@ -40,7 +40,7 @@ function safeRedirect(): string {
 function readableError(reason: unknown): string {
   const message = reason instanceof Error ? reason.message : String(reason)
   if (message.includes('401')) return '账号或密码错误，请重新输入。'
-  if (message.includes('429')) return '登录尝试次数过多，请 5 分钟后再试。'
+  if (message.includes('429')) return '登录尝试次数过多，请 15 分钟后再试。'
   if (message.includes('503')) return '登录功能尚未初始化，请先运行 scripts/init_auth.py。'
   if (/failed to fetch|networkerror|load failed/i.test(message)) {
     return '无法连接后端服务，请确认后端已启动后重试。'

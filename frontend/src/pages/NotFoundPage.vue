@@ -1,6 +1,11 @@
 <script setup lang="ts">
-import { useRoute } from 'vue-router'
-const route = useRoute()
+import { computed, onMounted } from 'vue'
+import { useAuth } from '../composables/useAuth'
+const auth = useAuth()
+const showLogin = computed(() =>
+  auth.ready.value && !auth.isAuthenticated.value && auth.configured.value,
+)
+onMounted(() => { void auth.restore() })
 </script>
 
 <template>
@@ -11,7 +16,7 @@ const route = useRoute()
       <p class="pilot-sub">请检查地址是否完整。返回待评估页可继续处理未发布评估。</p>
       <div class="pilot-actions not-found-actions">
         <RouterLink to="/" class="pilot-btn pilot-btn-primary">返回待评估</RouterLink>
-        <RouterLink v-if="route.path !== '/login'" to="/login" class="pilot-btn">去登录</RouterLink>
+        <RouterLink v-if="showLogin" to="/login" class="pilot-btn">去登录</RouterLink>
       </div>
     </div>
   </main>

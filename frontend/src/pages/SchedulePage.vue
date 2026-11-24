@@ -18,6 +18,8 @@ const doctors = ref<any[]>([])
 const patients = ref<any[]>([])
 const saving = ref(false)
 const slotBusy = ref('')
+const showSlotConfirm = ref(false)
+const pendingSlot = ref<any>(null)
 
 const aptFilter = ref('')
 const fbFilter = ref('pending')
@@ -175,17 +177,35 @@ async function createSlot() {
     saving.value = false
   }
 }
-async function toggleSlot(s: any) {
+async function applySlotActive(s: any) {
   slotBusy.value = s.id
   error.value = ''
   try {
     await api.updateSlot(s.id, { active: !Boolean(s.active) })
     notice.value = s.active ? '号源已停用' : '号源已启用'
     await load()
+    return true
   } catch (e: any) {
     error.value = e?.message ?? '号源更新失败'
+    return false
   } finally {
     slotBusy.value = ''
+  }
+}
+function toggleSlot(s: any) {
+  if (s.active && Number(s.booked) > 0) {
+    pendingSlot.value = s
+    showSlotConfirm.value = true
+    return
+  }
+  void applySlotActive(s)
+}
+async function confirmDisableSlot() {
+  if (!pendingSlot.value) return
+  const ok = await applySlotActive(pendingSlot.value)
+  if (ok) {
+    showSlotConfirm.value = false
+    pendingSlot.value = null
   }
 }
 
@@ -564,6 +584,33 @@ onMounted(() => {
             <button class="pilot-btn" type="button" @click="showStatusConfirm = false">取消</button>
             <button class="pilot-btn pilot-btn-primary" type="button" :disabled="statusBusy" @click="confirmStatus">
               {{ statusBusy ? '更新中…' : '确认变更' }}
+            </button>
+          </div>
+        </template>
+      </ElDialog>
+      <ElDialog
+        v-model="showSlotConfirm"
+        title="停用号源"
+        width="480px"
+        class="pilot-dialog"
+        :close-on-click-modal="false"
+        append-to-body
+      >
+        <p class="dialog-sub">
+          该号源已有 {{ pendingSlot?.booked ?? 0 }} 个预约。停用只关闭后续预约入口，
+          <strong>不会取消已有预约</strong>。
+        </p>
+        <div v-if="pendingSlot" class="status-confirm-row">
+          <span class="pilot-small">{{ fmt(pendingSlot.starts_at) }} · {{ pendingSlot.doctor_name }}</span>
+          <StatusPill label="当前在用" tone="low" />
+          <span class="pilot-muted">→</span>
+          <StatusPill label="停用" tone="high" />
+        </div>
+        <template #footer>
+          <div class="dialog-actions">
+            <button class="pilot-btn" type="button" @click="showSlotConfirm = false; pendingSlot = null">取消</button>
+            <button class="pilot-btn pilot-btn-danger" type="button" :disabled="slotBusy === pendingSlot?.id" @click="confirmDisableSlot">
+              {{ slotBusy === pendingSlot?.id ? '停用中…' : '确认停用' }}
             </button>
           </div>
         </template>

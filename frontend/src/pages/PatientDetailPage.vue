@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api/client'
 import { useAuth } from '../composables/useAuth'
@@ -22,6 +22,8 @@ const saveBusy = ref(false)
 const formError = ref('')
 const queryResult = ref<any>(null)
 const showQuery = ref(false)
+const queryModal = ref<HTMLElement | null>(null)
+const queryTrigger = ref<HTMLElement | null>(null)
 const showEdit = ref(false)
 const editForm = reactive<any>({})
 const copyState = ref('')
@@ -63,8 +65,11 @@ const latestValues = computed(() => ({
 const riskLevel = computed(() => latestPrediction.value?.risk_level ?? '')
 const riskLabel = computed(() => {
   if (!latestEncounter.value) return '无就诊'
-  if (!riskLevel.value) return '未评估'
-  return riskLevel.value === '人工审核' ? '人工审核' : `${riskLevel.value}风险`
+  if (!latestPrediction.value) return '未评估'
+  if (latestPrediction.value.origin === 'manual' || !riskLevel.value || riskLevel.value === '人工审核') {
+    return '人工审核'
+  }
+  return `${riskLevel.value}风险`
 })
 const riskTone = computed(() => {
   if (riskLevel.value === '高') return 'high'
@@ -72,6 +77,21 @@ const riskTone = computed(() => {
   if (riskLevel.value === '低') return 'low'
   return 'neutral'
 })
+function predictionRiskLabel(record: any) {
+  const prediction = record?.latest_prediction
+  if (!prediction) return '未评估'
+  if (prediction.origin === 'manual' || !prediction.risk_level || prediction.risk_level === '人工审核') {
+    return '人工审核'
+  }
+  return `${prediction.risk_level}风险`
+}
+function predictionRiskTone(record: any) {
+  const level = record?.latest_prediction?.risk_level
+  if (level === '高') return 'high'
+  if (level === '中') return 'mid'
+  if (level === '低') return 'low'
+  return 'neutral'
+}
 const probabilityText = computed(() => {
   const probability = latestPrediction.value?.probability
   return typeof probability === 'number' ? `${(probability * 100).toFixed(1)}%` : '—'
@@ -156,9 +176,52 @@ async function issueCode() {
   try {
     queryResult.value = await api.queryCode(patient.value.id)
     showQuery.value = true
+    await nextTick()
+    focusQueryModal()
     await load()
   } catch (reason: any) {
     error.value = reason?.message ?? '查询码生成失败'
+  }
+}
+function queryFocusables() {
+  if (!queryModal.value) return [] as HTMLElement[]
+  return Array.from(queryModal.value.querySelectorAll<HTMLElement>(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+  )).filter((element) => !element.hasAttribute('disabled'))
+}
+function focusQueryModal() {
+  const first = queryFocusables()[0]
+  ;(first ?? queryModal.value)?.focus()
+}
+function closeQuery() {
+  showQuery.value = false
+  void nextTick(() => queryTrigger.value?.focus())
+}
+function onQueryKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    closeQuery()
+    return
+  }
+  if (event.key !== 'Tab') return
+  const focusables = queryFocusables()
+  if (!focusables.length) {
+    event.preventDefault()
+    queryModal.value?.focus()
+    return
+  }
+  const first = focusables[0]
+  const last = focusables[focusables.length - 1]
+  const active = document.activeElement as HTMLElement | null
+  if (!queryModal.value?.contains(active)) {
+    event.preventDefault()
+    first.focus()
+  } else if (event.shiftKey && active === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && active === last) {
+    event.preventDefault()
+    first.focus()
   }
 }
 async function copyCode() {
@@ -261,7 +324,7 @@ onMounted(load)
             </div>
             <div class="pilot-actions patient-actions">
               <button v-if="canEdit" class="pilot-btn pilot-btn-primary" type="button" @click="openEncounter">新建接诊</button>
-              <button class="pilot-btn" type="button" @click="issueCode">生成查询码</button>
+              <button ref="queryTrigger" class="pilot-btn" type="button" @click="issueCode">生成查询码</button>
               <button v-if="canEdit" class="pilot-btn" type="button" @click="openEdit">编辑档案</button>
               <button class="pilot-btn pilot-btn-ghost" type="button" :disabled="loading" @click="load">刷新</button>
             </div>
@@ -295,8 +358,8 @@ onMounted(load)
                 <div class="encounter-row-foot">
                   <StatusPill
                     v-if="encounter.latest_prediction"
-                    :label="encounter.latest_prediction.risk_level === '人工审核' ? '人工审核' : `${encounter.latest_prediction.risk_level}风险`"
-                    :tone="encounter.latest_prediction.risk_level === '高' ? 'high' : encounter.latest_prediction.risk_level === '中' ? 'mid' : encounter.latest_prediction.risk_level === '低' ? 'low' : 'neutral'"
+                    :label="predictionRiskLabel(encounter)"
+                    :tone="predictionRiskTone(encounter)"
                   />
                   <span v-else class="pilot-small">未评估</span>
                   <span v-if="encounter.latest_report" class="pilot-small pilot-mono">{{ encounter.latest_report.report_no }}</span>
@@ -459,11 +522,23 @@ onMounted(load)
     </div>
 
     <!-- 查询码 -->
-    <div v-if="showQuery" class="modal-mask" @click.self="showQuery = false">
-      <div class="modal-panel patient-query-modal">
+    <div
+      v-if="showQuery"
+      class="modal-mask"
+      @click.self="closeQuery"
+      @keydown="onQueryKeydown"
+    >
+      <div
+        ref="queryModal"
+        class="modal-panel patient-query-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="patient-query-title"
+        tabindex="-1"
+      >
         <div class="modal-head">
-          <div class="modal-title">患者查询码</div>
-          <button class="modal-close" type="button" aria-label="关闭" @click="showQuery = false">×</button>
+          <div id="patient-query-title" class="modal-title">患者查询码</div>
+          <button class="modal-close" type="button" aria-label="关闭" @click="closeQuery">×</button>
         </div>
         <div class="modal-body patient-query-body">
           <div class="patient-query-code pilot-mono">{{ queryResult?.query_code }}</div>
@@ -473,7 +548,7 @@ onMounted(load)
           <button class="pilot-btn" type="button" @click="copyCode">复制查询码</button>
         </div>
         <div class="modal-foot">
-          <button class="pilot-btn pilot-btn-primary" type="button" @click="showQuery = false">我已记录</button>
+          <button class="pilot-btn pilot-btn-primary" type="button" @click="closeQuery">我已记录</button>
         </div>
       </div>
     </div>

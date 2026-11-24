@@ -26,7 +26,7 @@ sys.path.insert(0, str(ROOT))
 from fastapi.testclient import TestClient  # noqa: E402
 
 from backend.app import database as db  # noqa: E402
-from backend.app.auth_service import create_user, get_user  # noqa: E402
+from backend.app.auth_service import create_user, get_user, update_user  # noqa: E402
 from backend.app.backup import restore_database  # noqa: E402
 from backend.app.main import app  # noqa: E402
 
@@ -88,6 +88,57 @@ def test_auth_csrf_and_logout(client):
     client.headers["x-csrf-token"] = client.cookies.get("aki_csrf")
     assert client.post("/api/auth/logout").status_code == 200
     assert client.get("/api/auth/status").json()["authenticated"] is False
+
+
+def test_validation_error_is_chinese_and_does_not_echo_secrets(client):
+    missing = client.post("/api/auth/login", json={})
+    assert missing.status_code == 422, missing.text
+    payload = missing.json()
+    assert payload["detail"] == "请求字段不符合要求"
+    assert "Field required" not in missing.text
+    assert {item["field"] for item in payload["errors"]} == {"username", "password"}
+
+    secret = "DoNotEchoThisPassword"
+    invalid = client.post("/api/auth/login", json={
+        "username": "", "password": secret, "remember": False,
+    })
+    assert invalid.status_code == 422, invalid.text
+    assert secret not in invalid.text
+    assert "提交内容" not in invalid.text
+
+
+def test_revoke_report_uses_json_body_and_admin_only(client):
+    login(client)
+    case = _published_case(client, mrn="REVOKE-1")
+    url = f"/api/reports/{case['report_id']}/revoke"
+
+    no_body = client.post(url)
+    assert no_body.status_code == 400, no_body.text
+    assert "撤销正式报告必须填写原因" in no_body.text
+
+    blank = client.post(url, json={"reason": "   "})
+    assert blank.status_code == 400, blank.text
+    assert "撤销正式报告必须填写原因" in blank.text
+
+    _switch_login(client, "doctor1")
+    forbidden = client.post(url, json={"reason": "医生无权撤销"})
+    assert forbidden.status_code == 403, forbidden.text
+
+    _switch_login(client, "admin", "AdminPass123!")
+    revoked = client.post(url, json={"reason": "  复核发现风险分级需要修正  "})
+    assert revoked.status_code == 200, revoked.text
+    with db.reader() as conn:
+        report = conn.execute(
+            "SELECT status,revoke_reason FROM reports WHERE id=?",
+            (case["report_id"],),
+        ).fetchone()
+        encounter = conn.execute(
+            "SELECT status FROM encounters WHERE id=?",
+            (case["encounter_id"],),
+        ).fetchone()
+    assert report["status"] == "revoked"
+    assert report["revoke_reason"] == "复核发现风险分级需要修正"
+    assert encounter["status"] == "reviewed"
 
 
 def test_first_login_password_change_is_enforced(client):
@@ -415,6 +466,16 @@ def test_manual_review_without_prediction_succeeds(client):
     assert "人工记录" in pdf_text
     assert "暂缓采纳" not in pdf_text
     assert "人工审核" in pdf_text
+    assert "本次未使用模型" in pdf_text
+    assert "本次未使用模型，无概率" in pdf_text
+    assert "概率未校准" not in pdf_text
+    assert "中位数填充" not in pdf_text
+    assert "模型版本本次未使用模型" in pdf_text
+
+    encounters = client.get(f"/api/patients/{patient_id}/encounters").json()["encounters"]
+    manual = next(item for item in encounters if item["id"] == encounter_id)
+    assert manual["latest_prediction"]["origin"] == "manual"
+    assert manual["latest_prediction"]["risk_level"] == "人工审核"
 
 
 def test_portal_report_detail_matches_list_and_requires_second_factor(client):
@@ -513,6 +574,28 @@ def test_deactivate_account_and_last_admin_protection(client):
     self_off = client.patch(f"/api/admin/users/{admin_id}", json={"active": False})
     assert self_off.status_code == 409, self_off.text
     assert "不能停用" in self_off.text
+
+
+def test_last_admin_guard_rejects_non_self_actor_at_service_layer(client):
+    """正常 API 请求人必须是仍在职管理员，因此“非本人停用唯一管理员”只能由服务层构造。
+
+    API 路径已由上一个用例覆盖停用自己；这里直接验证 targets_active <= 1 时，
+    即使 actor 不是被停用对象，最后管理员保护也不会放行。
+    """
+    login(client)
+    admin_id = client.get("/api/auth/status").json()["user"]["id"]
+    created = client.post("/api/admin/users", json={
+        "username": "admin_second", "display_name": "第二管理员", "role": "admin",
+        "password": "AdminSecond123!", "must_change_password": False,
+    })
+    assert created.status_code == 201, created.text
+    second_id = created.json()["id"]
+    deactivated = client.patch(f"/api/admin/users/{second_id}", json={"active": False})
+    assert deactivated.status_code == 200, deactivated.text
+
+    with pytest.raises(ValueError, match="不能停用"):
+        update_user(actor_id=second_id, user_id=admin_id, active=False)
+    assert get_user(admin_id)["active"] == 1
 
 
 def get_user_id(username: str) -> str:

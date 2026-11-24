@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
@@ -140,6 +141,47 @@ def _with_security_headers(response: Response) -> Response:
     return response
 
 
+_VALIDATION_REASONS = {
+    "missing": "必填",
+    "string_too_short": "长度不足",
+    "string_too_long": "超出长度限制",
+    "string_pattern_mismatch": "格式不正确",
+    "int_parsing": "必须是整数",
+    "float_parsing": "必须是数字",
+    "bool_parsing": "必须是布尔值",
+    "greater_than_equal": "取值过小",
+    "less_than_equal": "取值过大",
+    "literal_error": "取值不在允许范围",
+    "enum": "取值不在允许范围",
+    "json_invalid": "请求格式不正确",
+    "model_attributes_type": "请求格式不正确",
+    "value_error": "取值不符合要求",
+}
+
+
+def _validation_field(loc: Any) -> str:
+    parts = list(loc) if isinstance(loc, (list, tuple)) else []
+    parts = [str(part) for part in parts if str(part) not in {"body", "query", "path", "header"}]
+    return ".".join(parts)[:100] or "请求体"
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error_handler(
+    request: Request, exc: RequestValidationError,
+) -> JSONResponse:
+    """Return a stable Chinese 422 response without echoing submitted values."""
+    errors = []
+    for error in exc.errors()[:20]:
+        errors.append({
+            "field": _validation_field(error.get("loc", ())),
+            "message": _VALIDATION_REASONS.get(str(error.get("type")), "格式不正确"),
+        })
+    return _with_security_headers(JSONResponse(
+        status_code=422,
+        content={"detail": "请求字段不符合要求", "errors": errors},
+    ))
+
+
 @app.middleware("http")
 async def protect_api(request: Request, call_next):
     """Require a DB-backed session and CSRF token for staff APIs."""
@@ -187,7 +229,7 @@ def auth_login(req: LoginRequest, request: Request, response: Response) -> AuthS
     host = request.client.host if request.client else "unknown"
     rate_key = f"{host}|{username.lower()}"
     if login_rate_limited(rate_key):
-        raise HTTPException(status_code=429, detail="登录尝试次数过多，请 5 分钟后再试")
+        raise HTTPException(status_code=429, detail="登录尝试次数过多，请 15 分钟后再试")
     try:
         user = authenticate(username, req.password)
     except Exception as exc:

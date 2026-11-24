@@ -76,7 +76,16 @@ const binaryText = computed(() => {
   if (v === 0) return '阴性'
   return '—'
 })
+const activePrediction = computed(() => prediction.value ?? encounter.value?.latest_prediction ?? null)
+const isManualPrediction = computed(() => Boolean(
+  activePrediction.value?.manual
+  || activePrediction.value?.origin === 'manual'
+  || activePrediction.value?.risk_level === '人工审核',
+))
+const hasPrediction = computed(() => Boolean(activePrediction.value))
+const hasModelPrediction = computed(() => hasPrediction.value && !isManualPrediction.value)
 const calibratedText = computed(() => {
+  if (isManualPrediction.value) return '不适用'
   const v = prediction.value?.calibrated ?? encounter.value?.latest_prediction?.calibrated
   return v ? '已校准' : '未校准'
 })
@@ -88,18 +97,19 @@ const shapRows = computed(() => {
   return [...rows].sort((a: any, b: any) => Math.abs(b.shap) - Math.abs(a.shap)).slice(0, 8)
 })
 const maxShap = computed(() => Math.max(0.001, ...shapRows.value.map((r: any) => Math.abs(r.shap))))
-const hasPrediction = computed(() => Boolean(prediction.value || encounter.value?.latest_prediction))
 const canEdit = computed(() => encounter.value?.can_edit !== false)
 const isPublished = computed(() => encounter.value?.status === 'published')
 const metricsLocked = computed(() => isPublished.value || reviewDone.value)
 const latestReport = computed(() => encounter.value?.latest_report ?? null)
-const reviewOptions = computed(() => hasPrediction.value
-  ? [
-      { value: 'agree', label: '采纳模型结果' },
-      { value: 'adjust', label: '调整风险判断（上调 / 下调）' },
-      { value: 'defer', label: '暂不发布，继续观察' },
-    ]
-  : [{ value: 'manual', label: '无模型结果，人工记录' }])
+const reviewOptions = computed(() => isManualPrediction.value
+  ? [{ value: 'manual', label: '人工记录' }]
+  : hasPrediction.value
+    ? [
+        { value: 'agree', label: '采纳模型结果' },
+        { value: 'adjust', label: '调整风险判断（上调 / 下调）' },
+        { value: 'defer', label: '暂不发布，继续观察' },
+      ]
+    : [{ value: 'manual', label: '无模型结果，人工记录' }])
 
 const statusText: Record<string, string> = {
   draft: '草稿', predicted: '待复核', reviewed: '已复核', published: '已发布',
@@ -610,7 +620,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
             <section class="pilot-panel rail-panel">
               <div class="pilot-panel-head">
                 <span class="pilot-panel-title">风险评估</span>
-                <span class="pilot-muted">{{ hasPrediction ? '已运行模型' : '尚未运行' }}</span>
+                <span class="pilot-muted">{{ hasModelPrediction ? '已运行模型' : isManualPrediction ? '人工记录' : '尚未运行' }}</span>
               </div>
               <div class="pilot-panel-body">
                 <div class="risk-value" :class="`risk-${riskTone}`">
@@ -688,7 +698,8 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
                 </div>
                 <label v-if="checklist.missing_count" class="check-ack">
                   <input v-model="missingAck" type="checkbox" @change="refreshChecklist" />
-                  我已确认 {{ checklist.missing_count }} 项指标缺失，模型按训练中位数填充。
+                  <span v-if="isManualPrediction">这些指标没有实测，人工记录不使用模型填充值。</span>
+                  <span v-else>我已确认 {{ checklist.missing_count }} 项指标缺失，模型按训练中位数填充。</span>
                 </label>
                 <div v-if="publishError" class="pilot-error publish-error">{{ publishError }}</div>
                 <div v-if="isPublished && latestReport" class="publish-result">
@@ -793,7 +804,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
 
 .encounter-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: var(--pilot-space-4); align-items: start; }
 .encounter-main { display: flex; flex-direction: column; gap: var(--pilot-space-4); min-width: 0; }
-.risk-rail { position: sticky; top: var(--pilot-space-4); display: flex; flex-direction: column; gap: var(--pilot-space-4); }
+.risk-rail { position: sticky; top: var(--pilot-space-4); display: flex; flex-direction: column; gap: var(--pilot-space-4); min-width: 0; }
 .rail-panel { margin: 0; }
 
 .doc-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--pilot-space-4); }
@@ -905,8 +916,8 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
 .paste-error { margin-top: var(--pilot-space-2); }
 
 @media (max-width: 1180px) {
-  .encounter-layout { grid-template-columns: 1fr; }
-  .risk-rail { position: static; }
+  .encounter-layout { grid-template-columns: minmax(0, 1fr); }
+  .risk-rail { position: static; min-width: 0; }
   .doc-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 720px) {

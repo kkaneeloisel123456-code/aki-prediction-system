@@ -37,6 +37,10 @@ const probability = computed(() => {
 const probabilityText = computed(() => probability.value === null ? '—' : `${(probability.value * 100).toFixed(1)}%`)
 const hasModel = computed(() => probability.value !== null && !result.value.manual)
 const riskLevel = computed(() => report.value?.risk_level || result.value.risk_level)
+const isManualReport = computed(() =>
+  !hasModel.value
+  && Boolean(result.value.manual || riskLevel.value === '人工审核' || probability.value === null),
+)
 const riskText = computed(() => {
   if (!riskLevel.value) return '未评估'
   return riskLevel.value === '人工审核' ? '人工审核' : `${riskLevel.value}风险`
@@ -363,7 +367,8 @@ onMounted(load)
           </div>
           <p v-else class="report-text">本报告没有记录实测指标。</p>
           <div v-if="missingRows.length" class="report-missing">
-            <strong>缺失指标（{{ missingRows.length }} 项，模型按训练中位数填充，非实测）</strong>
+            <strong v-if="hasModel">缺失指标（{{ missingRows.length }} 项，模型按训练中位数填充，非实测）</strong>
+            <strong v-else>缺失指标（{{ missingRows.length }} 项，人工记录未填写实测值）</strong>
             <p>{{ missingRows.map((row: any) => row.label).join('、') }}</p>
           </div>
         </section>
@@ -382,7 +387,8 @@ onMounted(load)
         <section class="report-sec">
           <h2 class="report-sec-title"><span>七</span>声明</h2>
           <p class="report-note report-declaration">
-            本报告由急性肾损伤风险预测模型辅助生成，仅供临床医生参考，不能替代专业医疗判断。模型对缺失指标采用训练队列中位数填充，预测结果可能受输入完整性影响。
+            <span v-if="isManualReport">本报告由医生人工记录，未使用预测模型，不能替代临床判断。</span>
+            <span v-else>本报告由急性肾损伤风险预测模型辅助生成，仅供临床医生参考，不能替代专业医疗判断。模型对缺失指标采用训练队列中位数填充，预测结果可能受输入完整性影响。</span>
           </p>
         </section>
 

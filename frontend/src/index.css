@@ -536,7 +536,7 @@ tr:hover td { background: var(--bg-hover); }
 .prob-card .prob-value { color:var(--text-bright); font-size:34px; font-weight:900; line-height:1.1; margin:8px 0 2px; }
 .prob-card .prob-risk { font-size:14px; font-weight:800; margin-bottom:10px; }
 .prob-card .prob-meta { color:var(--text-dim); font-size:10px; line-height:1.7; border-top:1px solid var(--border); padding-top:9px; }
-.shap-list .shap-row { display:grid; grid-template-columns:minmax(90px,1.2fr) 90px minmax(80px,.8fr); gap:8px; align-items:center; padding:5px 0; border-bottom:1px dashed var(--border); }
+/* SHAP rows are styled by EncounterPage.vue. */
 .shap-list .name { font-size:11px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .shap-list .bar { height:6px; background:var(--bg-inset); border-radius:3px; overflow:hidden; }
 .shap-list .bar span { display:block; height:100%; border-radius:3px; }
@@ -617,6 +617,10 @@ tr:hover td { background: var(--bg-hover); }
 .portal-card .line { font-size:10px; color:var(--text-dim); margin-top:3px; }
 .portal-card .actions { display:flex; gap:6px; margin-top:10px; }
 .portal-section-title { color:var(--text-bright); font-size:15px; font-weight:800; margin:18px 0 10px; }
+
+/* Data governance charts are exported with a white canvas. Invert only the
+   chart itself in dark mode; the rest of the application keeps its own theme. */
+html.dark[data-theme="dark"] .gov-figure { filter: invert(1) hue-rotate(180deg); }
 
 /* Utility */
 .flex { display:flex; }
