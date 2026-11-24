@@ -12,6 +12,12 @@ const route = useRoute()
 const auth = useAuth()
 const { theme } = useTheme()
 const visual = computed(() => theme.value === 'dark' ? darkVisual : lightVisual)
+const serviceState = computed(() => {
+  if (auth.statusError.value) return { label: '服务连接异常', tone: 'danger' }
+  if (!auth.ready.value) return { label: '正在检查服务', tone: 'checking' }
+  if (!auth.configured.value) return { label: '待初始化授权', tone: 'warn' }
+  return { label: '服务已就绪', tone: 'ok' }
+})
 
 const username = ref('')
 const password = ref('')
@@ -84,6 +90,35 @@ function forgotPassword() {
     </section>
 
     <section class="login-stage" aria-labelledby="login-title">
+      <aside class="login-corner login-corner-top" aria-label="系统状态">
+        <span class="login-corner-kicker">Clinical Decision Support</span>
+        <div class="login-service" :class="`is-${serviceState.tone}`">
+          <i aria-hidden="true" />
+          <div>
+            <strong>{{ serviceState.label }}</strong>
+            <span>授权访问 · 审计留痕</span>
+          </div>
+        </div>
+        <div class="login-task-tags" aria-label="核心工作流">
+          <span>风险评估</span><span>文书生成</span><span>复查管理</span>
+        </div>
+      </aside>
+
+      <aside class="login-corner login-corner-bottom" aria-label="模型概览">
+        <div class="login-corner-head">
+          <span class="login-corner-kicker">模型概览</span>
+          <span class="login-corner-code">PERIOPERATIVE</span>
+        </div>
+        <div class="login-model-stats">
+          <div><strong>35</strong><span>项围术期指标</span></div>
+          <div><strong>3</strong><span>级风险分层</span></div>
+          <div><strong>SHAP</strong><span>归因解释</span></div>
+        </div>
+        <div class="login-model-flow" aria-label="围术期阶段">
+          <span>术前</span><i aria-hidden="true" /><span>术中</span><i aria-hidden="true" /><span>ICU</span><i aria-hidden="true" /><span>术后</span>
+        </div>
+      </aside>
+
       <div class="login-card">
         <header class="login-card-head">
           <div class="login-brand">
@@ -222,9 +257,9 @@ function forgotPassword() {
   display: inline-flex;
   align-items: center;
   min-height: 32px;
-  padding: 0 var(--pilot-space-3);
+  padding: 0 var(--pilot-space-4);
   border: 1px solid var(--pilot-line);
-  border-radius: var(--pilot-radius-control);
+  border-radius: var(--pilot-radius-pill);
   background: color-mix(in srgb, var(--pilot-surface) 82%, transparent);
   color: var(--pilot-ink-soft);
   font-size: var(--pilot-font-xs);
@@ -237,17 +272,194 @@ function forgotPassword() {
   background: var(--pilot-line-strong);
 }
 .login-stage {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 100vh;
   padding: var(--pilot-space-6) var(--pilot-space-5);
+  overflow: hidden;
+  isolation: isolate;
+}
+.login-stage::before,
+.login-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.login-stage::before {
+  background:
+    radial-gradient(circle at 100% 0, color-mix(in srgb, var(--pilot-accent-soft) 62%, transparent), transparent 36%),
+    radial-gradient(circle at 100% 100%, color-mix(in srgb, var(--pilot-surface-2) 72%, transparent), transparent 34%);
+}
+.login-stage::after {
+  background-image:
+    linear-gradient(var(--pilot-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--pilot-line) 1px, transparent 1px);
+  background-size: 44px 44px;
+  opacity: .1;
+  -webkit-mask-image:
+    radial-gradient(circle at 100% 0, #000 0, transparent 48%),
+    radial-gradient(circle at 100% 100%, #000 0, transparent 44%);
+  mask-image:
+    radial-gradient(circle at 100% 0, #000 0, transparent 48%),
+    radial-gradient(circle at 100% 100%, #000 0, transparent 44%);
+}
+.login-corner {
+  position: absolute;
+  right: 40px;
+  z-index: 1;
+  width: min(420px, calc(100% - 48px));
+  color: var(--pilot-muted);
+  pointer-events: none;
+}
+.login-corner-top {
+  top: 40px;
+  padding-top: var(--pilot-space-3);
+  border-top: 1px solid var(--pilot-line-strong);
+}
+.login-corner-bottom {
+  right: 40px;
+  bottom: 40px;
+  padding-top: var(--pilot-space-3);
+  border-top: 1px solid var(--pilot-line);
+}
+.login-corner-kicker {
+  display: block;
+  color: var(--pilot-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.login-corner-code {
+  color: var(--pilot-line-strong);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .08em;
+}
+.login-service {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pilot-space-3);
+  margin-top: var(--pilot-space-2);
+}
+.login-service i {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--pilot-muted);
+}
+.login-service strong {
+  display: block;
+  color: var(--pilot-ink);
+  font-size: var(--pilot-font-xs);
+  font-weight: 700;
+}
+.login-service span {
+  display: block;
+  margin-top: 2px;
+  color: var(--pilot-muted);
+  font-size: 10px;
+  letter-spacing: .02em;
+}
+.login-task-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: var(--pilot-space-3);
+}
+.login-task-tags span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 var(--pilot-space-3);
+  border: 1px solid var(--pilot-line);
+  border-radius: var(--pilot-radius-pill);
+  background: color-mix(in srgb, var(--pilot-surface) 64%, transparent);
+  color: var(--pilot-ink-soft);
+  font-size: 10px;
+  font-weight: 600;
+}
+.login-service.is-ok i {
+  background: var(--pilot-low);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--pilot-low-soft) 80%, transparent);
+}
+.login-service.is-warn i {
+  background: var(--pilot-mid);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--pilot-mid-soft) 80%, transparent);
+}
+.login-service.is-danger i {
+  background: var(--pilot-high);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--pilot-high-soft) 80%, transparent);
+}
+.login-service.is-checking i { animation: login-service-pulse 1.4s ease-in-out infinite; }
+@keyframes login-service-pulse {
+  0%, 100% { opacity: .45; }
+  50% { opacity: 1; }
+}
+.login-corner-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--pilot-space-3);
+}
+.login-model-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: var(--pilot-space-3);
+}
+.login-model-stats > div {
+  min-width: 0;
+  padding-left: var(--pilot-space-3);
+  border-left: 1px solid var(--pilot-line);
+}
+.login-model-stats > div:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+.login-model-stats strong {
+  display: block;
+  color: var(--pilot-ink);
+  font-size: var(--pilot-font-lg);
+  font-weight: 700;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+.login-model-stats span {
+  display: block;
+  margin-top: 2px;
+  color: var(--pilot-muted);
+  font-size: 10px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.login-model-flow {
+  display: flex;
+  align-items: center;
+  gap: var(--pilot-space-2);
+  margin-top: var(--pilot-space-3);
+  color: var(--pilot-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .04em;
+}
+.login-model-flow i {
+  width: 12px;
+  height: 1px;
+  background: var(--pilot-line-strong);
 }
 .login-card {
+  position: relative;
+  z-index: 2;
   width: min(420px, 100%);
   padding: var(--pilot-space-6);
   border: 1px solid var(--pilot-line);
-  border-radius: var(--pilot-radius-card);
+  border-radius: 18px;
   background: var(--pilot-surface);
   box-shadow: var(--pilot-shadow);
 }
@@ -270,7 +482,7 @@ function forgotPassword() {
   width: 32px;
   height: 32px;
   border: 1px solid var(--pilot-line-strong);
-  border-radius: var(--pilot-radius-control);
+  border-radius: 10px;
   color: var(--pilot-accent);
   font-size: 11px;
   font-weight: 700;
@@ -304,6 +516,9 @@ function forgotPassword() {
 }
 .login-form { display: flex; flex-direction: column; gap: var(--pilot-space-4); }
 .login-field { display: flex; flex-direction: column; gap: var(--pilot-space-2); }
+.login-field .pilot-input { border-radius: 10px; }
+.login-card-head :deep(.theme-switch) { border-radius: 10px; }
+.login-card-head :deep(.theme-switch-option) { border-radius: 8px; }
 .login-field label {
   color: var(--pilot-ink-soft);
   font-size: var(--pilot-font-xs);
@@ -335,8 +550,8 @@ function forgotPassword() {
 .login-text-button:hover { color: var(--pilot-accent-hover); text-decoration: underline; }
 .login-text-button:focus-visible { outline: 2px solid var(--pilot-accent); outline-offset: 2px; }
 .login-message-slot { min-height: 0; }
-.login-message { margin: 0; }
-.login-submit { width: 100%; height: 44px; }
+.login-message { margin: 0; border-radius: 10px; }
+.login-submit { width: 100%; height: 44px; border-radius: 10px; }
 .login-foot {
   display: flex;
   align-items: center;
@@ -350,9 +565,24 @@ function forgotPassword() {
 }
 @media (max-width: 1050px) {
   .login-page { grid-template-columns: minmax(0, 1fr) minmax(430px, .95fr); }
+  .login-corner { right: 32px; }
+}
+@media (max-height: 880px) and (min-width: 821px) {
+  .login-corner-top { top: 32px; }
+  .login-corner-bottom { bottom: 32px; }
+  .login-task-tags { display: none; }
+}
+@media (max-height: 860px) and (min-width: 821px) {
+  .login-model-flow { display: none; }
+}
+@media (max-height: 780px) and (min-width: 821px) {
+  .login-corner { display: none; }
 }
 @media (max-width: 820px) {
   .login-page { display: block; }
+  .login-corner { display: none; }
+  .login-stage::before,
+  .login-stage::after { display: none; }
   .login-visual {
     height: clamp(180px, 26vh, 230px);
     min-height: 0;
