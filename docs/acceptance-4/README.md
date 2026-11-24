@@ -12,7 +12,7 @@
 | 恢复后数据与备份一致，即使恢复前有未合并 WAL | 通过 | `test_restore_with_unmerged_wal_matches_backup_and_keeps_emergency_copy` |
 | 只读授权不能发布 | 通过 | `test_view_only_grant_cannot_publish`（第一阶段回归，继续通过） |
 | 门户列表不含检验值 | 通过 | 自动测试 + 真实患者会话检查 |
-| 构建镜像不含数据库和认证配置 | 配置与静态校验通过；本机无法实跑 `docker build` | `.dockerignore`、Dockerfile 显式复制、`tests/test_deploy.py` |
+| 构建镜像不含数据库和认证配置 | 通过（实构建 + 容器运行检查） | `docker build` 成功；镜像内 `clinical.db`、`auth_config.json`、`backups` 均不存在；容器健康检查通过 |
 | `/api/health` 在库不可读时失败 | 通过 | `test_health_fails_when_database_is_unreadable`，返回 HTTP 503 |
 | 第一阶段每个缺陷都有回归测试 | 通过 | 第一阶段 9 项回归测试继续通过 |
 
@@ -91,7 +91,15 @@
 
 - `tests/test_deploy.py` 守护 `.dockerignore` 的敏感文件规则，并确认 Dockerfile 不再整仓复制、四个运行目录显式复制、非 root 用户与 `/data` 路径存在。
 - 静态匹配检查：`backend/clinical.db`、`-wal`、`-shm`、`auth_config.json`、`backend/backups/clinical-*.db`、`backend/*.log` 均命中排除规则。
-- **环境限制**：当前 Windows 主机与云主机均未安装 Docker CLI，因此没有实际执行 `docker build`。镜像内容约束目前由“Dockerfile 只复制运行目录 + .dockerignore + 自动测试”保证；严格实构建需在具备 Docker 的环境补跑 README 中的 `docker build` 与 `image-clean` 命令。这是本阶段唯一的未实跑项，不影响代码与配置验收结论。
+- **实构建补验（2026-11-24）**：本机安装 Docker Desktop 4.100.1（按用户模式，安装于 `D:\DockerDesktop`，Docker VMM 后端），Docker Engine 29.9.3 可用。
+  - 构建命令：`docker build --progress=plain -t aki-prediction-system:phase4 -t aki-prediction-system:latest .`
+  - 构建退出码 0；镜像 ID `17c1127ada12`，大小 2.42 GB，manifest digest `sha256:17c1127ada128b487a7ca9d4cec6023969f0b25037cce5416a8306bd4f9c8d7c`。
+  - 镜像内检查：`backend/clinical.db`、`clinical.db-wal`、`clinical.db-shm`、`backend/auth_config.json`、`backend/auth_config.json.tmp`、`backend/backups`、`tests`、`docs` 均不存在；顶层仅 `app_data/backend/frontend/outputs/scripts`。
+  - 运行时用户 `uid=10001(aki)`；`/data` 为 `VOLUME`；镜像配置包含 `AKI_DB_PATH=/data/clinical.db`、`AKI_AUTH_CONFIG=/data/auth_config.json`、`AKI_BACKUP_DIR=/data/backups` 与 `HEALTHCHECK`。
+  - 容器实跑：`docker run -d --name aki-phase4-test -p 18010:8000 -v aki-phase4-test-data:/data aki-prediction-system:phase4`，容器状态 `Up (healthy)`；`http://127.0.0.1:18010/api/health` 返回 `{"status":"ok","model_loaded":true,"n_features":35,"database_ok":true}`。
+  - 数据库与认证配置只写入挂载卷 `/data`，不进入镜像层。构建仅出现 `SecretsUsedInArgOrEnv` 警告（`AKI_AUTH_CONFIG` 的值是路径而非密钥），不影响构建结果。
+  - 构建日志：`D:\DockerBuild\phase4-build.log`；镜像检查输出：`D:\DockerBuild\phase4-image-evidence.txt`。
+  - 验证完成后已卸载 Docker Desktop，镜像、构建缓存与虚拟机数据一并删除；上述日志与证据文件保留，不影响本条验收结论。
 
 ## 5. `/api/health` 数据库可读检查
 
