@@ -326,7 +326,7 @@ onMounted(load)
               <button v-if="canEdit" class="pilot-btn pilot-btn-primary" type="button" @click="openEncounter">新建接诊</button>
               <button ref="queryTrigger" class="pilot-btn" type="button" @click="issueCode">生成查询码</button>
               <button v-if="canEdit" class="pilot-btn" type="button" @click="openEdit">编辑档案</button>
-              <button class="pilot-btn pilot-btn-ghost" type="button" :disabled="loading" @click="load">刷新</button>
+              <button class="pilot-btn" type="button" :disabled="loading" @click="load">刷新</button>
             </div>
           </div>
         </section>
