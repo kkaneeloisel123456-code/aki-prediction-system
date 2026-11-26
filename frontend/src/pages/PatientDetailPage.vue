@@ -562,7 +562,7 @@ onMounted(load)
 .patient-loading { height: 280px; margin-top: var(--pilot-space-3); }
 .patient-banner { align-items: flex-start; }
 .patient-banner-meta { margin-top: var(--pilot-space-3); }
-.patient-banner-side { align-items: flex-end; }
+.patient-banner-side { align-items: center; }
 .patient-risk-side {
   display: flex;
   align-items: flex-end;
