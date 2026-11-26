@@ -123,6 +123,10 @@ _PUBLIC_API_PATHS = {
     "/api/auth/status",
 }
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+_RESEARCH_API_PREFIXES = (
+    "/api/performance", "/api/figures", "/api/tables",
+    "/api/data/quality", "/api/data/imputation",
+)
 _MUST_CHANGE_ALLOWED = {
     "/api/auth/password",
     "/api/auth/status",
@@ -215,6 +219,13 @@ async def protect_api(request: Request, call_next):
     if user.get("must_change_password") and path not in _MUST_CHANGE_ALLOWED:
         return _with_security_headers(JSONResponse(
             status_code=403, content={"detail": "首次登录必须修改初始密码"}
+        ))
+    if user.get("role") != "admin" and any(
+        path == prefix or path.startswith(prefix + "/")
+        for prefix in _RESEARCH_API_PREFIXES
+    ):
+        return _with_security_headers(JSONResponse(
+            status_code=403, content={"detail": "科研与维护内容仅管理员可访问"}
         ))
     if request.method not in _SAFE_METHODS:
         cookie_csrf = request.cookies.get(AUTH_CSRF_COOKIE_NAME)
@@ -563,6 +574,30 @@ def _read_csv_records(path: Path) -> List[Dict[str, Any]]:
                 clean[k] = v
         records.append(clean)
     return records
+
+
+@app.get("/api/assessment-guide")
+def assessment_guide() -> Dict[str, Any]:
+    """Clinical explanation, separated from the administrator research APIs."""
+    assets = load_assets()
+    # Report the shipped ensemble's validation row, never the best of all models.
+    # These research outputs are not an external validation of this deployment.
+    validation = None
+    cv = OUTPUTS_DIR / "tables" / "final_cv_results.csv"
+    if cv.exists():
+        for row in _read_csv_records(cv):
+            if row.get("模型") == "Voting Ensemble":
+                mean, std = row.get("50次CV AUC均值"), row.get("标准差")
+                if all(isinstance(v, (int, float)) and math.isfinite(v) for v in (mean, std)):
+                    validation = {"auc_mean": mean, "auc_std": std}
+                break
+    return {
+        "model_version": assets["model_version"],
+        "n_features": len(assets["features"]),
+        "risk_low": RISK_LOW, "risk_high": RISK_HIGH,
+        "calibrated": assets["calibrator"] is not None,
+        "validation": validation,
+    }
 
 
 @app.get("/api/performance")

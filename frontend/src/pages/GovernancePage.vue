@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ResearchNav from '../components/ResearchNav.vue'
 import { computed, onMounted, ref } from 'vue'
 import PageHeader from '../components/PageHeader.vue'
 import SectionPanel from '../components/SectionPanel.vue'
@@ -97,7 +98,7 @@ onMounted(load)
   <div class="pilot-page">
     <div class="pilot-page-inner">
       <PageHeader
-        kicker="系统 / 数据"
+        kicker="科研与维护"
         title="数据治理"
         description="从原始数据到建模数据集的完整处理管线 · 35 项特征"
       >
@@ -105,6 +106,7 @@ onMounted(load)
           <button class="pilot-btn" type="button" :disabled="impLoading || dashboardLoading" @click="load">刷新</button>
         </template>
       </PageHeader>
+      <ResearchNav />
 
       <div v-if="figuresError" class="pilot-error" role="alert">
         评估图表索引加载失败；治理图表可能无法显示，其它数据仍可查看。

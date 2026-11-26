@@ -224,6 +224,7 @@ async function confirmCommit() {
         :description="pageDescription"
       >
         <template #actions>
+          <RouterLink to="/patients" class="pilot-btn">← 患者档案</RouterLink>
           <button class="pilot-btn" type="button" @click="downloadTemplate">下载 XLSX 模板</button>
           <button v-if="currentFile || preview || result || needsSheet" class="pilot-btn" type="button" @click="reset">重新选择文件</button>
         </template>

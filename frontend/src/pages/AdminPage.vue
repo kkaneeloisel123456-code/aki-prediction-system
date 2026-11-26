@@ -385,10 +385,11 @@ onMounted(() => {
     <div class="pilot-page-inner admin-page">
       <PageHeader
         kicker="系统 / 管理"
-        title="账号与审计"
+        title="系统管理"
         :description="pageDescription"
       >
         <template #actions>
+          <RouterLink v-if="isAdmin" to="/research" class="pilot-btn">科研与维护 →</RouterLink>
           <button v-if="isAdmin" class="pilot-btn" type="button" :disabled="loading" @click="load">刷新</button>
         </template>
       </PageHeader>
@@ -396,7 +397,7 @@ onMounted(() => {
       <div v-if="error" class="pilot-error" role="alert">{{ error }}</div>
       <div v-if="notice" class="pilot-notice" role="status">{{ notice }}</div>
 
-      <PilotTabs v-if="isAdmin" v-model="tab" label="账号与审计分区" :tabs="tabItems" />
+      <PilotTabs v-if="isAdmin" v-model="tab" label="系统管理分区" :tabs="tabItems" />
 
       <div v-if="loading" class="admin-loading">
         <div class="pilot-skeleton admin-loading-line" />

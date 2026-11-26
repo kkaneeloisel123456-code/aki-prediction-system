@@ -11,14 +11,13 @@ const { theme, toggle } = useTheme()
 const auth = useAuth()
 const user = auth.user
 const online = ref(false)
-const bestAuc = ref('-')
 const isPublic = computed(() => route.meta.public === true)
 const roleLabel = computed(() => user.value?.role === 'admin' ? '管理员' : '医生')
 
 async function refreshHealth() {
   try {
     const h = await api.health()
-    online.value = h.model_loaded
+    online.value = h.status === 'ok' && h.model_loaded && h.database_ok
   } catch { online.value = false }
 }
 
@@ -27,12 +26,6 @@ let healthTimer: ReturnType<typeof setInterval> | undefined
 
 async function refreshShell() {
   await refreshHealth()
-  if (isPublic.value) return
-  // meta 与 health 分开处理：表格读取失败不应把已确认在线的模型误标为离线。
-  try {
-    const m = await api.meta()
-    if (m.best_auc != null) bestAuc.value = m.best_auc.toFixed(3)
-  } catch { /* 顶栏 AUC 保持 '-' */ }
 }
 
 function handleUnauthorized() {
@@ -64,31 +57,18 @@ type NavItem = { to: string; label: string; icon: string; adminOnly?: boolean }
 const navGroups = computed(() => {
   const groups: { label: string; items: NavItem[] }[] = [
     {
-      label: '待评估',
-      items: [{ to: '/', label: '未发布评估', icon: 'home' }],
-    },
-    {
-      label: '患者',
-      items: [{ to: '/patients', label: '患者档案', icon: 'users' }],
-    },
-    {
-      label: '文书',
-      items: [{ to: '/reports', label: '报告与撤销', icon: 'file-text' }],
-    },
-    {
-      label: '录入',
-      items: [{ to: '/batch', label: '批量导入', icon: 'upload' }],
-    },
-    {
-      label: '复查',
-      items: [{ to: '/schedule', label: '复查安排', icon: 'calendar' }],
+      label: '临床工作',
+      items: [
+        { to: '/', label: '工作台', icon: 'home' },
+        { to: '/patients', label: '患者档案', icon: 'users' },
+        { to: '/reports', label: '评估报告', icon: 'file-text' },
+        { to: '/schedule', label: '复查随访', icon: 'calendar' },
+      ],
     },
     {
       label: '系统',
       items: [
-        { to: '/admin', label: '账号与审计', icon: 'shield', adminOnly: true },
-        { to: '/performance', label: '模型说明', icon: 'bar-chart' },
-        { to: '/governance', label: '数据治理', icon: 'layers' },
+        { to: '/admin', label: '系统管理', icon: 'shield', adminOnly: true },
       ],
     },
   ]
@@ -209,6 +189,10 @@ async function submitPassword() {
       </div>
 
       <div class="sidebar-footer">
+        <RouterLink to="/assessment-guide" class="sidebar-theme-btn" title="评估说明">
+          <span class="sidebar-icon" aria-hidden="true">?</span>
+          <span class="sidebar-label">评估说明</span>
+        </RouterLink>
         <div class="sidebar-user">
           <div class="sidebar-user-info">
             <span class="sidebar-user-name">{{ user?.display_name || user?.username }}</span>
@@ -239,7 +223,7 @@ async function submitPassword() {
         </div>
         <div class="topbar-actions">
           <span class="badge" :class="online ? 'badge-success' : 'badge-warn'" style="cursor:default">● {{ online ? '服务在线' : '服务离线' }}</span>
-          <span class="badge badge-info">模型 AUC {{ bestAuc }}</span>
+          <button class="btn btn-secondary" type="button" @click="passwordOpen = true">个人账号</button>
         </div>
       </header>
       <div class="content">
@@ -251,8 +235,8 @@ async function submitPassword() {
       <div class="modal-panel" style="max-width: 440px">
         <div class="modal-head">
           <div>
-            <div class="modal-title">首次登录：请修改初始密码</div>
-            <div class="modal-sub">修改完成前，业务接口将被暂时锁定。</div>
+            <div class="modal-title">{{ user?.must_change_password ? '首次登录：请修改初始密码' : '个人账号 · 修改密码' }}</div>
+            <div class="modal-sub">{{ user?.display_name || user?.username }} · {{ roleLabel }}{{ user?.must_change_password ? ' · 修改密码后继续使用' : '' }}</div>
           </div>
         </div>
         <div class="modal-body">
@@ -272,9 +256,10 @@ async function submitPassword() {
         </div>
         <div class="modal-foot">
           <button class="btn btn-primary" :disabled="passwordBusy" @click="submitPassword">
-            {{ passwordBusy ? '提交中…' : '修改并继续' }}
+            {{ passwordBusy ? '提交中…' : user?.must_change_password ? '修改并继续' : '保存新密码' }}
           </button>
           <button class="btn btn-secondary" @click="signOut">退出登录</button>
+          <button v-if="!user?.must_change_password" class="btn btn-secondary" type="button" @click="passwordOpen = false">关闭</button>
         </div>
       </div>
     </div>
@@ -282,6 +267,7 @@ async function submitPassword() {
 </template>
 
 <style scoped>
+.sidebar-theme-btn { text-decoration: none; }
 .sidebar-user {
   display: flex;
   align-items: center;

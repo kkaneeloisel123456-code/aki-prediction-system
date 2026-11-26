@@ -13,9 +13,9 @@ onMounted(() => { void auth.restore() })
     <div class="pilot-page-inner not-found-inner">
       <div class="not-found-code" aria-hidden="true">404</div>
       <h1 class="pilot-title">页面不存在或链接已失效</h1>
-      <p class="pilot-sub">请检查地址是否完整。返回待评估页可继续处理未发布评估。</p>
+      <p class="pilot-sub">请检查地址是否完整。返回工作台可继续处理待办。</p>
       <div class="pilot-actions not-found-actions">
-        <RouterLink to="/" class="pilot-btn pilot-btn-primary">返回待评估</RouterLink>
+        <RouterLink to="/" class="pilot-btn pilot-btn-primary">返回工作台</RouterLink>
         <RouterLink v-if="showLogin" to="/login" class="pilot-btn">去登录</RouterLink>
       </div>
     </div>

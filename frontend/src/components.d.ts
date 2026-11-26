@@ -20,6 +20,7 @@ declare module 'vue' {
     FormField: typeof import('./components/FormField.vue')['default']
     PageHeader: typeof import('./components/PageHeader.vue')['default']
     PilotTabs: typeof import('./components/PilotTabs.vue')['default']
+    ResearchNav: typeof import('./components/ResearchNav.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SectionPanel: typeof import('./components/SectionPanel.vue')['default']

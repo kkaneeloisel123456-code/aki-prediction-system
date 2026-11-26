@@ -1,0 +1,16 @@
+{
+  "repository": "kkaneeloisel123456-code/aki-prediction-system",
+  "state_dir": "/var/lib/aki-deploy",
+  "maintenance_file": "/var/lib/aki-deploy/maintenance",
+  "container": "aki-system",
+  "data_volume": "aki-data",
+  "public_host": "116.62.161.100",
+  "port": 8000,
+  "retain_backups": 5,
+  "failure_cooldown_seconds": 3600,
+  "health_timeout_seconds": 120,
+  "node_image": "public.ecr.aws/docker/library/node:22-slim",
+  "python_image": "public.ecr.aws/docker/library/python:3.12-slim",
+  "pip_index_url": "https://mirrors.aliyun.com/pypi/simple/",
+  "npm_registry": "https://registry.npmjs.org/"
+}

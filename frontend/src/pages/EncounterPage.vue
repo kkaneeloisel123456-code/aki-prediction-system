@@ -100,11 +100,6 @@ const maxShap = computed(() => Math.max(0.001, ...shapRows.value.map((r: any) =>
 const canEdit = computed(() => encounter.value?.can_edit !== false)
 const isPublished = computed(() => encounter.value?.status === 'published')
 const metricsLocked = computed(() => isPublished.value)
-
-function reviewIsCurrent(enc: any) {
-  const review = enc?.latest_review
-  return Boolean(review?.prediction_id && review.prediction_id === enc?.current_prediction_id)
-}
 const reopening = ref(false)
 const latestReport = computed(() => encounter.value?.latest_report ?? null)
 const reviewOptions = computed(() => isManualPrediction.value
@@ -336,9 +331,10 @@ async function load() {
     draftVersion.value = enc.draft?.draft_version ?? 0
     hydratePayload(payload)
     prediction.value = enc.latest_prediction ?? null
-    reviewDone.value = reviewIsCurrent(enc)
-    reviewDecision.value = enc.latest_review?.decision ?? (enc.latest_prediction ? 'agree' : 'manual')
-    reviewReason.value = enc.latest_review?.reason ?? ''
+    const currentReview = enc.latest_review?.prediction_id === enc.latest_prediction?.id ? enc.latest_review : null
+    reviewDone.value = Boolean(currentReview && ['reviewed', 'published'].includes(enc.status))
+    reviewDecision.value = currentReview?.decision ?? (enc.latest_prediction ? 'agree' : 'manual')
+    reviewReason.value = currentReview?.reason ?? ''
     missingAck.value = enc.status === 'published'
     if (enc.status === 'published' || enc.latest_review) {
       checklist.value = await api.checklist(enc.id, enc.status === 'published').catch(() => null)
@@ -407,11 +403,14 @@ async function runPrediction() {
       row_version: rowVersion.value,
       features: payloadValues,
     })
-    encounter.value = { ...encounter.value, ...result, latest_review: encounter.value?.latest_review }
+    encounter.value = { ...encounter.value, ...result }
     rowVersion.value = result.row_version
     prediction.value = result.prediction
-    reviewDone.value = reviewIsCurrent(encounter.value)
-    if (!reviewDone.value) reviewDecision.value = 'agree'
+    reviewDone.value = false
+    encounter.value.latest_review = null
+    reviewDecision.value = 'agree'
+    reviewReason.value = ''
+    checklist.value = null
     notice.value = `模型评估完成：${result.prediction.risk_level}风险，缺失指标 ${result.prediction.missing_filled?.length ?? 0} 项已按中位数填充。`
     ElMessage.success('模型评估完成')
   } catch (e: any) {
@@ -439,9 +438,9 @@ async function submitReview() {
     })
     encounter.value = { ...encounter.value, ...res }
     rowVersion.value = res.row_version
-    reviewDone.value = true
+    reviewDone.value = res.status === 'reviewed'
     checklist.value = await api.checklist(encounter.value.id, missingAck.value)
-    notice.value = '医生复核已记录，可进行发布核对。'
+    notice.value = res.status === 'reviewed' ? '医生复核已记录，可进行发布核对。' : '已记录暂不发布，可继续补录、评估与复核。'
     ElMessage.success('复核已记录')
   } catch (e: any) {
     error.value = e?.message ?? '复核失败'
@@ -564,7 +563,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
             </div>
           </div>
           <div class="banner-risk">
-            <span class="banner-risk-label">本次风险</span>
+            <span class="banner-risk-label">{{ isManualPrediction ? '医生人工记录' : '模型风险估计' }}</span>
             <span class="banner-prob">{{ probabilityText }}</span>
             <span class="pilot-chip" :class="riskTone === 'high' ? 'pilot-chip-high' : riskTone === 'mid' ? 'pilot-chip-mid' : riskTone === 'low' ? 'pilot-chip-low' : 'pilot-chip-accent'">{{ riskText }}</span>
           </div>
@@ -632,6 +631,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
                   <span class="pilot-muted">{{ previousLabel }}</span>
                   <span class="pilot-muted">复制上次就诊只补空项，不覆盖已填值。</span>
                 </div>
+                <p class="rail-hint">请按术前、术中、入 ICU 和术后核对指标时点。本系统未逐项记录采样时间，需结合原始病历确认。</p>
                 <div v-if="invalidCount()" class="pilot-error metric-error">有 {{ invalidCount() }} 项数值超出临床合理范围，请修正后再保存或预测。</div>
 
                 <div v-for="g in groups" :key="g.key" class="metric-group">
@@ -659,7 +659,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
           <aside class="risk-rail">
             <section class="pilot-panel rail-panel">
               <div class="pilot-panel-head">
-                <span class="pilot-panel-title">风险评估</span>
+                <span class="pilot-panel-title">{{ isManualPrediction ? '人工记录' : '模型评估结果' }}</span>
                 <span class="pilot-muted">{{ hasModelPrediction ? '已运行模型' : isManualPrediction ? '人工记录' : '尚未运行' }}</span>
               </div>
               <div class="pilot-panel-body">
@@ -670,9 +670,19 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
                 <dl class="risk-meta">
                   <div><dt>二分类</dt><dd>{{ binaryText }}</dd></div>
                   <div><dt>概率校准</dt><dd>{{ calibratedText }}</dd></div>
-                  <div><dt>实测 / 填充</dt><dd>{{ measuredCount }} / {{ missingCount }}</dd></div>
+                  <div><dt>当前输入实测</dt><dd>{{ measuredCount }} 项</dd></div>
+                  <div v-if="hasModelPrediction"><dt>结果使用填充</dt><dd>{{ missingCount }} 项（非实测）</dd></div>
+                  <div v-if="hasPrediction"><dt>评估时间</dt><dd>{{ fmt(activePrediction?.predicted_at) }}</dd></div>
+                  <div v-if="hasModelPrediction"><dt>模型版本</dt><dd class="pilot-mono" style="overflow-wrap:anywhere">{{ activePrediction?.model_version || '—' }}</dd></div>
                   <div><dt>预测编号</dt><dd class="pilot-mono">{{ encounter.current_prediction_id || '—' }}</dd></div>
                 </dl>
+                <p v-if="hasModelPrediction" class="rail-hint">模型风险估计供医生复核，临床诊断与医嘱在就诊文书中单独记录。</p>
+                <p v-if="hasModelPrediction && dirty" class="rail-warning">当前页面有未保存修改，以上为上次运行结果。请保存并核对指标是否需要重新评估。</p>
+                <details v-if="hasModelPrediction && missingCount" class="rail-hint">
+                  <summary>查看 {{ missingCount }} 项非实测输入</summary>
+                  <p>{{ (activePrediction?.missing_filled ?? []).map(shapLabel).join('、') }}。模型按训练中位数填充。</p>
+                </details>
+                <RouterLink to="/assessment-guide" class="pilot-link">评估说明与使用局限 →</RouterLink>
                 <div class="rail-actions">
                   <button class="pilot-btn pilot-btn-primary" type="button" :disabled="predicting || !canEdit || metricsLocked" @click="runPrediction">
                     {{ predicting ? '计算中…' : (hasPrediction ? '重新运行模型' : '运行模型') }}
@@ -702,7 +712,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
             <section id="encounter-review" class="pilot-panel rail-panel">
               <div class="pilot-panel-head">
                 <span class="pilot-panel-title">医生复核</span>
-                <span class="pilot-chip" :class="reviewDone ? 'pilot-chip-low' : ''">{{ reviewDone ? '已复核' : '待复核' }}</span>
+                <span class="pilot-chip" :class="reviewDone ? 'pilot-chip-low' : ''">{{ reviewDone ? '已复核' : encounter.latest_review?.decision === 'defer' ? '暂不发布' : '待复核' }}</span>
               </div>
               <div class="pilot-panel-body review-form">
                 <div v-if="!hasPrediction && !reviewDone" class="rail-warning">没有有效模型结果。确需继续时，选择“无模型结果，人工记录”并填写理由。</div>
@@ -722,7 +732,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
                 </div>
                 <button v-if="!reviewDone && !isPublished" class="pilot-btn pilot-btn-primary" type="button" :disabled="reviewing || !canEdit" @click="submitReview">{{ reviewing ? '提交中…' : '记录复核' }}</button>
                 <button v-else-if="reviewDone && !isPublished" class="pilot-btn" type="button" :disabled="!canEdit" @click="reviseReview">重新复核</button>
-                <div v-if="reviewDone && encounter.latest_review" class="review-record">
+                <div v-if="encounter.latest_review && encounter.latest_review.prediction_id === activePrediction?.id" class="review-record">
                   已由 {{ encounter.latest_review.reviewer_name }} 于 {{ fmt(encounter.latest_review.created_at) }} 记录：{{ decisionText[encounter.latest_review.decision] || encounter.latest_review.decision }}。{{ encounter.latest_review.reason }}
                 </div>
               </div>

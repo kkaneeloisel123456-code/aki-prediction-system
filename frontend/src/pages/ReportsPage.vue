@@ -118,8 +118,8 @@ onMounted(load)
   <div class="pilot-page">
     <div class="pilot-page-inner">
       <PageHeader
-        kicker="文书"
-        title="报告中心"
+        kicker="临床工作"
+        title="评估报告"
         description="已发布正式报告的检索、版本追溯与文件下载。撤销记录由管理员操作并保留原因。"
       >
         <template #actions>

@@ -275,7 +275,7 @@ onMounted(() => {
     <div class="pilot-page-inner schedule-page">
       <PageHeader
         kicker="复查 / 预约"
-        title="复查安排"
+        title="复查随访"
         :description="pageDescription"
       >
         <template #actions>

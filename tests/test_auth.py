@@ -902,6 +902,189 @@ def _switch_login(client: TestClient, username: str, password: str = "DoctorPass
     login(client, username, password)
 
 
+def _task_case(client, *, mrn="TASK-1", owner_id=None, values=None):
+    if owner_id is None:
+        with db.reader() as conn:
+            owner = conn.execute("SELECT id FROM users WHERE username='task_fixture'").fetchone()
+        owner_id = owner["id"] if owner else create_doctor(client, "task_fixture")
+    patient = client.post("/api/patients", json={
+        "mrn": mrn, "name": "待办测试患者", "sex": "男", "birth_year": 1960,
+        **({"owner_id": owner_id} if owner_id else {}),
+    })
+    assert patient.status_code == 201, patient.text
+    response = client.post(f"/api/patients/{patient.json()['id']}/encounters", json={
+        "case_ref": mrn, "occurred_at": "2026-11-20T09:00:00+08:00",
+        "values": values or {}, "diagnosis": "待核对", "orders": "观察",
+    })
+    assert response.status_code == 201, response.text
+    return patient.json()["id"], response.json()["id"]
+
+
+def test_clinical_research_permissions_and_guide(client):
+    paths = ["/api/performance", "/api/figures", "/api/figures/missing.png",
+             "/api/tables", "/api/tables/final_cv_results.csv",
+             "/api/data/quality", "/api/data/imputation"]
+    for path in paths:
+        assert client.get(path).status_code == 401, path
+    login(client)
+    create_doctor(client, "guide_doc")
+    assert client.get("/api/performance").status_code == 200
+    assert client.get("/api/tables").status_code == 200
+    _switch_login(client, "guide_doc")
+    for path in paths:
+        assert client.get(path).status_code == 403, path
+    for path in ["/api/features", "/api/meta", "/api/template.csv", "/api/assessment-guide"]:
+        assert client.get(path).status_code == 200, path
+    from backend.app.assets import load_assets
+    from backend.app.config import RISK_LOW, RISK_HIGH
+    guide = client.get("/api/assessment-guide").json()
+    assert guide["model_version"] == load_assets()["model_version"]
+    assert guide["n_features"] == len(load_assets()["features"])
+    assert (guide["risk_low"], guide["risk_high"]) == (RISK_LOW, RISK_HIGH)
+    assert guide["validation"]["auc_mean"] == pytest.approx(0.809613559322034)
+
+
+def test_guide_uses_ensemble_row_and_handles_missing_artifact(client, monkeypatch, tmp_path):
+    import backend.app.main as main_module
+    login(client)
+    monkeypatch.setattr(main_module, "OUTPUTS_DIR", tmp_path)
+    assert client.get("/api/assessment-guide").json()["validation"] is None
+    (tmp_path / "tables").mkdir()
+    table = tmp_path / "tables" / "final_cv_results.csv"
+    table.write_text("模型,50次CV AUC均值,标准差\nOther,0.99,0.01\nVoting Ensemble,0.8,0.04\n", encoding="utf-8-sig")
+    assert client.get("/api/assessment-guide").json()["validation"] == {"auc_mean": 0.8, "auc_std": 0.04}
+
+
+def test_tasks_count_all_records_filter_then_paginate(client):
+    login(client)
+    for i in range(23):
+        _task_case(client, mrn=f"QUEUE-{i}")
+    _, full_id = _task_case(client, mrn="FULL", values=_model_features())
+    first = client.get("/api/dashboard/tasks").json()
+    assert first["total"] == 24
+    assert first["counts"]["supplement"] == 23
+    assert first["counts"]["assess"] == 1
+    assert len(first["tasks"]) == 20
+    second = client.get("/api/dashboard/tasks?offset=20").json()
+    assert len(second["tasks"]) == 4
+    assert not {r["id"] for r in first["tasks"]} & {r["id"] for r in second["tasks"]}
+    filtered = client.get("/api/dashboard/tasks?stage=assess&limit=1").json()
+    assert filtered["total"] == 1 and filtered["tasks"][0]["id"] == full_id
+    assert client.get("/api/dashboard/tasks?stage=unknown").status_code == 400
+    assert client.get("/api/dashboard/tasks?offset=-1").status_code == 422
+    assert client.get("/api/dashboard/tasks?limit=101").status_code == 422
+    with db.transaction() as conn:
+        conn.execute("UPDATE encounters SET status='published' WHERE id=?", (full_id,))
+    assert client.get("/api/dashboard/tasks").json()["total"] == 23
+
+
+def test_tasks_respect_grants_and_personal_draft_replacement(client):
+    login(client)
+    owner = create_doctor(client, "task_owner")
+    viewer = create_doctor(client, "task_viewer")
+    create_doctor(client, "task_other")
+    values = _model_features()
+    patient_id, encounter_id = _task_case(client, owner_id=owner, values=values)
+    _switch_login(client, "task_other")
+    assert client.get("/api/dashboard/tasks").json()["total"] == 0
+    _switch_login(client, "admin", "AdminPass123!")
+    grant = client.post(f"/api/patients/{patient_id}/grants", json={"doctor_id": viewer, "permission": "view"})
+    assert grant.status_code == 200, grant.text
+    _switch_login(client, "task_owner")
+    detail = client.get(f"/api/encounters/{encounter_id}").json()
+    draft = client.put(f"/api/encounters/{encounter_id}/draft", json={
+        "row_version": detail["row_version"], "draft_version": 0,
+        "values": {}, "diagnosis": "待核对", "orders": "观察",
+    })
+    assert draft.status_code == 200, draft.text
+    own_task = client.get("/api/dashboard/tasks").json()["tasks"][0]
+    assert own_task["filled"] == 0 and own_task["stage"] == "supplement"
+    assert own_task["can_edit"] is True
+    _switch_login(client, "task_viewer")
+    read_task = client.get("/api/dashboard/tasks").json()["tasks"][0]
+    assert read_task["filled"] == len(values) and read_task["stage"] == "assess"
+    assert read_task["can_edit"] is False
+
+
+def test_tasks_prediction_review_defer_and_changed_input(client):
+    login(client)
+    values = _model_features()
+    key, value = next(iter(values.items()))
+    _, encounter_id = _task_case(client, values={key: value})
+    detail = client.get(f"/api/encounters/{encounter_id}").json()
+    response = client.post(f"/api/encounters/{encounter_id}/predict", json={"row_version": detail["row_version"], "features": {key: value}})
+    assert response.status_code == 200, response.text
+    prediction = response.json()["prediction"]
+    assert prediction["predicted_at"] and prediction["model_version"]
+    assert client.get(f"/api/encounters/{encounter_id}").json()["latest_prediction"]["predicted_at"] == prediction["predicted_at"]
+    row = client.get("/api/dashboard/tasks").json()["tasks"][0]
+    assert row["stage"] == "review" and row["missing_count"] == len(values) - 1
+    detail = client.get(f"/api/encounters/{encounter_id}").json()
+    defer = client.post(f"/api/encounters/{encounter_id}/review", json={"row_version": detail["row_version"], "decision": "defer", "reason": "补充检查后再发布"})
+    assert defer.status_code == 200, defer.text
+    assert client.get("/api/dashboard/tasks").json()["tasks"][0]["stage"] == "observe"
+    # A fresh prediction supersedes the old defer decision.
+    detail = client.get(f"/api/encounters/{encounter_id}").json()
+    rerun = client.post(f"/api/encounters/{encounter_id}/predict", json={"row_version": detail["row_version"], "features": {key: value}})
+    assert rerun.status_code == 200, rerun.text
+    assert client.get("/api/dashboard/tasks").json()["tasks"][0]["stage"] == "review"
+    detail = client.get(f"/api/encounters/{encounter_id}").json()
+    review = client.post(f"/api/encounters/{encounter_id}/review", json={"row_version": detail["row_version"], "decision": "agree", "reason": "结合病历复核"})
+    assert review.status_code == 200, review.text
+    assert client.get("/api/dashboard/tasks").json()["tasks"][0]["stage"] == "publish"
+    # Simulate a persisted personal draft no longer matching reviewed input.
+    with db.transaction() as conn:
+        conn.execute("UPDATE encounters SET values_json='{}' WHERE id=?", (encounter_id,))
+    changed = client.get("/api/dashboard/tasks").json()["tasks"][0]
+    assert changed["stage"] == "reconcile" and changed["probability"] is None
+
+
+def test_tasks_invalid_draft_hides_previously_imputed_prediction(client):
+    login(client)
+    values = _model_features()
+    key, missing_key = list(values)[:2]
+    current = {key: values[key]}
+    _, encounter_id = _task_case(client, values=current)
+    detail = client.get(f"/api/encounters/{encounter_id}").json()
+    response = client.post(f"/api/encounters/{encounter_id}/predict", json={
+        "row_version": detail["row_version"], "features": current,
+    })
+    assert response.status_code == 200, response.text
+    detail = client.get(f"/api/encounters/{encounter_id}").json()
+    saved = client.put(f"/api/encounters/{encounter_id}/draft", json={
+        "row_version": detail["row_version"], "draft_version": 0,
+        "values": {**current, missing_key: "待核查"},
+        "diagnosis": "核对输入", "orders": "观察",
+    })
+    assert saved.status_code == 200, saved.text
+    task = client.get("/api/dashboard/tasks").json()["tasks"][0]
+    assert task["stage"] == "supplement" and task["invalid_count"] == 1
+    assert task["probability"] is None and task["risk_level"] is None
+
+
+def test_tasks_invalid_draft_and_manual_record(client):
+    login(client)
+    values = _model_features()
+    key = next(iter(values))
+    _, encounter_id = _task_case(client)
+    detail = client.get(f"/api/encounters/{encounter_id}").json()
+    saved = client.put(f"/api/encounters/{encounter_id}/draft", json={
+        "row_version": detail["row_version"], "draft_version": 0,
+        "values": {key: "待核查"}, "diagnosis": "待核对", "orders": "观察",
+    })
+    assert saved.status_code == 200, saved.text
+    row = client.get("/api/dashboard/tasks").json()["tasks"][0]
+    assert row["stage"] == "supplement" and row["invalid_count"] == 1
+    assert row["filled"] == 0 and row["missing_count"] == len(values) - 1
+    _, manual_id = _task_case(client, mrn="MANUAL", values={key: values[key]})
+    detail = client.get(f"/api/encounters/{manual_id}").json()
+    review = client.post(f"/api/encounters/{manual_id}/review", json={"row_version": detail["row_version"], "decision": "manual", "reason": "人工记录不输出模型结论"})
+    assert review.status_code == 200, review.text
+    manual = next(r for r in client.get("/api/dashboard/tasks").json()["tasks"] if r["id"] == manual_id)
+    assert manual["stage"] == "publish" and manual["manual"] is True
+    assert manual["probability"] is None and manual["risk_level"] is None
+
+
 def _preview_fixture(
     client: TestClient, name: str, *, sheet_name: str = "", mapping: dict | None = None,
 ):
