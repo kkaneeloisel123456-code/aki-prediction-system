@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException, Request, Response
+from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
@@ -193,6 +193,8 @@ def _encounter_dict(row: Any, *, include_values: bool = True) -> dict[str, Any]:
         result["latest_prediction"] = {
             "id": row["current_prediction_id"],
             **prediction,
+            "model_version": row["prediction_model_version"],
+            "predicted_at": row["prediction_time"],
         }
     if "review_json" in row.keys() and row["review_json"]:
         result["latest_review"] = json_load(row["review_json"], {})
@@ -213,6 +215,8 @@ _ENCOUNTER_SELECT = """
            pr.result_json AS prediction_json,
            pr.risk_level AS prediction_risk_level,
            pr.origin AS prediction_origin,
+           pr.model_version AS prediction_model_version,
+           pr.predicted_at AS prediction_time,
            (SELECT rv.decision || '|' || rv.reason || '|' || rv.created_at || '|' || rv.reviewer_id
             FROM clinical_reviews rv WHERE rv.encounter_id=e.id
             ORDER BY rv.created_at DESC LIMIT 1) AS review_json,
@@ -842,6 +846,7 @@ def clinical_predict(encounter_id: str, req: ClinicalPredictRequest, request: Re
         response["prediction"] = {
             "id": pid, **result, "model_version": assets["model_version"],
             "model_hash": assets["model_hash"], "input_fingerprint": fingerprint,
+            "predicted_at": updated["prediction_time"],
         }
         response["row_version"] = updated["row_version"]
         return response
@@ -1346,6 +1351,79 @@ def dashboard_summary(request: Request):
             for e in pending_encounters[:8]
         ],
     }
+
+
+@router.get("/dashboard/tasks")
+def dashboard_tasks(
+    request: Request, stage: str = "all",
+    offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100),
+):
+    """All visible unfinished encounters, filtered before pagination.
+
+    Personal drafts replace the saved input exactly as in the encounter editor;
+    another doctor's draft is never used. Counts cover the entire queue.
+    """
+    stages = {"supplement", "assess", "review", "publish", "observe", "reconcile"}
+    if stage != "all" and stage not in stages:
+        raise _err("未知的待办类型")
+    user = _user(request)
+    access, params = _access_sql(user)
+    assets = load_assets()
+    with db.reader() as conn:
+        rows = conn.execute(
+            f"""SELECT e.*,p.name AS patient_name,p.mrn,
+                       pr.probability,pr.risk_level,pr.origin,pr.model_hash,
+                       pr.input_fingerprint,pr.status AS prediction_status,
+                       d.payload_json AS draft_payload,d.base_row_version,
+                       (SELECT rv.decision FROM clinical_reviews rv
+                        WHERE rv.encounter_id=e.id AND rv.prediction_id=e.current_prediction_id
+                        ORDER BY rv.created_at DESC LIMIT 1) AS decision,
+                       CASE WHEN ?='admin' OR p.owner_id=? OR EXISTS(
+                         SELECT 1 FROM patient_grants g WHERE g.patient_id=p.id
+                         AND g.doctor_id=? AND g.permission='edit') THEN 1 ELSE 0 END AS can_edit
+                FROM encounters e JOIN patients p ON p.id=e.patient_id
+                LEFT JOIN predictions pr ON pr.id=e.current_prediction_id
+                LEFT JOIN encounter_drafts d ON d.encounter_id=e.id AND d.user_id=?
+                WHERE p.active=1 AND e.status!='published' AND {access}
+                ORDER BY e.occurred_at DESC,e.id""",
+            [user["role"], user["id"], user["id"], user["id"], *params],
+        ).fetchall()
+    counts = {key: 0 for key in sorted(stages)}
+    tasks = []
+    for row in rows:
+        payload = json_load(row["draft_payload"], {})
+        values = payload.get("values", json_load(row["values_json"], {}))
+        _, numeric, invalid = _normalise_values(values, allow_incomplete=True)
+        missing = [name for name in assets["features"] if name not in numeric and name not in invalid]
+        has_prediction = bool(row["current_prediction_id"] and row["prediction_status"] == "valid")
+        manual = has_prediction and row["origin"] == "manual"
+        input_matches = has_prediction and (
+            manual or _fingerprint_input(numeric, row["model_hash"]) == row["input_fingerprint"]
+        ) and not invalid
+        if row["decision"] == "defer" and input_matches and not invalid:
+            task_stage = "observe"
+        elif row["status"] == "reviewed":
+            task_stage = "reconcile" if not input_matches or invalid else "publish"
+        elif input_matches and not invalid:
+            task_stage = "review"
+        else:
+            task_stage = "supplement" if missing or invalid else "assess"
+        counts[task_stage] += 1
+        tasks.append({
+            "id": row["id"], "patient_name": row["patient_name"], "mrn": row["mrn"],
+            "case_ref": row["case_ref"], "occurred_at": row["occurred_at"],
+            "status": row["status"], "stage": task_stage, "can_edit": bool(row["can_edit"]),
+            "filled": len(numeric), "total_features": len(assets["features"]),
+            "missing_count": len(missing), "invalid_count": len(invalid),
+            "risk_level": row["risk_level"] if input_matches and not manual else None,
+            "probability": row["probability"] if input_matches and not manual else None,
+            "manual": bool(manual),
+        })
+    # Risk is a secondary ordering aid; it does not alter the workflow stage.
+    tasks.sort(key=lambda item: {"高": 0, "中": 1, "低": 2}.get(item["risk_level"], 3))
+    filtered = tasks if stage == "all" else [item for item in tasks if item["stage"] == stage]
+    return {"counts": counts, "total": len(filtered), "offset": offset, "limit": limit,
+            "tasks": filtered[offset:offset + limit]}
 
 
 @router.get("/workstation/summary")

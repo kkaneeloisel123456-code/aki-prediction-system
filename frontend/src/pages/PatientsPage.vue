@@ -125,6 +125,7 @@ onUnmounted(() => window.removeEventListener('keydown', handleWindowEscape))
           <p class="pilot-sub">真实患者档案、授权与就诊入口 · 当前 {{ rows.length }} 份档案</p>
         </div>
         <div class="pilot-actions">
+          <RouterLink to="/batch" class="pilot-btn">批量导入</RouterLink>
           <button class="pilot-btn pilot-btn-primary" type="button" @click="openCreate">＋ 新建患者</button>
           <button class="pilot-btn" type="button" :disabled="loading" @click="load">刷新</button>
         </div>

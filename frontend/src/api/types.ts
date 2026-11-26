@@ -1,5 +1,23 @@
 export interface ShapContribution { feature: string; value: number; shap: number; direction: string }
 export interface HealthResponse { status: string; model_loaded: boolean; n_features: number; database_ok: boolean }
+export interface AssessmentGuide {
+  model_version: string
+  n_features: number
+  risk_low: number
+  risk_high: number
+  calibrated: boolean
+  validation: { auc_mean: number; auc_std: number } | null
+}
+export type TaskStage = 'supplement' | 'assess' | 'review' | 'publish' | 'observe' | 'reconcile'
+export interface ClinicalTask {
+  id: string; patient_name: string; mrn: string; case_ref: string; occurred_at: string
+  status: string; stage: TaskStage; can_edit: boolean; filled: number; total_features: number
+  missing_count: number; invalid_count: number; risk_level: string | null
+  probability: number | null; manual: boolean
+}
+export interface ClinicalTasks {
+  counts: Record<TaskStage, number>; total: number; offset: number; limit: number; tasks: ClinicalTask[]
+}
 export interface FeatureMeta {
   name: string
   median: number

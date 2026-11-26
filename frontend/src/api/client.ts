@@ -4,6 +4,9 @@ import type {
   PerformanceResponse,
   MetaResponse,
   AuthStatus,
+  AssessmentGuide,
+  ClinicalTasks,
+  TaskStage,
 } from "./types";
 
 // FastAPI errors put a human-readable message in `detail`: either a plain
@@ -155,6 +158,9 @@ export const api = {
     }),
 
   health: () => request<HealthResponse>("/api/health"),
+  assessmentGuide: () => request<AssessmentGuide>("/api/assessment-guide"),
+  tasks: (stage: TaskStage | 'all' = 'all', offset = 0) =>
+    request<ClinicalTasks>(`/api/dashboard/tasks?stage=${stage}&offset=${offset}&limit=20`),
   features: () => request<FeaturesResponse>("/api/features"),
   performance: () => request<PerformanceResponse>("/api/performance"),
   meta: () => request<MetaResponse>("/api/meta"),

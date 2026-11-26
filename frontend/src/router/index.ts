@@ -14,23 +14,27 @@ import Governance from "../pages/GovernancePage.vue";
 import Login from "../pages/LoginPage.vue";
 import Register from "../pages/RegisterPage.vue";
 import NotFound from "../pages/NotFoundPage.vue";
+import AssessmentGuide from "../pages/AssessmentGuidePage.vue";
+import Research from "../pages/ResearchPage.vue";
 import { useAuth } from "../composables/useAuth";
 
 const routes = [
   { path: "/register", component: Register, meta: { title: "医生注册", public: true } },
   { path: "/login", component: Login, meta: { title: "登录", public: true } },
   { path: "/portal", component: Portal, meta: { title: "患者服务", public: true } },
-  { path: "/", component: Dashboard, meta: { title: "待评估" } },
-  { path: "/patients", component: Patients, meta: { title: "患者" } },
+  { path: "/", component: Dashboard, meta: { title: "工作台" } },
+  { path: "/patients", component: Patients, meta: { title: "患者档案" } },
   { path: "/patients/:id", component: PatientDetail, meta: { title: "患者病历" } },
   { path: "/encounters/:id", component: Encounter, meta: { title: "接诊与评估" } },
-  { path: "/reports", component: Reports, meta: { title: "文书" } },
+  { path: "/reports", component: Reports, meta: { title: "评估报告" } },
   { path: "/reports/:id", component: ReportDetail, meta: { title: "正式报告" } },
-  { path: "/schedule", component: Schedule, meta: { title: "复查" } },
-  { path: "/admin", component: Admin, meta: { title: "账号与审计", adminOnly: true } },
-  { path: "/batch", component: Batch, meta: { title: "录入" } },
-  { path: "/performance", component: Performance, meta: { title: "模型说明" } },
-  { path: "/governance", component: Governance, meta: { title: "数据治理" } },
+  { path: "/schedule", component: Schedule, meta: { title: "复查随访" } },
+  { path: "/admin", component: Admin, meta: { title: "系统管理", adminOnly: true } },
+  { path: "/batch", component: Batch, meta: { title: "批量导入" } },
+  { path: "/assessment-guide", component: AssessmentGuide, meta: { title: "评估说明" } },
+  { path: "/research", component: Research, meta: { title: "科研与维护", adminOnly: true } },
+  { path: "/performance", component: Performance, meta: { title: "研究验证", adminOnly: true } },
+  { path: "/governance", component: Governance, meta: { title: "数据治理", adminOnly: true } },
   // Backward-compatible redirects for bookmarks from the research prototype.
   { path: "/dashboard", redirect: "/" },
   { path: "/workstation", redirect: "/patients" },

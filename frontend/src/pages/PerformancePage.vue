@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ResearchNav from '../components/ResearchNav.vue'
 import { computed, onMounted, ref } from 'vue'
 import PageHeader from '../components/PageHeader.vue'
 import SectionPanel from '../components/SectionPanel.vue'
@@ -152,8 +153,8 @@ onMounted(load)
   <div class="pilot-page">
     <div class="pilot-page-inner">
       <PageHeader
-        kicker="系统 / 模型"
-        title="模型说明"
+        kicker="科研与维护"
+        title="研究验证"
         description="50 次嵌套 CV · 模型对比、校准与消融"
       >
         <template #actions>
@@ -162,6 +163,7 @@ onMounted(load)
           </button>
         </template>
       </PageHeader>
+      <ResearchNav />
 
       <div v-if="offline" class="pilot-error" role="alert">
         无法连接后端或评估产物缺失。请确认服务已启动，并已在受控环境生成评估图表。
@@ -190,7 +192,7 @@ onMounted(load)
         </div>
       </div>
 
-      <PilotTabs v-model="tab" :tabs="tabs" label="模型说明分区" />
+      <PilotTabs v-model="tab" :tabs="tabs" label="研究验证分区" />
 
       <div v-if="loading" class="pilot-stack" aria-label="正在加载评估结果">
         <div class="pilot-skeleton perf-skeleton" />
