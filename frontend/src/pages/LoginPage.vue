@@ -311,20 +311,20 @@ function forgotPassword() {
 }
 .login-corner {
   position: absolute;
-  right: 40px;
+  left: 50%;
   z-index: 1;
-  width: min(420px, calc(100% - 48px));
+  width: min(420px, calc(100% - 2 * var(--pilot-space-5)));
   color: var(--pilot-muted);
   pointer-events: none;
+  transform: translateX(-50%);
 }
 .login-corner-top {
-  top: 40px;
+  top: clamp(24px, 3.2vh, 40px);
   padding-top: var(--pilot-space-3);
   border-top: 1px solid var(--pilot-line-strong);
 }
 .login-corner-bottom {
-  right: 40px;
-  bottom: 40px;
+  bottom: clamp(24px, 3.2vh, 40px);
   padding-top: var(--pilot-space-3);
   border-top: 1px solid var(--pilot-line);
 }
@@ -567,14 +567,11 @@ function forgotPassword() {
 }
 @media (max-width: 1050px) {
   .login-page { grid-template-columns: minmax(0, 1fr) minmax(430px, .95fr); }
-  .login-corner { right: 32px; }
 }
-@media (max-height: 880px) and (min-width: 821px) {
-  .login-corner-top { top: 32px; }
-  .login-corner-bottom { bottom: 32px; }
+@media (max-height: 1000px) and (min-width: 821px) {
   .login-task-tags { display: none; }
 }
-@media (max-height: 860px) and (min-width: 821px) {
+@media (max-height: 980px) and (min-width: 821px) {
   .login-model-flow { display: none; }
 }
 @media (max-height: 780px) and (min-width: 821px) {

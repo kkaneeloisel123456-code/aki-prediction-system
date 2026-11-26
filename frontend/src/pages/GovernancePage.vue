@@ -144,8 +144,12 @@ onMounted(load)
               class="gov-figure gov-figure-funnel"
               :alt="`特征筛选漏斗：${funnelSlides[funnelIdx].label}`"
             >
-            <button class="gov-funnel-arrow is-left" type="button" aria-label="上一张漏斗图" @click="funnelNext(-1)">‹</button>
-            <button class="gov-funnel-arrow is-right" type="button" aria-label="下一张漏斗图" @click="funnelNext(1)">›</button>
+            <button class="gov-funnel-arrow is-left" type="button" aria-label="上一张漏斗图" @click="funnelNext(-1)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 4 L8 12 L16 20" /></svg>
+            </button>
+            <button class="gov-funnel-arrow is-right" type="button" aria-label="下一张漏斗图" @click="funnelNext(1)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4 L16 12 L8 20" /></svg>
+            </button>
           </div>
           <EmptyState v-else title="图未生成" description="特征筛选漏斗图尚未生成，刷新后重试。" />
 
@@ -349,16 +353,24 @@ onMounted(load)
   place-items: center;
   width: 32px;
   height: 32px;
+  padding: 0;
   border: 0;
   border-radius: 50%;
   background: var(--pilot-ink);
   color: var(--pilot-surface);
-  font: inherit;
-  font-size: 20px;
-  line-height: 1;
   opacity: .65;
   cursor: pointer;
   transform: translateY(-50%);
+}
+.gov-funnel-arrow svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .gov-funnel-arrow:hover { opacity: 1; }
 .gov-funnel-arrow.is-left { left: var(--pilot-space-2); }
