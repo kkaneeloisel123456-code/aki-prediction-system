@@ -570,7 +570,11 @@ onMounted(load)
   gap: var(--pilot-space-1);
 }
 .patient-risk-prob { color: var(--pilot-ink); font-size: var(--pilot-font-lg); line-height: 1.1; }
-.patient-actions { justify-content: flex-end; }
+.patient-actions {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  justify-content: end;
+}
 .patient-layout {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
