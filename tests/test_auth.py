@@ -384,7 +384,7 @@ def test_predictions_migration_rebuilds_table():
     check = sqlite3.connect(migration_db)
     try:
         version = check.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 4
+        assert version == db.SCHEMA_VERSION
         columns = {row[1]: row for row in check.execute("PRAGMA table_info(predictions)")}
         assert "origin" in columns
         for nullable in ("probability", "model_version", "model_hash"):
