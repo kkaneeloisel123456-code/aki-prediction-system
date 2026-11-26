@@ -12,10 +12,12 @@ import Performance from "../pages/PerformancePage.vue";
 import Batch from "../pages/BatchPage.vue";
 import Governance from "../pages/GovernancePage.vue";
 import Login from "../pages/LoginPage.vue";
+import Register from "../pages/RegisterPage.vue";
 import NotFound from "../pages/NotFoundPage.vue";
 import { useAuth } from "../composables/useAuth";
 
 const routes = [
+  { path: "/register", component: Register, meta: { title: "医生注册", public: true } },
   { path: "/login", component: Login, meta: { title: "登录", public: true } },
   { path: "/portal", component: Portal, meta: { title: "患者服务", public: true } },
   { path: "/", component: Dashboard, meta: { title: "待评估" } },

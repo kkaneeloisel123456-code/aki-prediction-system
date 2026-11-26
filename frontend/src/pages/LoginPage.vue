@@ -190,6 +190,7 @@ function forgotPassword() {
           </button>
         </form>
 
+        <div class="login-register"><span>首次使用临床工作台？</span><RouterLink to="/register" class="pilot-link">申请医生账号 →</RouterLink></div>
         <footer class="login-foot">
           <span>仅限授权医务人员使用</span>
           <RouterLink to="/portal" class="pilot-link">患者查询入口</RouterLink>
@@ -200,6 +201,7 @@ function forgotPassword() {
 </template>
 
 <style scoped>
+.login-register { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; margin-top:20px; padding:16px 0; border-top:1px solid var(--pilot-line); font-size:12px; color:var(--pilot-muted); }
 .login-page {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(440px, .85fr);

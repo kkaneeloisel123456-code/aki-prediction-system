@@ -49,6 +49,7 @@ from .clinical_api import router as clinical_router
 from .admin_api import router as admin_router
 from .patient_portal_api import router as portal_router
 from .import_api import router as import_router
+from .registration_api import router as registration_router
 from .database import database_path, ensure_initialized, utc_now
 from .schemas import (
     AuthStatusResponse,
@@ -112,8 +113,10 @@ app.include_router(clinical_router)
 app.include_router(admin_router)
 app.include_router(portal_router)
 app.include_router(import_router)
+app.include_router(registration_router)
 
 _PUBLIC_API_PATHS = {
+    "/api/auth/register",
     "/api/health",
     "/api/auth/login",
     "/api/auth/logout",

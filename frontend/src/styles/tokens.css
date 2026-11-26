@@ -18,8 +18,8 @@
   --pilot-font-lg: 20px;
   --pilot-font-xl: 28px;
 
-  --pilot-radius-control: 2px;
-  --pilot-radius-card: 4px;
+  --pilot-radius-control: 7px;
+  --pilot-radius-card: 12px;
   --pilot-radius-pill: 999px;
 }
 

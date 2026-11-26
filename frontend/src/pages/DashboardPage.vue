@@ -5,6 +5,8 @@ import PageHeader from '../components/PageHeader.vue'
 import SectionPanel from '../components/SectionPanel.vue'
 import EmptyState from '../components/EmptyState.vue'
 import StatusPill from '../components/StatusPill.vue'
+import { useAuth } from '../composables/useAuth'
+const auth = useAuth()
 
 const loading = ref(true)
 const error = ref('')
@@ -137,6 +139,17 @@ onMounted(load)
         </template>
       </PageHeader>
 
+      <section class="dashboard-welcome">
+        <div><span class="pilot-kicker">CLINICAL WORKSPACE</span><h2>你好，{{ auth.user.value?.display_name || '医生' }}</h2><p>从一份接诊记录开始，完成今天的风险评估与复核。</p></div>
+        <RouterLink to="/patients" class="pilot-btn pilot-btn-primary">＋ 开始接诊</RouterLink>
+      </section>
+      <div v-if="!loading && summary" class="dashboard-stats">
+        <RouterLink to="/patients"><span>在管患者</span><strong>{{ summary.patients_total ?? 0 }}</strong><small>查看患者档案 →</small></RouterLink>
+        <a href="#assessment-queue"><span>待完成评估</span><strong>{{ sortedPending.length }}</strong><small>进入评估队列 →</small></a>
+        <RouterLink to="/schedule"><span>今日复查</span><strong>{{ summary.today_appointments ?? 0 }}</strong><small>查看复查安排 →</small></RouterLink>
+        <RouterLink to="/reports"><span>已发布报告</span><strong>{{ summary.reports_total ?? 0 }}</strong><small>查看正式报告 →</small></RouterLink>
+      </div>
+
       <div v-if="error" class="pilot-error">{{ error }}</div>
 
       <div v-if="loading" class="pilot-stack" aria-label="正在加载">
@@ -146,7 +159,7 @@ onMounted(load)
 
       <div v-else class="dashboard-grid">
         <SectionPanel
-          class="dashboard-pending"
+          id="assessment-queue" class="dashboard-pending"
           title="评估队列"
           :subtitle="`${sortedPending.length} 份 · 高风险 ${pendingRiskCounts.high} 份`"
           flush
@@ -231,6 +244,9 @@ onMounted(load)
 </template>
 
 <style scoped>
+.dashboard-welcome{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:28px 32px;margin-bottom:20px;border:1px solid var(--pilot-line);border-radius:var(--pilot-radius-card);background:linear-gradient(115deg,var(--pilot-accent-soft),var(--pilot-surface));}
+.dashboard-welcome h2{margin:10px 0;font-size:25px;font-weight:600}.dashboard-welcome p{margin:0;color:var(--pilot-muted);line-height:1.8}.dashboard-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:24px}.dashboard-stats>a{display:grid;gap:10px;padding:20px;background:var(--pilot-surface);border:1px solid var(--pilot-line);border-radius:var(--pilot-radius-card);text-decoration:none;color:var(--pilot-ink)}.dashboard-stats>a:hover{border-color:var(--pilot-accent)}.dashboard-stats span,.dashboard-stats small{font-size:12px;color:var(--pilot-muted)}.dashboard-stats strong{font-size:28px;font-weight:600;color:var(--pilot-accent)}
+@media(max-width:700px){.dashboard-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-welcome{padding:20px;align-items:flex-start;flex-direction:column}}
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(320px, 1fr);

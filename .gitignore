@@ -41,6 +41,7 @@ outputs/tables/clinical_range_flags.csv
 
 # Full-stack (React + FastAPI)
 frontend/node_modules/
+.pnpm-store/
 frontend/dist/
 backend/__pycache__/
 

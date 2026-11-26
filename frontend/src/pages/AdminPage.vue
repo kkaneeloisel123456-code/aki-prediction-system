@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { api } from '../api/client'
 import { useAuth } from '../composables/useAuth'
 
-type Tab = 'overview' | 'users' | 'patients' | 'audit'
+type Tab = 'overview' | 'users' | 'patients' | 'audit' | 'applications'
 type Tone = 'neutral' | 'low' | 'mid' | 'high' | 'accent'
 
 const auth = useAuth()
@@ -13,6 +13,22 @@ const error = ref('')
 const notice = ref('')
 const system = ref<any>(null)
 const users = ref<any[]>([])
+const applications = ref<any[]>([])
+const reviewBusy = ref(false)
+const reviewReasons = reactive<Record<string, string>>({})
+async function reviewDoctor(row: any, decision: string) {
+  error.value = ''
+  if (decision === 'rejected' && !reviewReasons[row.id]?.trim()) {
+    error.value = '请先填写未通过原因'; return
+  }
+  reviewBusy.value = true
+  try {
+    await api.reviewDoctor(row.id, decision, reviewReasons[row.id]?.trim() || '')
+    notice.value = decision === 'approved' ? '审核通过，医生现在可以登录' : '已记录未通过原因'
+    await load()
+  } catch (e: any) { error.value = e.message || '审核失败' }
+  finally { reviewBusy.value = false }
+}
 const accounts = ref<any[]>([])
 const events = ref<any[]>([])
 const auditAction = ref('')
@@ -43,6 +59,7 @@ const selectedAccount = computed(() => accounts.value.find((a) => a.id === accou
 const tabItems = computed(() => [
   { value: 'overview', label: '系统概览' },
   { value: 'users', label: '员工账号', count: users.value.length },
+  { value: 'applications', label: '医生注册审核', count: applications.value.filter(r => r.status === 'pending').length },
   { value: 'patients', label: '患者账号', count: accounts.value.length },
   { value: 'audit', label: '审计日志', count: events.value.length },
 ])
@@ -59,6 +76,7 @@ function bytes(n?: number) {
   return `${(n / 1024).toFixed(0)} KB`
 }
 const AUDIT_ACTION_LABELS: Record<string, string> = {
+  doctor_registration_review: '医生注册审核',
   report_publish: '发布报告',
   report_revoke: '撤销报告',
   report_pdf_download: '下载报告 PDF',
@@ -144,6 +162,7 @@ const AUDIT_DETAIL_LABELS: Record<string, string> = {
 }
 const SENSITIVE_AUDIT_KEYS = ['password', 'query_code', 'certificate', 'phone', 'token', 'secret']
 const AUDIT_ENTITY_LABELS: Record<string, string> = {
+  doctor_application: '医生注册申请',
   report: '报告',
   patient: '患者',
   encounter: '就诊',
@@ -209,11 +228,12 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [s, u, a] = await Promise.all([
-      api.system(), api.adminUsers(), api.patientAccounts(),
+    const [s, u, a, registrations] = await Promise.all([
+      api.system(), api.adminUsers(), api.patientAccounts(), api.doctorApplications(),
     ])
     system.value = s
     users.value = u.users ?? []
+    applications.value = registrations.applications ?? []
     accounts.value = a.accounts ?? []
     await loadAudit()
   } catch (e: any) {
@@ -440,6 +460,17 @@ onMounted(() => {
           </div>
         </div>
 
+        <SectionPanel v-else-if="tab === 'applications'" title="医生注册审核" subtitle="请先通过院内渠道核实申请人身份，再开通医生账号。">
+          <p v-if="!applications.length" class="pilot-muted">暂无注册申请。</p>
+          <article v-for="row in applications" :key="row.id" class="application-card">
+            <div class="application-heading"><strong>{{ row.display_name }} <small class="pilot-muted">{{ row.username }}</small></strong><span class="pilot-chip">{{ ({pending:'待审核',approved:'已通过',rejected:'未通过'} as Record<string,string>)[row.status] }}</span></div>
+            <p>{{ row.institution }} · {{ row.department }}</p><p class="pilot-small">申请时间：{{ fmt(row.created_at) }}<span v-if="row.reviewed_at"> · 审核时间：{{ fmt(row.reviewed_at) }}</span></p>
+            <div v-if="row.status === 'pending'" class="pilot-stack">
+              <label :for="`reason-${row.id}`" class="pilot-small">审核备注（未通过时必填）</label><input :id="`reason-${row.id}`" v-model="reviewReasons[row.id]" class="pilot-input" maxlength="500" :disabled="reviewBusy" placeholder="请填写核实情况或未通过原因">
+              <div class="pilot-actions"><button class="pilot-btn pilot-btn-primary" :disabled="reviewBusy" @click="reviewDoctor(row, 'approved')">核实并开通</button><button class="pilot-btn" :disabled="reviewBusy" @click="reviewDoctor(row, 'rejected')">不予通过</button></div>
+            </div><p v-else-if="row.reason" class="pilot-small">审核备注：{{ row.reason }}</p>
+          </article>
+        </SectionPanel>
         <SectionPanel
           v-else-if="tab === 'users'"
           title="员工账号"
@@ -640,6 +671,8 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.application-card{padding:20px;margin-bottom:16px;border:1px solid var(--pilot-line);border-radius:var(--pilot-radius-card);background:var(--pilot-surface)}
+.application-heading{display:flex;justify-content:space-between;gap:16px;align-items:center}.application-heading small{margin-left:10px}.application-card p{line-height:1.7}
 .admin-page { max-width: 1440px; }
 .admin-loading { display: grid; gap: var(--pilot-space-3); padding: var(--pilot-space-5) 0; }
 .admin-loading-line { height: 28px; }

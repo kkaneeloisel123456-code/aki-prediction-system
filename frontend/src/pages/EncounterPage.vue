@@ -540,9 +540,16 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
 
         <div v-if="!canEdit" class="pilot-error">当前账号对该患者只有只读权限，无法修改就诊或发布报告。</div>
 
+        <nav class="encounter-steps" aria-label="接诊流程">
+          <a href="#encounter-document"><span>01</span> 就诊文书</a>
+          <a href="#encounter-metrics"><span>02</span> 指标录入</a>
+          <a href="#encounter-review"><span>03</span> 医生复核</a>
+          <a v-if="reviewDone && checklist" href="#encounter-publish"><span>04</span> 发布核对</a>
+          <span v-else class="encounter-step-disabled" aria-disabled="true">04 · 复核后发布</span>
+        </nav>
         <div class="encounter-layout">
           <main class="encounter-main">
-            <section class="pilot-panel">
+            <section id="encounter-document" class="pilot-panel">
               <div class="pilot-panel-head">
                 <span class="pilot-panel-title">本次就诊文书</span>
                 <span class="pilot-muted">记录 v{{ rowVersion }} · 草稿 v{{ draftVersion }}</span>
@@ -559,7 +566,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
               </div>
             </section>
 
-            <section class="pilot-panel metrics-panel">
+            <section id="encounter-metrics" class="pilot-panel metrics-panel">
               <div class="pilot-panel-head metrics-head">
                 <div class="metrics-title">
                   <span class="pilot-panel-title">围手术期指标</span>
@@ -658,7 +665,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
               </div>
             </section>
 
-            <section class="pilot-panel rail-panel">
+            <section id="encounter-review" class="pilot-panel rail-panel">
               <div class="pilot-panel-head">
                 <span class="pilot-panel-title">医生复核</span>
                 <span class="pilot-chip" :class="reviewDone ? 'pilot-chip-low' : ''">{{ reviewDone ? '已复核' : '待复核' }}</span>
@@ -686,7 +693,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
               </div>
             </section>
 
-            <section v-if="reviewDone && checklist" class="pilot-panel rail-panel">
+            <section id="encounter-publish" v-if="reviewDone && checklist" class="pilot-panel rail-panel">
               <div class="pilot-panel-head">
                 <span class="pilot-panel-title">发布核对</span>
                 <button class="pilot-btn pilot-btn-ghost" type="button" @click="refreshChecklist">重新核对</button>
@@ -776,6 +783,9 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
 </template>
 
 <style scoped>
+.encounter-steps{display:flex;flex-wrap:wrap;gap:8px;padding:12px 16px;margin:16px 0 24px;background:var(--pilot-surface);border:1px solid var(--pilot-line);border-radius:var(--pilot-radius-card)}
+.encounter-steps a{display:flex;align-items:center;gap:10px;flex:1;min-width:135px;padding:8px;color:var(--pilot-ink-soft);text-decoration:none;font-size:13px}.encounter-steps a:hover{color:var(--pilot-accent);background:var(--pilot-accent-soft);border-radius:var(--pilot-radius-control)}.encounter-steps span{color:var(--pilot-accent);font-variant-numeric:tabular-nums}.encounter-pilot section[id]{scroll-margin-top:90px}
+.encounter-steps .encounter-step-disabled{flex:1;min-width:135px;padding:8px;color:var(--pilot-muted);font-size:13px;align-self:center}
 .encounter-head { margin-bottom: var(--pilot-space-3); }
 .pilot-back { display: inline-block; margin-bottom: var(--pilot-space-2); font-size: var(--pilot-font-xs); }
 .pilot-loading { padding: var(--pilot-space-7); color: var(--pilot-muted); text-align: center; }

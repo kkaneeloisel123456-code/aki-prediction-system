@@ -22,7 +22,7 @@ from .config import BACKEND_DIR
 _INIT_LOCK = threading.Lock()
 _INITIALIZED: set[str] = set()
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # Prediction rows come from two origins:
 #   model  - produced by the deployed model; probability/model_version/model_hash set
@@ -99,6 +99,19 @@ def reader() -> Iterator[sqlite3.Connection]:
 
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS doctor_applications (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    display_name TEXT NOT NULL,
+    institution TEXT NOT NULL,
+    department TEXT NOT NULL,
+    password_hash TEXT,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')),
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    reviewed_at TEXT,
+    reviewer_id TEXT
+);
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     username TEXT NOT NULL UNIQUE COLLATE NOCASE,

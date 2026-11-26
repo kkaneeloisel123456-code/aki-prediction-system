@@ -136,6 +136,11 @@ function saveBlob(blob: Blob, filename: string) {
 }
 
 export const api = {
+  registerDoctor: (payload: { username: string; display_name: string; institution: string; department: string; password: string }) =>
+    request<{ message: string }>("/api/auth/register", { method: "POST", body: JSON.stringify(payload) }),
+  doctorApplications: () => request<any>("/api/admin/doctor-applications"),
+  reviewDoctor: (id: string, decision: string, reason: string) =>
+    request<any>(`/api/admin/doctor-applications/${encodeURIComponent(id)}/review`, { method: "POST", body: JSON.stringify({ decision, reason }) }),
   authStatus: () => request<AuthStatus>("/api/auth/status"),
   login: (username: string, password: string, remember: boolean) =>
     request<AuthStatus>("/api/auth/login", {
