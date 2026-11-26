@@ -77,6 +77,9 @@ docker run --rm aki-prediction-system sh -c \
 
 ### 本地登录、数据库与账号管理
 
+当前阿里云 Docker 实例可使用 [按正式 Release 自动更新的部署工具](deploy/README.md)：
+每 10 分钟检查新版本、隔离预检、切换前一致性备份，并在切换失败时恢复旧容器和数据库。
+
 - 一键启动器首次运行时会在缺少认证配置的情况下创建 `admin` 并生成随机初始密码；随后自动初始化 `backend/clinical.db`、导入管理员并生成首份一致性备份。
 - `backend/auth_config.json` 只作为首次管理员导入来源，保存 PBKDF2 密码哈希和旧会话密钥，已被 Git 忽略；日常账号数据存放在 SQLite。
 - 数据库默认路径为 `backend/clinical.db`，可用环境变量 `AKI_DB_PATH` 覆盖；备份目录默认 `backend/backups`，可用 `AKI_BACKUP_DIR` 覆盖。

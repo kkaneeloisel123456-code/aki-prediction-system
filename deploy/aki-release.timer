@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for an AKI release every ten minutes
+
+[Timer]
+OnCalendar=*:0/10
+RandomizedDelaySec=30
+Persistent=true
+Unit=aki-release.service
+
+[Install]
+WantedBy=timers.target
