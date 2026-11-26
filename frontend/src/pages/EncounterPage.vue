@@ -99,7 +99,13 @@ const shapRows = computed(() => {
 const maxShap = computed(() => Math.max(0.001, ...shapRows.value.map((r: any) => Math.abs(r.shap))))
 const canEdit = computed(() => encounter.value?.can_edit !== false)
 const isPublished = computed(() => encounter.value?.status === 'published')
-const metricsLocked = computed(() => isPublished.value || reviewDone.value)
+const metricsLocked = computed(() => isPublished.value)
+
+function reviewIsCurrent(enc: any) {
+  const review = enc?.latest_review
+  return Boolean(review?.prediction_id && review.prediction_id === enc?.current_prediction_id)
+}
+const reopening = ref(false)
 const latestReport = computed(() => encounter.value?.latest_report ?? null)
 const reviewOptions = computed(() => isManualPrediction.value
   ? [{ value: 'manual', label: '人工记录' }]
@@ -285,7 +291,7 @@ async function loadPrevious(current: any) {
 function copyPrevious() {
   error.value = ''
   if (!previousEncounter.value) { error.value = '没有可复制的上次就诊'; return }
-  if (!canEdit.value || metricsLocked.value) { error.value = '当前记录不能修改指标'; return }
+  if (!canEdit.value || metricsLocked.value) { error.value = '报告已发布，请先继续修订'; return }
   let copied = 0
   let kept = 0
   for (const meta of metas.value) {
@@ -330,7 +336,7 @@ async function load() {
     draftVersion.value = enc.draft?.draft_version ?? 0
     hydratePayload(payload)
     prediction.value = enc.latest_prediction ?? null
-    reviewDone.value = Boolean(enc.latest_review)
+    reviewDone.value = reviewIsCurrent(enc)
     reviewDecision.value = enc.latest_review?.decision ?? (enc.latest_prediction ? 'agree' : 'manual')
     reviewReason.value = enc.latest_review?.reason ?? ''
     missingAck.value = enc.status === 'published'
@@ -348,7 +354,7 @@ async function load() {
 async function persistDraft(silent = false): Promise<boolean> {
   error.value = ''
   if (!canEdit.value) { error.value = '当前账号对该患者只有只读权限'; return false }
-  if (metricsLocked.value) { error.value = '已复核或已发布的记录不能修改指标'; return false }
+  if (metricsLocked.value) { error.value = '报告已发布，请先继续修订'; return false }
   if (invalidCount() > 0) { error.value = '存在超出临床合理范围的指标，请修正后再保存'; return false }
   saving.value = true
   try {
@@ -383,7 +389,7 @@ async function persistDraft(silent = false): Promise<boolean> {
 
 async function runPrediction() {
   error.value = ''
-  if (metricsLocked.value) { error.value = '已复核或已发布的记录不能重新运行模型'; return }
+  if (metricsLocked.value) { error.value = '报告已发布，请先继续修订'; return }
   if (measuredCount.value === 0) { error.value = '至少录入一项实测指标后才能运行模型'; return }
   if (invalidCount() > 0) { error.value = '请先修正超出合理范围的指标'; return }
   const saved = await persistDraft(true)
@@ -401,9 +407,10 @@ async function runPrediction() {
       row_version: rowVersion.value,
       features: payloadValues,
     })
-    encounter.value = { ...encounter.value, ...result }
+    encounter.value = { ...encounter.value, ...result, latest_review: encounter.value?.latest_review }
     rowVersion.value = result.row_version
     prediction.value = result.prediction
+    reviewDone.value = reviewIsCurrent(encounter.value)
     if (!reviewDone.value) reviewDecision.value = 'agree'
     notice.value = `模型评估完成：${result.prediction.risk_level}风险，缺失指标 ${result.prediction.missing_filled?.length ?? 0} 项已按中位数填充。`
     ElMessage.success('模型评估完成')
@@ -443,9 +450,15 @@ async function submitReview() {
   }
 }
 
+function reviseReview() {
+  if (isPublished.value || !canEdit.value) return
+  reviewDone.value = false
+  notice.value = '可以更新复核结论。已发出的报告保持不变，再次发布会生成新版本。'
+}
+
 function startManualReview() {
   error.value = ''
-  if (metricsLocked.value) { error.value = '已复核或已发布的记录不能修改复核结论'; return }
+  if (metricsLocked.value) { error.value = '报告已发布，请先继续修订'; return }
   if (measuredCount.value === 0) { error.value = '至少录入一项实测指标后才能人工记录'; return }
   reviewDecision.value = 'manual'
   notice.value = '已切换到人工记录，填写理由后提交复核。'
@@ -456,6 +469,24 @@ async function refreshChecklist() {
     checklist.value = await api.checklist(encounter.value.id, missingAck.value)
   } catch (e: any) {
     error.value = e?.message ?? '发布核对失败'
+  }
+}
+
+async function reopenVisit() {
+  if (!encounter.value?.id || reopening.value) return
+  reopening.value = true
+  error.value = ''
+  try {
+    const next = await api.reopenEncounter(encounter.value.id)
+    encounter.value = { ...encounter.value, ...next, status: next.status }
+    rowVersion.value = next.row_version
+    notice.value = '已恢复为可编辑。已发布的报告不会被改写，再次发布会生成新版本。'
+    ElMessage.success('可以继续编辑')
+    await load()
+  } catch (e: any) {
+    error.value = e?.message ?? '无法恢复编辑'
+  } finally {
+    reopening.value = false
   }
 }
 
@@ -509,9 +540,10 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
           <div class="pilot-kicker">围术期评估</div>
           <h1 class="pilot-title">接诊与风险报告</h1>
         </div>
-        <div class="pilot-actions" v-if="encounter">
+        <div class="pilot-actions encounter-head-actions" v-if="encounter">
           <span class="pilot-chip" :class="isPublished ? 'pilot-chip-accent' : ''">{{ statusText[encounter.status] ?? encounter.status }}</span>
-          <button v-if="!metricsLocked" class="pilot-btn" type="button" :disabled="saving || !canEdit" @click="persistDraft(false)">{{ saving ? '保存中…' : '保存草稿' }}</button>
+          <button v-if="!isPublished" class="pilot-btn" type="button" :disabled="saving || !canEdit" @click="persistDraft(false)">{{ saving ? '保存中…' : '保存草稿' }}</button>
+          <button v-else class="pilot-btn" type="button" :disabled="reopening || !canEdit" @click="reopenVisit">{{ reopening ? '恢复中…' : '继续修订' }}</button>
           <button class="pilot-btn" type="button" :disabled="loading" @click="load">重新载入</button>
         </div>
       </header>
@@ -557,11 +589,12 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
               <div class="pilot-panel-body doc-grid">
                 <div class="form-field">
                   <label for="enc-diagnosis">临床诊断（写入正式报告）</label>
-                  <textarea id="enc-diagnosis" v-model="diagnosis" class="pilot-textarea" rows="3" :disabled="!canEdit || metricsLocked" placeholder="如：冠状动脉粥样硬化性心脏病，拟行冠脉搭桥术" @input="markDirty" />
+                  <textarea id="enc-diagnosis" v-model="diagnosis" class="pilot-textarea encounter-note" rows="4" :disabled="!canEdit || metricsLocked" placeholder="在此输入诊断。灰字只是示例，不会保存。" @input="markDirty" />
+                  <p class="note-hint">框内灰字是示例。点进去输入后才会写入报告，回车用于换行。</p>
                 </div>
                 <div class="form-field">
                   <label for="enc-orders">医嘱 / 随访建议（写入正式报告）</label>
-                  <textarea id="enc-orders" v-model="orders" class="pilot-textarea" rows="3" :disabled="!canEdit || metricsLocked" placeholder="如：术后监测肌酐与尿量，必要时肾内科会诊" @input="markDirty" />
+                  <textarea id="enc-orders" v-model="orders" class="pilot-textarea encounter-note" rows="4" :disabled="!canEdit || metricsLocked" placeholder="在此输入医嘱。灰字只是示例，不会保存。" @input="markDirty" />
                 </div>
               </div>
             </section>
@@ -573,7 +606,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
                   <span class="pilot-chip pilot-chip-accent">{{ measuredCount }} 项实测 / {{ allFeatures.length }} 项</span>
                 </div>
                 <div class="metrics-head-side">
-                  <span v-if="metricsLocked" class="pilot-muted">{{ isPublished ? '已发布，指标锁定' : '已复核，指标锁定' }}</span>
+                  <span v-if="metricsLocked" class="pilot-muted">已发布，指标锁定</span>
                   <div class="metric-tools">
                     <button
                       class="pilot-btn pilot-btn-sm"
@@ -647,7 +680,8 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
                   <button v-if="!hasPrediction && !reviewDone" class="pilot-btn" type="button" :disabled="!canEdit || measuredCount === 0" @click="startManualReview">无模型时人工记录</button>
                   <button class="pilot-btn" type="button" :disabled="saving || !canEdit || metricsLocked" @click="persistDraft(false)">{{ saving ? '保存中…' : '保存草稿' }}</button>
                 </div>
-                <p v-if="metricsLocked" class="rail-hint">{{ isPublished ? '报告已发布，指标与复核已锁定。' : '已复核，指标已锁定；如需修改请由管理员撤销报告后重开。' }}</p>
+                <p v-if="isPublished" class="rail-hint">报告已发布，内容已锁定。点“继续修订”后可再编辑；已发出的报告保持不变，再次发布会生成新版本。</p>
+                <p v-else-if="reviewDone" class="rail-hint">复核之后仍可修改诊断、医嘱和指标。改过指标后需要重新运行模型并再次复核，才能发布。</p>
               </div>
             </section>
 
@@ -687,6 +721,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
                   <textarea id="review-reason" v-model="reviewReason" class="pilot-textarea" rows="3" :disabled="reviewDone || isPublished || !canEdit" placeholder="说明采纳、调整或暂不发布的依据" />
                 </div>
                 <button v-if="!reviewDone && !isPublished" class="pilot-btn pilot-btn-primary" type="button" :disabled="reviewing || !canEdit" @click="submitReview">{{ reviewing ? '提交中…' : '记录复核' }}</button>
+                <button v-else-if="reviewDone && !isPublished" class="pilot-btn" type="button" :disabled="!canEdit" @click="reviseReview">重新复核</button>
                 <div v-if="reviewDone && encounter.latest_review" class="review-record">
                   已由 {{ encounter.latest_review.reviewer_name }} 于 {{ fmt(encounter.latest_review.created_at) }} 记录：{{ decisionText[encounter.latest_review.decision] || encounter.latest_review.decision }}。{{ encounter.latest_review.reason }}
                 </div>
@@ -783,6 +818,9 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
 </template>
 
 <style scoped>
+.encounter-head-actions { gap: var(--pilot-space-4); }
+.note-hint { margin: 6px 0 0; color: var(--pilot-muted); font-size: var(--pilot-font-xs); line-height: 1.5; }
+.encounter-note { min-height: 96px; }
 .encounter-steps{display:flex;flex-wrap:wrap;gap:8px;padding:12px 16px;margin:16px 0 24px;background:var(--pilot-surface);border:1px solid var(--pilot-line);border-radius:var(--pilot-radius-card)}
 .encounter-steps a{display:flex;align-items:center;gap:10px;flex:1;min-width:135px;padding:8px;color:var(--pilot-ink-soft);text-decoration:none;font-size:13px}.encounter-steps a:hover{color:var(--pilot-accent);background:var(--pilot-accent-soft);border-radius:var(--pilot-radius-control)}.encounter-steps span{color:var(--pilot-accent);font-variant-numeric:tabular-nums}.encounter-pilot section[id]{scroll-margin-top:90px}
 .encounter-steps .encounter-step-disabled{flex:1;min-width:135px;padding:8px;color:var(--pilot-muted);font-size:13px;align-self:center}

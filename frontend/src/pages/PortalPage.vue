@@ -411,7 +411,7 @@ onMounted(async () => {
     </header>
 
     <main class="portal-main">
-      <PageHeader :kicker="pageKicker" :title="pageTitle" :description="pageDescription" />
+      <PageHeader v-if="status.authenticated || !initialized" :kicker="pageKicker" :title="pageTitle" :description="pageDescription" />
 
       <div v-if="error" class="pilot-error" role="alert">{{ error }}</div>
       <div v-if="notice" class="pilot-notice" role="status">{{ notice }}</div>
@@ -421,7 +421,10 @@ onMounted(async () => {
       </div>
 
       <div v-else-if="!status.authenticated" class="portal-auth-grid">
-        <section class="portal-auth-copy">
+        <p class="pilot-kicker portal-auth-kicker">{{ pageKicker }}</p>
+        <h1 class="pilot-title portal-auth-title">{{ pageTitle }}</h1>
+        <p class="pilot-sub portal-auth-desc">{{ pageDescription }}</p>
+        <section class="portal-auth-story">
           <p class="pilot-kicker">患者可以做什么</p>
           <h2>报告、预约与评价，集中查看。</h2>
           <p class="portal-auth-lead">
@@ -434,8 +437,9 @@ onMounted(async () => {
           </ol>
           <p class="portal-auth-foot note">查询码会话仅用于查看报告，不展示预约和评价。</p>
         </section>
-
-        <SectionPanel title="身份核验" subtitle="选择一种入口进入患者服务">
+        <aside class="portal-auth-card">
+          <h2 class="portal-auth-card-title">身份核验</h2>
+          <p class="portal-auth-card-sub">选择一种入口进入患者服务</p>
           <PilotTabs v-model="authMode" :tabs="authTabs" label="患者身份核验方式" />
 
           <form v-if="authMode === 'login'" class="portal-form" @submit.prevent="doLogin">
@@ -502,7 +506,7 @@ onMounted(async () => {
             <button class="pilot-btn pilot-btn-primary portal-submit" type="submit" :disabled="busy">{{ busy ? '核验中…' : '核验并查看报告' }}</button>
             <p class="portal-form-hint">临时会话仅可查看已发布报告，过期需重新申领查询码。</p>
           </form>
-        </SectionPanel>
+        </aside>
       </div>
 
       <div v-else-if="!status.patient" class="portal-bind-layout">
@@ -842,11 +846,28 @@ onMounted(async () => {
 .portal-auth-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
-  gap: var(--pilot-space-7);
+  column-gap: var(--pilot-space-6);
+  grid-template-areas:
+    "kicker ."
+    "title card"
+    "desc card"
+    "story card";
   align-items: start;
-  margin-top: var(--pilot-space-3);
 }
-.portal-auth-copy { max-width: 540px; padding-top: var(--pilot-space-2); }
+.portal-auth-kicker { grid-area: kicker; }
+.portal-auth-title { grid-area: title; margin: 4px 0 0; }
+.portal-auth-desc { grid-area: desc; margin: var(--pilot-space-2) 0 0; }
+.portal-auth-story { grid-area: story; max-width: 540px; margin-top: var(--pilot-space-5); }
+.portal-auth-card {
+  grid-area: card;
+  align-self: start;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+}
+.portal-auth-card-title { margin: 0; font-size: var(--pilot-font-lg); }
+.portal-auth-card-sub { margin: var(--pilot-space-1) 0 var(--pilot-space-4); color: var(--pilot-muted); font-size: var(--pilot-font-xs); }
 .portal-auth-copy h2 {
   margin: var(--pilot-space-1) 0 var(--pilot-space-3);
   color: var(--pilot-ink);
@@ -991,8 +1012,8 @@ onMounted(async () => {
 .portal-cancel-summary strong { color: var(--pilot-ink); }
 .portal-cancel-summary span { color: var(--pilot-muted); font-size: var(--pilot-font-xs); }
 @media (max-width: 900px) {
-  .portal-auth-grid { grid-template-columns: minmax(0, 1fr); gap: var(--pilot-space-5); }
-  .portal-auth-copy { max-width: none; }
+  .portal-auth-grid { display: flex; flex-direction: column; gap: var(--pilot-space-4); }
+  .portal-auth-card { order: -1; }
   .portal-overview { grid-template-columns: minmax(0, 1fr); }
   .portal-report-banner { grid-template-columns: minmax(0, 1fr); }
 }

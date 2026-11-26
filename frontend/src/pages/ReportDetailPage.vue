@@ -292,7 +292,7 @@ onMounted(load)
           <dl class="report-facts">
             <div><dt>患者姓名</dt><dd>{{ val(patient.name) }}</dd></div>
             <div><dt>病历号</dt><dd class="pilot-mono">{{ val(patient.mrn) }}</dd></div>
-            <div><dt>性别 / 出生年</dt><dd>{{ val(patient.sex) }} / {{ val(patient.birth_year) }}</dd></div>
+            <div><dt>性别 / 出生日期</dt><dd>{{ val(patient.sex) }} / {{ val(patient.birth_date || patient.birth_year) }}</dd></div>
             <div><dt>证件信息</dt><dd>{{ val(patient.certificate) }}</dd></div>
             <div><dt>就诊编号</dt><dd class="pilot-mono">{{ val(encounter.case_ref) }}</dd></div>
             <div><dt>发生时间</dt><dd>{{ fmt(encounter.occurred_at) }}</dd></div>

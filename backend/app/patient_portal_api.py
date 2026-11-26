@@ -292,7 +292,7 @@ def login(req: PortalLoginRequest, request: Request, response: Response):
     _set_cookie(response, token, ttl)
     with db.reader() as conn:
         patient = conn.execute(
-            "SELECT id,name,mrn,sex,birth_year FROM patients WHERE id=?",
+            "SELECT id,name,mrn,sex,birth_year,birth_date FROM patients WHERE id=?",
             (account["patient_id"],),
         ).fetchone() if account["patient_id"] else None
         record_audit(
@@ -317,7 +317,7 @@ def status(request: Request):
         return {"authenticated": False, "account": None, "patient": None}
     with db.reader() as conn:
         patient = conn.execute(
-            "SELECT id,name,mrn,sex,birth_year FROM patients WHERE id=?",
+            "SELECT id,name,mrn,sex,birth_year,birth_date FROM patients WHERE id=?",
             (session["patient_id"],),
         ).fetchone() if session["patient_id"] else None
     account = None
@@ -367,6 +367,7 @@ def bind_patient(req: PortalBindRequest, request: Request):
         return {"ok": True, "patient": {
             "id": patient["id"], "name": patient["name"], "mrn": patient["mrn"],
             "sex": patient["sex"], "birth_year": patient["birth_year"],
+            "birth_date": patient["birth_date"] if "birth_date" in patient.keys() else None,
         }}
 
 

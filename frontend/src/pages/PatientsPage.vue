@@ -19,7 +19,7 @@ const formError = ref('')
 const doctors = ref<any[]>([])
 
 const form = reactive({
-  mrn: '', name: '', sex: '未知', birth_year: '', certificate_last4: '', phone_last4: '', owner_id: '',
+  mrn: '', name: '', sex: '未知', birth_date: '', certificate_last4: '', phone_last4: '', owner_id: '',
 })
 
 const filtered = computed(() => rows.value.filter((p) => {
@@ -43,9 +43,7 @@ function fmt(value?: string) {
   if (!value) return '—'
   return new Date(value).toLocaleDateString('zh-CN')
 }
-function disableFuture(date: Date) {
-  return date.getTime() > Date.now()
-}
+const today = new Date().toISOString().slice(0, 10)
 function openPatient(row: any) {
   router.push(`/patients/${row.id}`)
 }
@@ -66,7 +64,7 @@ async function load() {
 
 function openCreate() {
   Object.assign(form, {
-    mrn: '', name: '', sex: '未知', birth_year: '', certificate_last4: '',
+    mrn: '', name: '', sex: '未知', birth_date: '', certificate_last4: '',
     phone_last4: '', owner_id: '',
   })
   formError.value = ''
@@ -87,7 +85,7 @@ async function submitCreate() {
   try {
     const payload: any = {
       mrn: form.mrn.trim(), name: form.name.trim(), sex: form.sex,
-      birth_year: form.birth_year ? Number(form.birth_year) : null,
+      birth_date: form.birth_date || null,
       certificate_last4: form.certificate_last4.trim() || null,
       phone_last4: form.phone_last4.trim() || null,
     }
@@ -164,8 +162,8 @@ onUnmounted(() => window.removeEventListener('keydown', handleWindowEscape))
               <div class="patient-meta">{{ row.phone || '未登记联系方式' }}</div>
             </template>
           </ElTableColumn>
-          <ElTableColumn label="性别 / 出生年" width="144">
-            <template #default="{ row }">{{ row.sex }} <span class="pilot-muted">/ {{ row.birth_year ?? '—' }}</span></template>
+          <ElTableColumn label="性别 / 出生日期" width="168">
+            <template #default="{ row }">{{ row.sex }} <span class="pilot-muted">/ {{ row.birth_date || row.birth_year || '—' }}</span></template>
           </ElTableColumn>
           <ElTableColumn label="病历号" width="132">
             <template #default="{ row }"><span class="pilot-mono">{{ row.mrn }}</span></template>
@@ -203,6 +201,7 @@ onUnmounted(() => window.removeEventListener('keydown', handleWindowEscape))
       :close-on-click-modal="false"
       append-to-body
     >
+      <form id="create-patient-form" @submit.prevent="submitCreate" @keydown.enter.prevent="submitCreate">
       <div class="dialog-sub">只登记检索与身份核对所需字段，证件与电话仅存末四位。</div>
       <div class="patient-form">
         <div class="form-field">
@@ -220,16 +219,8 @@ onUnmounted(() => window.removeEventListener('keydown', handleWindowEscape))
           </select>
         </div>
         <div class="form-field">
-          <label for="patient-birth">出生年份</label>
-          <ElDatePicker
-            id="patient-birth"
-            v-model="form.birth_year"
-            type="year"
-            placeholder="选择出生年份"
-            value-format="YYYY"
-            format="YYYY"
-            :disabled-date="disableFuture"
-          />
+          <label for="patient-birth">出生日期</label>
+          <input id="patient-birth" v-model="form.birth_date" class="pilot-input" type="date" :max="today" />
         </div>
         <div class="form-field">
           <label for="patient-cert">证件号末四位</label>
@@ -249,10 +240,11 @@ onUnmounted(() => window.removeEventListener('keydown', handleWindowEscape))
         </div>
       </div>
       <div v-if="formError" class="pilot-error form-error">{{ formError }}</div>
+      </form>
       <template #footer>
         <div class="dialog-actions">
           <button class="pilot-btn" type="button" @click="showCreate = false">取消</button>
-          <button class="pilot-btn pilot-btn-primary" type="button" :disabled="saving" @click="submitCreate">
+          <button class="pilot-btn pilot-btn-primary" type="submit" form="create-patient-form" :disabled="saving">
             {{ saving ? '创建中…' : '创建档案' }}
           </button>
         </div>
@@ -297,7 +289,7 @@ onUnmounted(() => window.removeEventListener('keydown', handleWindowEscape))
 .form-field-full { grid-column: 1 / -1; }
 .field-hint { color: var(--pilot-muted); font-size: var(--pilot-font-xs); }
 .form-error { margin: var(--pilot-space-4) 0 0; }
-.dialog-actions { display: flex; justify-content: flex-end; gap: var(--pilot-space-2); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: var(--pilot-space-4); }
 
 @media (max-width: 720px) {
   .patient-form { grid-template-columns: 1fr; }

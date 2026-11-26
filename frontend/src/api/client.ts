@@ -189,6 +189,8 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   encounter: (id: string) => request<any>(`/api/encounters/${id}`),
+  reopenEncounter: (id: string) =>
+    request<any>(`/api/encounters/${id}/reopen`, { method: "POST" }),
   updateEncounter: (id: string, payload: any) =>
     request<any>(`/api/encounters/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   saveDraft: (id: string, payload: any) =>

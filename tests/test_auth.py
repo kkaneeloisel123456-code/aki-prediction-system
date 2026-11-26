@@ -395,6 +395,11 @@ def test_predictions_migration_rebuilds_table():
         ).fetchone()[0]
         assert "REFERENCES predictions" in review_sql
         assert "predictions_new" not in review_sql
+        patient_columns = {row[1] for row in check.execute("PRAGMA table_info(patients)")}
+        assert "birth_date" in patient_columns
+        assert check.execute(
+            "SELECT birth_year, birth_date FROM patients WHERE id='P-1'"
+        ).fetchone() == (1960, None)
         assert check.execute("PRAGMA foreign_key_check").fetchall() == []
         check.execute(
             """INSERT INTO predictions
@@ -1044,3 +1049,271 @@ def test_doctor_cannot_assign_new_patient_to_another_doctor(client):
     payload = preview.json()
     assert payload["summary"]["valid"] == 0
     assert "医生只能把新患者建在自己名下" in payload["rows"][0]["errors"]
+
+
+def test_import_excel_date_cell_writes_full_birth_date(client):
+    login(client)
+    create_doctor(client, "doctor1")
+    _switch_login(client, "doctor1")
+    from openpyxl import Workbook
+    book = Workbook()
+    sheet = book.active
+    sheet.append(["病历号", "姓名", "性别", "出生日期", "就诊编号", "发生时间"])
+    sheet.append(["BDATE-1", "日期患者", "女", datetime(1968, 4, 12), "BDATE-CASE", datetime(2026, 11, 18, 9, 0)])
+    raw = io.BytesIO()
+    book.save(raw)
+    preview = client.post(
+        "/api/imports/preview",
+        files={"file": (
+            "birth.xlsx", raw.getvalue(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )},
+    )
+    assert preview.status_code == 200, preview.text
+    row = preview.json()["rows"][0]
+    assert row["errors"] == [], row
+    assert row["birth_date"] == "1968-04-12"
+    assert row["birth_year"] == 1968
+    commit = client.post("/api/imports/commit", json={"batch_id": preview.json()["batch_id"]})
+    assert commit.status_code == 200, commit.text
+    with db.reader() as conn:
+        stored = conn.execute(
+            "SELECT birth_date, birth_year FROM patients WHERE mrn='BDATE-1'"
+        ).fetchone()
+    assert stored["birth_date"] == "1968-04-12"
+    assert stored["birth_year"] == 1968
+
+
+def _xlsx_bytes(rows: list[list]) -> bytes:
+    from openpyxl import Workbook
+    book = Workbook()
+    sheet = book.active
+    for row in rows:
+        sheet.append(row)
+    raw = io.BytesIO()
+    book.save(raw)
+    return raw.getvalue()
+
+
+def test_birth_date_import_covers_excel_text_serial_and_existing_archives(client):
+    login(client)
+    create_doctor(client, "doctor1")
+    _switch_login(client, "doctor1")
+    created = client.post("/api/patients", json={
+        "mrn": "OLD-DATE", "name": "待补日期", "sex": "男", "birth_year": 1940,
+    })
+    assert created.status_code == 201, created.text
+    kept = client.post("/api/patients", json={
+        "mrn": "KEEP-DATE", "name": "不覆盖", "sex": "女", "birth_date": "1950-01-01",
+    })
+    assert kept.status_code == 201, kept.text
+    assert kept.json()["birth_date"] == "1950-01-01"
+    assert kept.json()["birth_year"] == 1950
+    year_only = client.post("/api/patients", json={
+        "mrn": "YEAR-ONLY", "name": "只补年份", "sex": "男",
+    })
+    assert year_only.status_code == 201, year_only.text
+
+    renamed = client.patch(f"/api/patients/{kept.json()['id']}", json={"name": "不覆盖乙"})
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["birth_date"] == "1950-01-01"
+    cleared = client.patch(f"/api/patients/{kept.json()['id']}", json={"birth_date": ""})
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["birth_date"] is None
+    assert cleared.json()["birth_year"] is None
+    restored = client.patch(f"/api/patients/{kept.json()['id']}", json={"birth_date": "1950/1/1"})
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["birth_date"] == "1950-01-01"
+    future = client.patch(f"/api/patients/{kept.json()['id']}", json={"birth_date": "2099-01-01"})
+    assert future.status_code == 400, future.text
+    assert client.get(f"/api/patients/{kept.json()['id']}").json()["birth_date"] == "1950-01-01"
+
+    early = date(1948, 6, 1)
+    serial = (early - date(1899, 12, 30)).days
+    assert serial < 20000
+    raw = _xlsx_bytes([
+        ["病历号", "姓名", "性别", "出生日期", "出生年份", "就诊编号", "发生时间"],
+        ["BDATE-SERIAL", "序列患者", "男", serial, None, "CASE-SERIAL", datetime(2026, 11, 18, 9, 0)],
+        ["BDATE-SLASH", "斜线患者", "女", "1975/7/9", None, "CASE-SLASH", "2026-11-18 09:00"],
+        ["BDATE-CN", "中文患者", "男", "1955年3月8日", None, "CASE-CN", "2026-11-18 09:00"],
+        ["BDATE-YEAR", "只有年份", "女", "1972", None, "CASE-YEAR", "2026-11-18 09:00"],
+        ["BDATE-TEXT", "文本时间", "男", "1968-04-12 00:00:00", "1960", "CASE-TEXT", "2026-11-18 09:00"],
+        ["OLD-DATE", "待补日期", "男", datetime(1940, 2, 2), None, "CASE-FILL", "2026-11-18 09:00"],
+        ["KEEP-DATE", "不覆盖乙", "女", "1951-01-01", None, "CASE-KEEP", "2026-11-18 09:00"],
+        ["YEAR-ONLY", "只补年份", "男", None, "1938", "CASE-YEAR-FILL", "2026-11-18 09:00"],
+        ["BDATE-BAD", "坏日期", "男", "不是日期", None, "CASE-BAD", "2026-11-18 09:00"],
+    ])
+    preview = client.post(
+        "/api/imports/preview",
+        files={"file": (
+            "birth-paths.xlsx", raw,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )},
+    )
+    assert preview.status_code == 200, preview.text
+    payload = preview.json()
+    by_mrn = {row["mrn"]: row for row in payload["rows"]}
+    assert by_mrn["BDATE-SERIAL"]["birth_date"] == "1948-06-01"
+    assert by_mrn["BDATE-SERIAL"]["errors"] == []
+    assert by_mrn["BDATE-SLASH"]["birth_date"] == "1975-07-09"
+    assert by_mrn["BDATE-CN"]["birth_date"] == "1955-03-08"
+    assert by_mrn["BDATE-YEAR"]["birth_date"] is None
+    assert by_mrn["BDATE-YEAR"]["birth_year"] == 1972
+    assert by_mrn["BDATE-TEXT"]["birth_date"] == "1968-04-12"
+    assert any("不一致" in warning for warning in by_mrn["BDATE-TEXT"]["warnings"])
+    assert any("补进已有档案" in warning for warning in by_mrn["OLD-DATE"]["warnings"])
+    assert any("不覆盖" in warning for warning in by_mrn["KEEP-DATE"]["warnings"])
+    assert any("出生年" in warning for warning in by_mrn["YEAR-ONLY"]["warnings"])
+    assert by_mrn["BDATE-BAD"]["errors"]
+    assert payload["summary"]["valid"] == 8
+    commit = client.post("/api/imports/commit", json={"batch_id": payload["batch_id"]})
+    assert commit.status_code == 200, commit.text
+    assert commit.json()["imported"] == 8
+    with db.reader() as conn:
+        def stored(mrn: str):
+            return conn.execute(
+                "SELECT birth_date, birth_year FROM patients WHERE mrn=?", (mrn,)
+            ).fetchone()
+        assert stored("BDATE-SERIAL")["birth_date"] == "1948-06-01"
+        assert stored("BDATE-YEAR")["birth_year"] == 1972
+        assert stored("BDATE-YEAR")["birth_date"] is None
+        assert stored("OLD-DATE")["birth_date"] == "1940-02-02"
+        assert stored("KEEP-DATE")["birth_date"] == "1950-01-01"
+        assert stored("YEAR-ONLY")["birth_year"] == 1938
+        assert stored("YEAR-ONLY")["birth_date"] is None
+        assert conn.execute("SELECT 1 FROM patients WHERE mrn='BDATE-BAD'").fetchone() is None
+
+
+def test_published_visit_stays_locked_until_reopen_and_new_review(client):
+    login(client)
+    case = _published_case(client, "REV-1")
+    encounter_id = case["encounter_id"]
+    patient_id = case["patient_id"]
+    first_report = case["report_id"]
+    published = case["encounter"]
+    blocked = client.put(f"/api/encounters/{encounter_id}/draft", json={
+        "row_version": published["row_version"], "draft_version": 0,
+        "values": published["values"], "diagnosis": "改诊断", "orders": "改医嘱",
+    })
+    assert blocked.status_code == 409, blocked.text
+    assert client.post(f"/api/encounters/{encounter_id}/predict", json={
+        "row_version": published["row_version"], "features": published["values"],
+    }).status_code == 409
+    assert client.post(f"/api/encounters/{encounter_id}/review", json={
+        "row_version": published["row_version"], "decision": "agree", "reason": "再核",
+    }).status_code == 409
+
+    dated = client.patch(f"/api/patients/{patient_id}", json={"birth_date": "1968-04-12"})
+    assert dated.status_code == 200, dated.text
+    issued = client.post(f"/api/patients/{patient_id}/query-code")
+    assert issued.status_code == 200, issued.text
+    portal = client.post("/api/portal/query", json={
+        "mrn": "REV-1", "name": "测试患者", "query_code": issued.json()["query_code"],
+        "certificate_last4": "1234",
+    })
+    assert portal.status_code == 200, portal.text
+    portal_status = client.get("/api/portal/status").json()
+    assert portal_status["patient"]["birth_date"] == "1968-04-12"
+    assert portal_status["patient"]["birth_year"] == 1968
+    reopened = client.post(f"/api/encounters/{encounter_id}/reopen")
+    assert reopened.status_code == 200, reopened.text
+    body = reopened.json()
+    assert body["status"] == "reviewed"
+    assert body["latest_review"]["prediction_id"] == body["current_prediction_id"]
+    assert client.get(f"/api/reports/{first_report}").json()["status"] == "published"
+
+    draft = client.put(f"/api/encounters/{encounter_id}/draft", json={
+        "row_version": body["row_version"], "draft_version": 0,
+        "values": published["values"], "diagnosis": "修订后的诊断", "orders": "修订后的医嘱",
+    })
+    assert draft.status_code == 200, draft.text
+    checklist = client.get(f"/api/encounters/{encounter_id}/checklist").json()
+    assert checklist["can_publish"] is True, checklist
+    second = client.post(f"/api/encounters/{encounter_id}/publish", json={
+        "row_version": body["row_version"],
+        "draft_version": draft.json()["draft_version"],
+        "missing_ack": False,
+    })
+    assert second.status_code == 200, second.text
+    assert second.json()["version"] == 2
+    snapshot = client.get(f"/api/reports/{second.json()['id']}").json()["snapshot"]
+    assert snapshot["patient"]["birth_date"] == "1968-04-12"
+    assert snapshot["encounter"]["diagnosis"] == "修订后的诊断"
+    first_snapshot = client.get(f"/api/reports/{first_report}").json()["snapshot"]
+    assert first_snapshot["encounter"]["diagnosis"] == "术后AKI风险"
+    pdf = client.get(f"/api/reports/{second.json()['id']}/pdf")
+    assert pdf.status_code == 200
+    assert "1968-04-12" in _pdf_text(pdf.content)
+
+    current = client.get(f"/api/encounters/{encounter_id}").json()
+    again = client.post(f"/api/encounters/{encounter_id}/reopen")
+    assert again.status_code == 200, again.text
+    changed = dict(current["values"])
+    changed["术前Scr"] = 88
+    redraft = client.put(f"/api/encounters/{encounter_id}/draft", json={
+        "row_version": again.json()["row_version"], "draft_version": 0,
+        "values": changed, "diagnosis": "指标已改", "orders": "重新评估",
+    })
+    assert redraft.status_code == 200, redraft.text
+    stale = client.get(f"/api/encounters/{encounter_id}/checklist").json()
+    assert stale["can_publish"] is False
+    predicted = client.post(f"/api/encounters/{encounter_id}/predict", json={
+        "row_version": again.json()["row_version"], "features": changed,
+    })
+    assert predicted.status_code == 200, predicted.text
+    still_old_review = client.get(f"/api/encounters/{encounter_id}/checklist").json()
+    assert still_old_review["can_publish"] is False
+    reviewed = client.post(f"/api/encounters/{encounter_id}/review", json={
+        "row_version": predicted.json()["row_version"],
+        "decision": "adjust", "reason": "指标变化后上调关注",
+    })
+    assert reviewed.status_code == 200, reviewed.text
+    assert reviewed.json()["latest_review"]["prediction_id"] == reviewed.json()["current_prediction_id"]
+    ready = client.get(f"/api/encounters/{encounter_id}/checklist").json()
+    assert ready["can_publish"] is True, ready
+    third = client.post(f"/api/encounters/{encounter_id}/publish", json={
+        "row_version": reviewed.json()["row_version"],
+        "draft_version": ready["draft_version"],
+        "missing_ack": False,
+    })
+    assert third.status_code == 200, third.text
+    assert third.json()["version"] == 3
+    assert client.get(f"/api/reports/{first_report}").json()["status"] == "published"
+
+
+def test_demo_import_files_keep_full_birth_dates(client):
+    demo_dir = ROOT / "data" / "demo_import"
+    workbook = demo_dir / "演示患者导入.xlsx"
+    table = demo_dir / "演示患者导入.csv"
+    if not workbook.exists() or not table.exists():
+        pytest.skip("演示导入文件不在当前工作区")
+    login(client)
+    create_doctor(client, "doctor1")
+    _switch_login(client, "doctor1")
+    preview = client.post(
+        "/api/imports/preview",
+        files={"file": (
+            workbook.name, workbook.read_bytes(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )},
+    )
+    assert preview.status_code == 200, preview.text
+    payload = preview.json()
+    assert payload["header_errors"] == []
+    assert payload["summary"]["valid"] == payload["summary"]["total"] > 0
+    for row in payload["rows"]:
+        assert row["errors"] == [], row
+        assert row["birth_date"]
+        assert len(row["birth_date"]) == 10
+    csv_preview = client.post(
+        "/api/imports/preview",
+        files={"file": (table.name, table.read_bytes(), "text/csv")},
+    )
+    assert csv_preview.status_code == 200, csv_preview.text
+    csv_payload = csv_preview.json()
+    assert csv_payload["summary"]["invalid"] == 0
+    for row in csv_payload["rows"]:
+        assert row["birth_date"] and len(row["birth_date"]) == 10
+    commit = client.post("/api/imports/commit", json={"batch_id": payload["batch_id"]})
+    assert commit.status_code == 200, commit.text
+    assert commit.json()["imported"] == payload["summary"]["valid"]

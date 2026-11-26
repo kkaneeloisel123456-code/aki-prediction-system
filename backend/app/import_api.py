@@ -23,7 +23,7 @@ from openpyxl.utils.datetime import from_excel
 
 from . import database as db
 from .assets import load_assets
-from .clinical_api import _access_map, _err, _normalise_values
+from .clinical_api import _access_map, _birth_fields, _err, _normalise_values
 from .database import json_dump, new_id, record_audit, utc_now
 from .feature_labels import get_label
 from .schemas import ImportCommitRequest
@@ -40,19 +40,21 @@ ALIASES = {
     "病历号": "mrn", "病历编号": "mrn", "病案号": "mrn", "住院号": "mrn",
     "姓名": "name", "患者姓名": "name", "病人姓名": "name",
     "性别": "sex", "出生年份": "birth_year",
-    "出生年": "birth_year", "证件号末四位": "certificate_last4",
+    "出生年": "birth_year", "出生日期": "birth_date",
+    "证件号末四位": "certificate_last4",
     "手机号末四位": "phone_last4", "就诊编号": "case_ref",
     "发生时间": "occurred_at", "就诊时间": "occurred_at", "手术类型": "surgery_type",
     "诊断": "diagnosis", "医嘱": "orders", "负责人ID": "owner_id",
     "mrn": "mrn", "name": "name", "sex": "sex", "birth_year": "birth_year",
     "certificate_last4": "certificate_last4", "phone_last4": "phone_last4",
+    "birth_date": "birth_date",
     "case_ref": "case_ref", "occurred_at": "occurred_at",
     "surgery_type": "surgery_type", "diagnosis": "diagnosis", "orders": "orders",
     "owner_id": "owner_id",
 }
 IGNORED_COLUMNS = {"id", "patient_id", "序号", "备注"}
 PATIENT_FIELDS = {
-    "mrn", "name", "sex", "birth_year", "certificate_last4", "phone_last4",
+    "mrn", "name", "sex", "birth_year", "birth_date", "certificate_last4", "phone_last4",
     "owner_id",
 }
 ENCOUNTER_FIELDS = {"case_ref", "occurred_at", "surgery_type", "diagnosis", "orders"}
@@ -60,6 +62,7 @@ REQUIRED_FIELDS = (("mrn", "病历号"), ("name", "姓名"), ("case_ref", "就�
 
 FIELD_LABELS = {
     "mrn": "病历号", "name": "姓名", "sex": "性别", "birth_year": "出生年份",
+    "birth_date": "出生日期",
     "certificate_last4": "证件号末四位", "phone_last4": "手机号末四位",
     "owner_id": "负责人ID", "case_ref": "就诊编号", "occurred_at": "发生时间",
     "surgery_type": "手术类型", "diagnosis": "诊断", "orders": "医嘱",
@@ -350,11 +353,26 @@ def _normalise_row(
         errors.append(str(exc))
         sex = "未知"
 
+    birth_date = None
     birth_year = None
-    if canonical.get("birth_year"):
+    raw_birth_date = (canonical.get("birth_date") or "").strip()
+    raw_birth_year = (canonical.get("birth_year") or "").strip()
+    if raw_birth_date:
+        try:
+            birth_date, birth_year = _birth_fields(raw_birth_date, None)
+        except HTTPException as exc:
+            errors.append(str(exc.detail))
+        if raw_birth_year and birth_year is not None:
+            try:
+                stated_year = int(float(raw_birth_year))
+                if stated_year != birth_year:
+                    warnings.append(f"出生年份 {stated_year} 与出生日期不一致，以出生日期为准")
+            except ValueError:
+                warnings.append("出生年份无法识别，已忽略")
+    elif raw_birth_year:
         try:
             birth_year = int(float(canonical["birth_year"]))
-            if not 1900 <= birth_year <= 2100:
+            if not 1900 <= birth_year <= date.today().year:
                 errors.append("出生年份超出合理范围")
         except ValueError:
             errors.append("出生年份不是有效整数")
@@ -399,6 +417,18 @@ def _normalise_row(
         if existing:
             patient_exists = True
             patient_id = existing["id"]
+            stored_birth = existing["birth_date"] if "birth_date" in existing.keys() else None
+            if birth_date and stored_birth and stored_birth != birth_date:
+                warnings.append(f"档案已有出生日期 {stored_birth}，本次导入不覆盖")
+            elif birth_date and not stored_birth:
+                warnings.append("将把出生日期补进已有档案")
+            elif (
+                not birth_date and birth_year and not stored_birth
+                and existing["birth_year"] and existing["birth_year"] != birth_year
+            ):
+                warnings.append(f"档案已有出生年 {existing['birth_year']}，本次导入不覆盖")
+            elif not birth_date and birth_year and not stored_birth and not existing["birth_year"]:
+                warnings.append("将把出生年补进已有档案")
             if existing["name"] != name:
                 errors.append("病历号已存在但姓名不一致，不能挂到该档案")
             access = _access_map(conn, user, existing["id"])
@@ -442,6 +472,7 @@ def _normalise_row(
         "name": name,
         "sex": sex,
         "birth_year": birth_year,
+        "birth_date": birth_date,
         "certificate_last4": canonical.get("certificate_last4") or None,
         "phone_last4": canonical.get("phone_last4") or None,
         "owner_id": resolved_owner or canonical.get("owner_id") or None,
@@ -509,14 +540,14 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, int]:
 
 def _template_headers() -> list[str]:
     return [
-        "病历号", "姓名", "性别", "出生年份", "证件号末四位", "手机号末四位",
+        "病历号", "姓名", "性别", "出生日期", "证件号末四位", "手机号末四位",
         "就诊编号", "发生时间", "手术类型", "诊断", "医嘱", "负责人ID",
     ] + list(load_assets()["features"])
 
 
 def _template_sample() -> list[str]:
     return [
-        "MRN-DEMO-001", "示例患者", "男", "1960", "1234", "5678",
+        "MRN-DEMO-001", "示例患者", "男", "1960-03-15", "1234", "5678",
         "CASE-20261122-001", "2026-11-20 09:00", "冠脉搭桥术",
         "冠心病，拟行冠脉搭桥术", "术后监测肌酐与尿量", "",
     ] + [""] * len(load_assets()["features"])
@@ -743,6 +774,19 @@ def _insert_row(
         patient_id = existing["id"]
         if not _access_map(conn, user, patient_id)["edit"]:
             raise ValueError("无权向该患者导入就诊")
+        incoming_date = row.get("birth_date") or None
+        incoming_year = row.get("birth_year")
+        stored_date = existing["birth_date"] if "birth_date" in existing.keys() else None
+        if incoming_date and not stored_date:
+            conn.execute(
+                "UPDATE patients SET birth_date=?,birth_year=?,updated_at=? WHERE id=?",
+                (incoming_date, incoming_year, utc_now(), patient_id),
+            )
+        elif incoming_year and not stored_date and not existing["birth_year"]:
+            conn.execute(
+                "UPDATE patients SET birth_year=?,updated_at=? WHERE id=?",
+                (incoming_year, utc_now(), patient_id),
+            )
     else:
         owner_ref = str(row.get("owner_id") or "").strip()
         if not owner_ref:
@@ -764,12 +808,12 @@ def _insert_row(
         patient_id = new_id("P")
         conn.execute(
             """INSERT INTO patients
-               (id,mrn,name,sex,birth_year,certificate_last4,phone_last4,
+               (id,mrn,name,sex,birth_year,birth_date,certificate_last4,phone_last4,
                 owner_id,active,created_at,updated_at)
-               VALUES(?,?,?,?,?,?,?,?,1,?,?)""",
+               VALUES(?,?,?,?,?,?,?,?,?,1,?,?)""",
             (
                 patient_id, mrn, name, sex,
-                row.get("birth_year"), row.get("certificate_last4") or None,
+                row.get("birth_year"), row.get("birth_date"), row.get("certificate_last4") or None,
                 row.get("phone_last4") or None, owner_id, utc_now(), utc_now(),
             ),
         )

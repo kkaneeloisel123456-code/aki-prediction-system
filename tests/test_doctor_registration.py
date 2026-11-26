@@ -84,7 +84,7 @@ def test_existing_database_upgrade_preserves_users(registration_client):
     db.reset_initialization_cache()
     db.ensure_initialized()
     with db.reader() as conn:
-        assert conn.execute('PRAGMA user_version').fetchone()[0] == 5
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == db.SCHEMA_VERSION
         assert conn.execute('SELECT count(*) FROM users').fetchone()[0] == 1
     assert apply(registration_client).status_code == 202
 

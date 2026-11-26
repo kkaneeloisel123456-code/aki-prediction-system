@@ -239,7 +239,7 @@ function openEdit() {
   Object.assign(editForm, {
     name: patient.value.name,
     sex: patient.value.sex,
-    birth_year: patient.value.birth_year ?? '',
+    birth_date: patient.value.birth_date ?? '',
     certificate_last4: '',
     phone_last4: '',
     active: patient.value.active,
@@ -254,7 +254,7 @@ async function submitEdit() {
   try {
     const payload: any = {
       name: editForm.name, sex: editForm.sex,
-      birth_year: editForm.birth_year ? Number(editForm.birth_year) : null,
+      birth_date: editForm.birth_date || (patient.value.birth_date ? '' : null),
       active: Boolean(editForm.active),
     }
     if (editForm.certificate_last4) payload.certificate_last4 = editForm.certificate_last4
@@ -306,7 +306,7 @@ onMounted(load)
             <div class="pilot-meta">
               <span class="pilot-mono">{{ patient.mrn }}</span>
               <span>{{ patient.sex }}</span>
-              <span>{{ patient.birth_year ? `${patient.birth_year} 年出生` : '出生年未登记' }}</span>
+              <span>{{ patient.birth_date || (patient.birth_year ? `${patient.birth_year} 年出生` : '出生日期未登记') }}</span>
             </div>
             <h1 class="pilot-banner-title">{{ patient.name }}</h1>
             <div class="pilot-meta patient-banner-meta">
@@ -375,7 +375,7 @@ onMounted(load)
             <EmptyState
               v-if="!latestEncounter"
               title="暂无指标"
-              description="建立接诊后，术前、术中、ICU 与术后指标会在这里汇总。"
+              description="建立接诊后，各项指标会汇总在这里。"
             />
             <template v-else>
               <div class="metric-head">
@@ -424,7 +424,7 @@ onMounted(load)
           <SectionPanel title="档案信息">
             <dl class="patient-info-grid">
               <div><dt>病历号</dt><dd class="pilot-mono">{{ patient.mrn }}</dd></div>
-              <div><dt>性别 / 出生年</dt><dd>{{ patient.sex }} / {{ patient.birth_year ?? '—' }}</dd></div>
+              <div><dt>性别 / 出生日期</dt><dd>{{ patient.sex }} / {{ patient.birth_date || patient.birth_year || '—' }}</dd></div>
               <div><dt>负责人</dt><dd>{{ ownerName }}</dd></div>
               <div><dt>联系电话</dt><dd>{{ patient.phone || '未登记' }}</dd></div>
               <div><dt>证件信息</dt><dd>{{ patient.certificate || '未登记' }}</dd></div>
@@ -465,6 +465,7 @@ onMounted(load)
           <div><div class="modal-title">新建就诊</div><div class="modal-sub">为 {{ patient?.name }} 建立一次围手术期风险评估。</div></div>
           <button class="modal-close" type="button" aria-label="关闭" @click="showEncounter = false">×</button>
         </div>
+        <form @submit.prevent="submitEncounter" @keydown.enter.prevent="submitEncounter">
         <div class="modal-body">
           <div class="pilot-form-grid">
             <div class="pilot-field">
@@ -485,8 +486,9 @@ onMounted(load)
         </div>
         <div class="modal-foot">
           <button class="pilot-btn" type="button" @click="showEncounter = false">取消</button>
-          <button class="pilot-btn pilot-btn-primary" type="button" :disabled="saveBusy" @click="submitEncounter">{{ saveBusy ? '创建中…' : '创建并进入接诊' }}</button>
+          <button class="pilot-btn pilot-btn-primary" type="submit" :disabled="saveBusy">{{ saveBusy ? '创建中…' : '创建并进入接诊' }}</button>
         </div>
+        </form>
       </div>
     </div>
 
@@ -497,11 +499,12 @@ onMounted(load)
           <div><div class="modal-title">编辑患者档案</div><div class="modal-sub">证件与电话留空表示不修改已保存的末四位。</div></div>
           <button class="modal-close" type="button" aria-label="关闭" @click="showEdit = false">×</button>
         </div>
+        <form @submit.prevent="submitEdit" @keydown.enter.prevent="submitEdit">
         <div class="modal-body">
           <div class="pilot-form-grid">
             <div class="pilot-field"><label for="edit-name">姓名</label><input id="edit-name" v-model="editForm.name" class="pilot-input" /></div>
             <div class="pilot-field"><label for="edit-sex">性别</label><select id="edit-sex" v-model="editForm.sex" class="pilot-select"><option>男</option><option>女</option><option>未知</option></select></div>
-            <div class="pilot-field"><label for="edit-birth">出生年份</label><input id="edit-birth" v-model="editForm.birth_year" class="pilot-input" type="number" /></div>
+            <div class="pilot-field"><label for="edit-birth">出生日期</label><input id="edit-birth" v-model="editForm.birth_date" class="pilot-input" type="date" /></div>
             <div class="pilot-field"><label for="edit-status">状态</label><select id="edit-status" v-model="editForm.active" class="pilot-select"><option :value="true">在管</option><option :value="false">归档</option></select></div>
             <div class="pilot-field"><label for="edit-cert">证件号末四位（更新）</label><input id="edit-cert" v-model="editForm.certificate_last4" class="pilot-input" maxlength="4" /></div>
             <div class="pilot-field"><label for="edit-phone">手机号末四位（更新）</label><input id="edit-phone" v-model="editForm.phone_last4" class="pilot-input" maxlength="4" /></div>
@@ -516,8 +519,9 @@ onMounted(load)
         </div>
         <div class="modal-foot">
           <button class="pilot-btn" type="button" @click="showEdit = false">取消</button>
-          <button class="pilot-btn pilot-btn-primary" type="button" :disabled="saveBusy" @click="submitEdit">保存</button>
+          <button class="pilot-btn pilot-btn-primary" type="submit" :disabled="saveBusy">保存</button>
         </div>
+        </form>
       </div>
     </div>
 

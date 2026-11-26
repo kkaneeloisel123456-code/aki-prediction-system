@@ -316,7 +316,7 @@ html.dark[data-theme="dark"] {
 }
 .pilot-input,
 .pilot-select { height: 40px; padding: 0 var(--pilot-space-3); }
-.pilot-textarea { padding: var(--pilot-space-3); resize: vertical; line-height: 1.55; }
+.pilot-textarea { padding: var(--pilot-space-3); resize: none; line-height: 1.55; }
 .pilot-input::placeholder,
 .pilot-textarea::placeholder { color: var(--pilot-muted); opacity: .8; }
 .pilot-input:disabled,

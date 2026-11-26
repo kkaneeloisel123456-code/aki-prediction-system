@@ -119,6 +119,7 @@ class PatientCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     sex: str = Field(default="未知", pattern=r"^(男|女|未知)$")
     birth_year: Optional[int] = Field(default=None, ge=1900, le=2100)
+    birth_date: Optional[str] = Field(default=None, max_length=32)
     certificate_last4: Optional[str] = Field(default=None, max_length=8)
     phone_last4: Optional[str] = Field(default=None, max_length=8)
     owner_id: Optional[str] = None
@@ -128,6 +129,7 @@ class PatientUpdateRequest(BaseModel):
     name: Optional[str] = Field(default=None, max_length=80)
     sex: Optional[str] = Field(default=None, pattern=r"^(男|女|未知)$")
     birth_year: Optional[int] = Field(default=None, ge=1900, le=2100)
+    birth_date: Optional[str] = Field(default=None, max_length=32)
     certificate_last4: Optional[str] = Field(default=None, max_length=8)
     phone_last4: Optional[str] = Field(default=None, max_length=8)
     active: Optional[bool] = None

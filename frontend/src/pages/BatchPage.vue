@@ -341,6 +341,8 @@ async function confirmCommit() {
                   <th scope="col">行</th>
                   <th scope="col">病历号</th>
                   <th scope="col">姓名</th>
+                  <th scope="col">性别</th>
+                  <th scope="col">出生日期</th>
                   <th scope="col">就诊编号</th>
                   <th scope="col">发生时间</th>
                   <th scope="col">指标</th>
@@ -353,6 +355,8 @@ async function confirmCommit() {
                   <td class="pilot-mono">{{ row.index }}</td>
                   <td class="pilot-mono">{{ row.mrn || '—' }}</td>
                   <td class="cell-strong">{{ row.name || '—' }}</td>
+                  <td>{{ row.sex || '—' }}</td>
+                  <td class="pilot-mono">{{ row.birth_date || row.birth_year || '—' }}</td>
                   <td class="pilot-mono">{{ row.case_ref || '—' }}</td>
                   <td>{{ fmt(row.occurred_at) }}</td>
                   <td>{{ fieldCount(row) }} 项</td>

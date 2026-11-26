@@ -467,7 +467,7 @@ onMounted(() => {
             <p>{{ row.institution }} · {{ row.department }}</p><p class="pilot-small">申请时间：{{ fmt(row.created_at) }}<span v-if="row.reviewed_at"> · 审核时间：{{ fmt(row.reviewed_at) }}</span></p>
             <div v-if="row.status === 'pending'" class="pilot-stack">
               <label :for="`reason-${row.id}`" class="pilot-small">审核备注（未通过时必填）</label><input :id="`reason-${row.id}`" v-model="reviewReasons[row.id]" class="pilot-input" maxlength="500" :disabled="reviewBusy" placeholder="请填写核实情况或未通过原因">
-              <div class="pilot-actions"><button class="pilot-btn pilot-btn-primary" :disabled="reviewBusy" @click="reviewDoctor(row, 'approved')">核实并开通</button><button class="pilot-btn" :disabled="reviewBusy" @click="reviewDoctor(row, 'rejected')">不予通过</button></div>
+              <div class="pilot-actions admin-review-actions"><button class="pilot-btn pilot-btn-primary" type="button" :disabled="reviewBusy" @click="reviewDoctor(row, 'approved')">核实并开通</button><button class="pilot-btn" type="button" :disabled="reviewBusy" @click="reviewDoctor(row, 'rejected')">不予通过</button></div>
             </div><p v-else-if="row.reason" class="pilot-small">审核备注：{{ row.reason }}</p>
           </article>
         </SectionPanel>
@@ -624,7 +624,7 @@ onMounted(() => {
         append-to-body
       >
         <p class="admin-dialog-sub">新账号默认要求首次登录修改密码；停用账号无法继续登录。</p>
-        <div class="admin-user-form">
+        <form id="admin-user-form" class="admin-user-form" @submit.prevent="saveUser" @keydown.enter.prevent="saveUser">
           <div class="pilot-field">
             <label for="user-username">登录账号 <span class="admin-required">*</span></label>
             <input id="user-username" v-model="userForm.username" class="pilot-input" autocomplete="off" :disabled="Boolean(editingUser)" />
@@ -655,12 +655,12 @@ onMounted(() => {
             <input id="user-first-login" v-model="userForm.must_change_password" type="checkbox" />
             <span>首次登录必须修改密码</span>
           </label>
-        </div>
         <div v-if="formError" class="pilot-error admin-dialog-error" role="alert">{{ formError }}</div>
+        </form>
         <template #footer>
           <div class="admin-dialog-actions">
             <button class="pilot-btn" type="button" @click="showUser = false">取消</button>
-            <button class="pilot-btn pilot-btn-primary" type="button" :disabled="saving" @click="saveUser">
+            <button class="pilot-btn pilot-btn-primary" type="submit" form="admin-user-form" :disabled="saving">
               {{ saving ? '保存中…' : '保存' }}
             </button>
           </div>
@@ -735,7 +735,8 @@ tr.is-selected td:first-child { box-shadow: inset 3px 0 0 var(--pilot-accent); }
 .admin-check-field { display: flex; align-items: center; gap: var(--pilot-space-2); color: var(--pilot-ink-soft); font-size: var(--pilot-font-sm); }
 .admin-check-field input { accent-color: var(--pilot-accent); }
 .admin-dialog-error { margin: var(--pilot-space-4) 0 0; }
-.admin-dialog-actions { display: flex; justify-content: flex-end; gap: var(--pilot-space-2); }
+.admin-dialog-actions { display: flex; justify-content: flex-end; gap: var(--pilot-space-4); }
+.admin-review-actions { gap: var(--pilot-space-4); margin-top: var(--pilot-space-3); }
 
 @media (max-width: 1024px) {
   .admin-overview-grid,

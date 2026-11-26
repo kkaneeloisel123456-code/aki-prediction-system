@@ -22,7 +22,7 @@ from .config import BACKEND_DIR
 _INIT_LOCK = threading.Lock()
 _INITIALIZED: set[str] = set()
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # Prediction rows come from two origins:
 #   model  - produced by the deployed model; probability/model_version/model_hash set
@@ -152,6 +152,7 @@ CREATE TABLE IF NOT EXISTS patients (
     name TEXT NOT NULL,
     sex TEXT NOT NULL CHECK(sex IN ('男','女','未知')),
     birth_year INTEGER,
+    birth_date TEXT,
     certificate_last4 TEXT,
     phone_last4 TEXT,
     owner_id TEXT REFERENCES users(id) ON DELETE SET NULL,
@@ -447,6 +448,15 @@ def _migrate_import_batches_v4(conn: sqlite3.Connection) -> bool:
     return changed
 
 
+def _migrate_patient_birth_date(conn: sqlite3.Connection) -> bool:
+    """Store a full birth date. Existing rows keep birth_year only."""
+    columns = _table_columns(conn, "patients")
+    if not columns or "birth_date" in columns:
+        return False
+    conn.execute("ALTER TABLE patients ADD COLUMN birth_date TEXT")
+    return True
+
+
 def initialize_database(path: Path | None = None) -> Path:
     target = Path(path or database_path())
     key = str(target)
@@ -458,6 +468,7 @@ def initialize_database(path: Path | None = None) -> Path:
             conn.executescript(_SCHEMA)
             _migrate_predictions_v3(conn, target)
             _migrate_import_batches_v4(conn)
+            _migrate_patient_birth_date(conn)
             conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         finally:
             conn.close()

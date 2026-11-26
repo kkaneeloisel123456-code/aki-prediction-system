@@ -363,7 +363,8 @@ def generate_clinical_report(snapshot: Dict[str, Any]) -> bytes:
     heading("患者与就诊")
     line("姓名", patient.get("name"))
     line("病历号", patient.get("mrn"))
-    line("性别 / 出生年", f"{patient.get('sex') or ''} / {patient.get('birth_year') or ''}")
+    born = patient.get("birth_date") or patient.get("birth_year") or ""
+    line("性别 / 出生日期", f"{patient.get('sex') or ''} / {born}")
     line("证件（脱敏）", patient.get("certificate") or "未提供")
     line("就诊编号", encounter.get("case_ref"))
     line("就诊时间", encounter.get("occurred_at"))

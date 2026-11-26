@@ -7,7 +7,7 @@ import json
 import math
 import secrets
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Request, Response
@@ -40,6 +40,11 @@ def _err(message: str, status: int = 400) -> HTTPException:
     return HTTPException(status_code=status, detail=message)
 
 
+def _reject_if_published(row: Any) -> None:
+    if row["status"] == "published":
+        raise _err("报告已发布。请先继续修订；已发出的报告不会被改写", 409)
+
+
 def _user(request: Request) -> dict[str, Any]:
     user = getattr(request.state, "user", None)
     if not user:
@@ -70,6 +75,64 @@ def _mask(last4: str | None, prefix: str = "****") -> str:
     return f"{prefix}{last4}" if last4 else ""
 
 
+def _calendar_date(text: str) -> date | None:
+    """YYYY-MM-DD, slash or dot dates, and Chinese dates. The time part is ignored."""
+    head = text.split()[0].strip().replace("年", "-").replace("月", "-").replace("日", "")
+    head = head.replace("/", "-")
+    if head.count(".") == 2:
+        head = head.replace(".", "-")
+    parts = head.split("-")
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        return None
+    try:
+        return date(int(parts[0]), int(parts[1]), int(parts[2]))
+    except ValueError:
+        return None
+
+
+def _plain_year(text: str) -> int | None:
+    token = text.strip()
+    if token.endswith(".0"):
+        token = token[:-2]
+    if len(token) == 4 and token.isdigit():
+        year = int(token)
+        if 1900 <= year <= date.today().year:
+            return year
+    return None
+
+
+def _birth_fields(birth_date: str | None, birth_year: int | None) -> tuple[str | None, int | None]:
+    """Accept a full date, a year, an Excel date-time string, or an Excel serial."""
+    text = (birth_date or "").strip()
+    if not text:
+        if birth_year is not None and not 1900 <= birth_year <= date.today().year:
+            raise _err("出生日期超出合理范围")
+        return None, birth_year
+    parsed = _calendar_date(text)
+    if parsed is None:
+        year = _plain_year(text)
+        if year is not None:
+            return None, year
+    if parsed is None:
+        try:
+            serial = float(text)
+        except ValueError:
+            serial = None
+        if serial is not None:
+            # Excel's 1900 system: day 61 is 1900-03-01. Earlier serials collide
+            # with four-digit birth years, so those stay years.
+            epoch = date(1899, 12, 30)
+            days = int(serial)
+            latest = (date.today() - epoch).days
+            if 61 <= days <= latest:
+                parsed = epoch + timedelta(days=days)
+    if parsed is None:
+        raise _err("出生日期无法识别，请使用 YYYY-MM-DD 或 Excel 日期")
+    if parsed.year < 1900 or parsed > date.today():
+        raise _err("出生日期超出合理范围")
+    return parsed.isoformat(), parsed.year
+
+
 def _patient_dict(row: Any) -> dict[str, Any]:
     return {
         "id": row["id"],
@@ -77,6 +140,7 @@ def _patient_dict(row: Any) -> dict[str, Any]:
         "name": row["name"],
         "sex": row["sex"],
         "birth_year": row["birth_year"],
+        "birth_date": row["birth_date"] if "birth_date" in row.keys() else None,
         "certificate": _mask(row["certificate_last4"]),
         "phone": _mask(row["phone_last4"]),
         "owner_id": row["owner_id"],
@@ -433,14 +497,15 @@ def create_patient(req: PatientCreateRequest, request: Request):
         if not owner:
             raise _err("负责人账号不存在或不是有效医生")
         patient_id = new_id("P")
+        birth_date, birth_year = _birth_fields(req.birth_date, req.birth_year)
         try:
             conn.execute(
                 """INSERT INTO patients
-                   (id,mrn,name,sex,birth_year,certificate_last4,phone_last4,
+                   (id,mrn,name,sex,birth_year,birth_date,certificate_last4,phone_last4,
                     owner_id,active,created_at,updated_at)
-                   VALUES(?,?,?,?,?,?,?,?,1,?,?)""",
+                   VALUES(?,?,?,?,?,?,?,?,?,1,?,?)""",
                 (
-                    patient_id, req.mrn.strip(), req.name.strip(), req.sex, req.birth_year,
+                    patient_id, req.mrn.strip(), req.name.strip(), req.sex, birth_year, birth_date,
                     (req.certificate_last4 or "").strip() or None,
                     (req.phone_last4 or "").strip() or None,
                     owner_id, now, now,
@@ -502,13 +567,25 @@ def update_patient(patient_id: str, req: PatientUpdateRequest, request: Request)
             if not doctor:
                 raise _err("新负责人不是有效医生")
             owner_id = req.owner_id
+        current_date = row["birth_date"] if "birth_date" in row.keys() else None
+        requested_date = req.birth_date.strip() if isinstance(req.birth_date, str) else req.birth_date
+        if requested_date:
+            birth_date, birth_year = _birth_fields(requested_date, req.birth_year)
+        elif requested_date == "":
+            # The edit form sends an empty string only when a saved date was cleared.
+            birth_date, birth_year = None, req.birth_year
+        elif req.birth_year is not None:
+            birth_date, birth_year = _birth_fields(current_date, req.birth_year)
+        else:
+            birth_date, birth_year = current_date, row["birth_year"]
         conn.execute(
-            """UPDATE patients SET name=?,sex=?,birth_year=?,certificate_last4=?,
+            """UPDATE patients SET name=?,sex=?,birth_year=?,birth_date=?,certificate_last4=?,
                    phone_last4=?,active=?,owner_id=?,updated_at=? WHERE id=?""",
             (
                 req.name.strip() if req.name is not None else row["name"],
                 req.sex if req.sex is not None else row["sex"],
-                req.birth_year if req.birth_year is not None else row["birth_year"],
+                birth_year,
+                birth_date,
                 req.certificate_last4 if req.certificate_last4 is not None
                 else row["certificate_last4"],
                 req.phone_last4 if req.phone_last4 is not None else row["phone_last4"],
@@ -702,12 +779,40 @@ def get_encounter(encounter_id: str, request: Request):
         return result
 
 
+@router.post("/encounters/{encounter_id}/reopen")
+def reopen_encounter(encounter_id: str, request: Request):
+    """Unlock a published visit for correction. The issued report stays unchanged."""
+    user = _user(request)
+    with db.transaction(immediate=True) as conn:
+        row = _get_encounter(conn, user, encounter_id, write=True)
+        if row["status"] != "published":
+            return _encounter_dict(row)
+        review = _latest_review(conn, encounter_id)
+        status = "reviewed" if review else ("predicted" if row["current_prediction_id"] else "draft")
+        conn.execute(
+            """UPDATE encounters SET status=?,row_version=row_version+1,updated_by=?,updated_at=?
+               WHERE id=?""",
+            (status, user["id"], utc_now(), encounter_id),
+        )
+        record_audit(
+            conn, actor_type="user", actor_id=user["id"], action="encounter_reopen",
+            entity_type="encounter", entity_id=encounter_id,
+            detail={"report_kept": True}, ip=_ip(request),
+        )
+        updated = _get_encounter(conn, user, encounter_id)
+        result = _encounter_dict(updated)
+        result["latest_review"] = _latest_review(conn, encounter_id)
+        result["can_edit"] = True
+        return result
+
+
 @router.patch("/encounters/{encounter_id}")
 def update_encounter(encounter_id: str, req: EncounterUpdateRequest, request: Request):
     user = _user(request)
     stored, _, invalid = _normalise_values(req.values, allow_incomplete=False)
     with db.transaction(immediate=True) as conn:
         row = _get_encounter(conn, user, encounter_id, write=True)
+        _reject_if_published(row)
         if req.row_version != row["row_version"]:
             raise _err("就诊记录已在其他页面更新，请重新载入", 409)
         conn.execute(
@@ -735,6 +840,7 @@ def save_draft(encounter_id: str, req: DraftSaveRequest, request: Request):
     stored, _, invalid = _normalise_values(req.values, allow_incomplete=True)
     with db.transaction(immediate=True) as conn:
         row = _get_encounter(conn, user, encounter_id, write=True)
+        _reject_if_published(row)
         if req.row_version != row["row_version"]:
             raise _err("就诊记录已更新，草稿未覆盖，请重新载入", 409)
         existing = conn.execute(
@@ -773,7 +879,8 @@ def save_draft(encounter_id: str, req: DraftSaveRequest, request: Request):
 def delete_draft(encounter_id: str, request: Request, draft_version: int = -1):
     user = _user(request)
     with db.transaction(immediate=True) as conn:
-        _get_encounter(conn, user, encounter_id, write=True)
+        locked = _get_encounter(conn, user, encounter_id, write=True)
+        _reject_if_published(locked)
         row = conn.execute(
             "SELECT * FROM encounter_drafts WHERE user_id=? AND encounter_id=?",
             (user["id"], encounter_id),
@@ -805,6 +912,7 @@ def clinical_predict(encounter_id: str, req: ClinicalPredictRequest, request: Re
     assets = load_assets()
     with db.transaction(immediate=True) as conn:
         row = _get_encounter(conn, user, encounter_id, write=True)
+        _reject_if_published(row)
         if req.row_version != row["row_version"]:
             raise _err("就诊记录已更新，请重新载入后再预测", 409)
         result = predictor.predict(numeric, patient_id=row["patient_id"], explain=True)
@@ -857,6 +965,7 @@ def review_encounter(encounter_id: str, req: ClinicalReviewRequest, request: Req
         raise _err("调整风险判断、暂不发布或人工记录时必须填写理由")
     with db.transaction(immediate=True) as conn:
         row = _get_encounter(conn, user, encounter_id, write=True)
+        _reject_if_published(row)
         if req.row_version != row["row_version"]:
             raise _err("就诊记录已更新，请重新核对预测结果", 409)
         draft = conn.execute(
@@ -1024,6 +1133,7 @@ def publish_report(encounter_id: str, req: ReportPublishRequest, request: Reques
             "patient": {
                 "id": patient["id"], "mrn": patient["mrn"], "name": patient["name"],
                 "sex": patient["sex"], "birth_year": patient["birth_year"],
+                "birth_date": patient["birth_date"] if "birth_date" in patient.keys() else None,
                 "certificate": _mask(patient["certificate_last4"]),
             },
             "encounter": {
