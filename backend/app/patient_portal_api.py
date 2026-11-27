@@ -278,7 +278,7 @@ def login(req: PortalLoginRequest, request: Request, response: Response):
         valid = bool(account and verify_password(req.password, account["password_hash"]))
         if account is None:
             verify_password(req.password, _DUMMY_HASH)
-    if not valid:
+    if not valid or account is None:
         # Must run outside a read cursor's implicit transaction; SQLite would
         # otherwise hold a lock while a second connection records the failure.
         record_login_failure(key)
@@ -338,7 +338,9 @@ def status(request: Request):
 @router.post("/logout")
 def logout(request: Request, response: Response):
     _origin_ok(request)
-    _revoke_portal_token(request.cookies.get(PORTAL_COOKIE))
+    token = request.cookies.get(PORTAL_COOKIE)
+    if token:
+        _revoke_portal_token(token)
     _clear_cookie(response)
     return {"ok": True}
 

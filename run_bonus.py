@@ -193,7 +193,7 @@ pd.DataFrame([{
     '自由度': n_groups - 2,
     'P值': round(p_hl, 4),
     '测试集样本数': n_test_hl,
-    '测试集事件数': int(y_te.sum()),
+    '测试集事件数': int(np.sum(y_te)),
     '模型': 'LogisticRegression(C=0.02, balanced) 在20%测试集上的近似检验',
     '说明': 'n≈84，样本量小，仅供参考',
 }]).to_csv(f'{OUT}/tables/HL检验汇总.csv', index=False, encoding='utf-8-sig')

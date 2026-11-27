@@ -24,6 +24,7 @@ import warnings
 from datetime import datetime
 from functools import partial
 from pathlib import Path
+from typing import cast
 
 warnings.filterwarnings('ignore')
 
@@ -214,8 +215,10 @@ def run_threshold_and_cost_benefit(X, y):
     table.to_csv(OUT_TABLES / 'wave2_threshold.csv', index=False, encoding='utf-8-sig')
 
     candidates = table[table['阈值'] <= 0.5].copy()
-    default_best = np.maximum(0, candidates['净获益_全部干预'].to_numpy())
-    incremental = candidates['净获益_模型'].to_numpy() - default_best
+    default_best = np.maximum(
+        0, cast(pd.Series, candidates['净获益_全部干预']).to_numpy())
+    incremental = (
+        cast(pd.Series, candidates['净获益_模型']).to_numpy() - default_best)
     pos_mask = incremental > 0
     if np.any(pos_mask):
         recommended = float(candidates.loc[candidates.index[pos_mask], '阈值'].iloc[

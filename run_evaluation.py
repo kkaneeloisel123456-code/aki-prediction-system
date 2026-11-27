@@ -16,6 +16,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 import joblib
+from typing import cast
 
 def _check_lfs(path):
     import sys
@@ -147,8 +148,11 @@ cv_csv = 'outputs/tables/final_cv_results.csv'
 if os.path.exists(cv_csv):
     cv_df = pd.read_csv(cv_csv, encoding='utf-8-sig')
     all_results = {
-        row['模型']: {'mean': float(row['50次CV AUC均值']), 'std': float(row['标准差'])}
-        for _, row in cv_df.iterrows()
+        str(record['模型']): {
+            'mean': float(record['50次CV AUC均值']),
+            'std': float(record['标准差']),
+        }
+        for record in cv_df.to_dict(orient='records')
     }
 else:
     print('    [WARN] 未找到 final_cv_results.csv，用 5 折 CV 计算标签 AUC')
@@ -174,10 +178,10 @@ cv5 = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 y_prob_oof = {}
 for name in model_order:
     print(f'    {name} ...')
-    y_prob_oof[name] = cross_val_predict(
+    y_prob_oof[name] = cast(np.ndarray, cross_val_predict(
         build_honest_pipeline(models[name]), X_raw, y,
         cv=cv5, method='predict_proba', n_jobs=-1
-    )[:, 1]
+    ))[:, 1]
 
 # ---------------------------------------------------------------
 # 4. ROC / PR / 校准曲线
@@ -400,9 +404,9 @@ for name in model_order:
         '50xCV AUC (mean)': all_results[name]['mean'],
         '50xCV AUC (std)': all_results[name]['std'],
         'Accuracy': accuracy_score(y, y_pred),
-        'Precision': precision_score(y, y_pred, zero_division=0),
-        'Recall': recall_score(y, y_pred, zero_division=0),
-        'F1': f1_score(y, y_pred, zero_division=0),
+        'Precision': precision_score(y, y_pred, zero_division=0),  # type: ignore[arg-type]
+        'Recall': recall_score(y, y_pred, zero_division=0),  # type: ignore[arg-type]
+        'F1': f1_score(y, y_pred, zero_division=0),  # type: ignore[arg-type]
     })
 summary_df = pd.DataFrame(rows).sort_values('50xCV AUC (mean)', ascending=False)
 summary_df.to_csv('outputs/tables/model_summary_clean.csv', index=False, encoding='utf-8-sig')

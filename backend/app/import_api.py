@@ -569,6 +569,8 @@ def template_csv(request: Request):
 def _build_template_workbook() -> bytes:
     workbook = Workbook()
     sheet = workbook.active
+    if sheet is None:  # openpyxl always creates one, guard for type checkers
+        sheet = workbook.create_sheet()
     sheet.title = "导入模板"
     headers = _template_headers()
     sheet.append(headers)
@@ -973,6 +975,8 @@ def export_errors(batch_id: str, request: Request):
     }
     workbook = Workbook()
     sheet = workbook.active
+    if sheet is None:  # openpyxl always creates one, guard for type checkers
+        sheet = workbook.create_sheet()
     sheet.title = "错误行"
     sheet.append(["行号", "错误", "提示"] + headers)
     for row in errors:

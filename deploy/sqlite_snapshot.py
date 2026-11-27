@@ -74,9 +74,9 @@ def clone(source: Path, target_dir: Path) -> None:
     if auth.is_file():
         shutil.copyfile(auth, target_dir / "auth_config.json")
     # The helper runs as root for a newly created empty Docker volume.
-    os.chown(target_dir, 10001, 10001)
+    os.chown(target_dir, 10001, 10001)  # type: ignore[attr-defined]  # Linux-only API
     for path in target_dir.iterdir():
-        os.chown(path, 10001, 10001)
+        os.chown(path, 10001, 10001)  # type: ignore[attr-defined]  # Linux-only API
 
 
 def prune(directory: Path, keep: int) -> None:

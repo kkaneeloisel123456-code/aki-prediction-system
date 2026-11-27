@@ -29,7 +29,7 @@ def main() -> None:
         csv.writer(handle).writerows(gbk_rows)
 
     workbook = Workbook()
-    valid = workbook.active
+    valid = workbook.active or workbook.create_sheet()
     valid.title = "有效数据"
     valid.append(["病历编号", "患者姓名", "性别", "出生年份", "就诊编号", "发生时间", "负责人ID", "术前肌酐", "术前 eGFR"])
     valid.append(["MAP-001", "映射患者", "男", 1960, "MAP-CASE-001", excel_serial(date(2026, 11, 20)), "doctor1", 88, 92])

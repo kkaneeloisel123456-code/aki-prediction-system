@@ -324,7 +324,6 @@ html.dark[data-theme="dark"] {
   display: block;
   padding: 16px;
   line-height: 1.5;
-  vertical-align: top;
   resize: none;
 }
 .pilot-input::placeholder,

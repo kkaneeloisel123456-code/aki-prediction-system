@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def module(name):
     spec = importlib.util.spec_from_file_location(name, ROOT / "deploy" / (name + ".py"))
+    assert spec is not None and spec.loader is not None
     result = importlib.util.module_from_spec(spec)
     sys.modules[name] = result
     spec.loader.exec_module(result)

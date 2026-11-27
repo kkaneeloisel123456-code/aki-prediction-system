@@ -22,6 +22,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from typing import Any
 
 LOG = logging.getLogger("aki-deploy")
 HERE = Path(__file__).resolve().parent
@@ -33,7 +34,7 @@ def stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:6]
 
 
-def read_json(path: Path, default=None):
+def read_json(path: Path, default: Any = None) -> Any:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
 
 
@@ -99,7 +100,7 @@ class Deployer:
         import fcntl
         with (self.state / "deploy.lock").open("a") as stream:
             try:
-                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)  # type: ignore[attr-defined]  # Linux-only API
             except BlockingIOError:
                 LOG.info("Another deployment is running; skipped")
                 yield False
@@ -126,7 +127,7 @@ class Deployer:
                     time.sleep(2 ** (attempt + 1))
         raise RuntimeError("GitHub release API unavailable; running service was left unchanged") from error
 
-    def inspect(self, name: str):
+    def inspect(self, name: str) -> Any:
         text = self.run("docker", "inspect", name, check=False)
         return json.loads(text)[0] if text else None
 

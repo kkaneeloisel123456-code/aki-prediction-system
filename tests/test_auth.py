@@ -161,7 +161,9 @@ def test_first_login_password_change_is_enforced(client):
     })
     assert changed.status_code == 200, changed.text
     assert client.get("/api/patients").status_code == 200
-    assert not get_user(doctor_id)["must_change_password"]
+    stored_doctor = get_user(doctor_id)
+    assert stored_doctor is not None
+    assert not stored_doctor["must_change_password"]
 
 
 def test_clinical_publish_pdf_and_backup(client):
@@ -600,7 +602,9 @@ def test_last_admin_guard_rejects_non_self_actor_at_service_layer(client):
 
     with pytest.raises(ValueError, match="不能停用"):
         update_user(actor_id=second_id, user_id=admin_id, active=False)
-    assert get_user(admin_id)["active"] == 1
+    stored_admin = get_user(admin_id)
+    assert stored_admin is not None
+    assert stored_admin["active"] == 1
 
 
 def get_user_id(username: str) -> str:
@@ -1240,7 +1244,7 @@ def test_import_excel_date_cell_writes_full_birth_date(client):
     _switch_login(client, "doctor1")
     from openpyxl import Workbook
     book = Workbook()
-    sheet = book.active
+    sheet = book.active or book.create_sheet()
     sheet.append(["病历号", "姓名", "性别", "出生日期", "就诊编号", "发生时间"])
     sheet.append(["BDATE-1", "日期患者", "女", datetime(1968, 4, 12), "BDATE-CASE", datetime(2026, 11, 18, 9, 0)])
     raw = io.BytesIO()
@@ -1270,7 +1274,7 @@ def test_import_excel_date_cell_writes_full_birth_date(client):
 def _xlsx_bytes(rows: list[list]) -> bytes:
     from openpyxl import Workbook
     book = Workbook()
-    sheet = book.active
+    sheet = book.active or book.create_sheet()
     for row in rows:
         sheet.append(row)
     raw = io.BytesIO()
@@ -1483,23 +1487,30 @@ def test_demo_import_files_keep_full_birth_dates(client):
     assert preview.status_code == 200, preview.text
     payload = preview.json()
     assert payload["header_errors"] == []
-    assert payload["summary"]["valid"] == payload["summary"]["total"] > 0
+    assert payload["summary"] == {
+        "total": 12, "valid": 7, "invalid": 5, "new_patients": 6, "existing_patients": 0,
+    }
     for row in payload["rows"]:
-        assert row["errors"] == [], row
-        assert row["birth_date"]
-        assert len(row["birth_date"]) == 10
+        if row["errors"]:
+            continue
+        assert row["birth_date"] and len(row["birth_date"]) == 10
+    errors = {row["mrn"]: row["errors"] for row in payload["rows"] if row["errors"]}
+    assert any("性别" in item for item in errors["DEMO-ERR-1"])
+    assert any("出生日期" in item for item in errors["DEMO-ERR-2"])
+    assert any("术前SBP" in item for item in errors["DEMO-ERR-3"])
+    assert any("发生时间" in item for item in errors["DEMO-ERR-4"])
+    assert any("就诊编号" in item for item in errors["DEMO-ERR-5"])
     csv_preview = client.post(
         "/api/imports/preview",
         files={"file": (table.name, table.read_bytes(), "text/csv")},
     )
     assert csv_preview.status_code == 200, csv_preview.text
     csv_payload = csv_preview.json()
-    assert csv_payload["summary"]["invalid"] == 0
-    for row in csv_payload["rows"]:
-        assert row["birth_date"] and len(row["birth_date"]) == 10
+    assert csv_payload["summary"]["valid"] == 7
+    assert csv_payload["summary"]["invalid"] == 5
     commit = client.post("/api/imports/commit", json={"batch_id": payload["batch_id"]})
     assert commit.status_code == 200, commit.text
-    assert commit.json()["imported"] == payload["summary"]["valid"]
+    assert commit.json()["imported"] == 7
 
 
 def test_apache_ii_accepts_scores_through_71(client):

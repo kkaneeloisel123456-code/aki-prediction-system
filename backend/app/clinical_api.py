@@ -153,7 +153,7 @@ def _patient_dict(row: Any) -> dict[str, Any]:
     }
 
 
-def _patient_query(conn: Any, user: dict[str, Any], *, include_inactive: bool = False) -> str:
+def _patient_query(conn: Any, user: dict[str, Any], *, include_inactive: bool = False) -> tuple[str, list[Any]]:
     base = """
         SELECT p.*, u.display_name AS owner_name,
                (SELECT COUNT(*) FROM encounters e WHERE e.patient_id=p.id) AS encounter_count,
@@ -411,16 +411,18 @@ def _checklist(
         and review["reason"].strip()
     )
     fingerprint_match = manual_review
+    prediction_data = prediction or {}
     if model_prediction_valid:
-        current_fp = _fingerprint_input(numeric, prediction.get("model", {}).get("hash", ""))
-        fingerprint_match = current_fp == prediction.get("input_fingerprint")
+        current_fp = _fingerprint_input(
+            numeric, prediction_data.get("model", {}).get("hash", ""))
+        fingerprint_match = current_fp == prediction_data.get("input_fingerprint")
     review_valid = False
     if review:
         if model_prediction_valid:
             review_valid = (
                 review["decision"] in {"agree", "adjust"}
-                and review.get("prediction_id") == prediction.get("id")
-                and review.get("prediction_fingerprint") == prediction.get("input_fingerprint")
+                and review.get("prediction_id") == prediction_data.get("id")
+                and review.get("prediction_fingerprint") == prediction_data.get("input_fingerprint")
                 and (review["decision"] == "agree" or bool(review["reason"].strip()))
             )
         else:
@@ -1124,6 +1126,10 @@ def publish_report(encounter_id: str, req: ReportPublishRequest, request: Reques
         failed = [item["label"] for item in checklist["items"] if not item["ok"]]
         if failed:
             raise _err("发布核对未完成：" + "；".join(failed), 422)
+        if review is None:
+            # _checklist already requires a valid review; keep this explicit so
+            # the NOT NULL reports.reviewer_id insert below stays consistent.
+            raise _err("发布核对未完成：医生复核无效", 422)
         patient = _require_patient(conn, user, row["patient_id"], write=True)
         version = conn.execute(
             "SELECT COALESCE(MAX(version),0)+1 FROM reports WHERE encounter_id=?",

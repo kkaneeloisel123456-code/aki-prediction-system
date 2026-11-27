@@ -8,8 +8,9 @@ import math
 import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
+import numpy as np
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
@@ -55,6 +56,7 @@ from .schemas import (
     AuthStatusResponse,
     AuthUser,
     BatchPredictResponse,
+    FeatureMeta,
     FeaturesResponse,
     HealthResponse,
     LoginRequest,
@@ -175,7 +177,7 @@ def _validation_field(loc: Any) -> str:
 @app.exception_handler(RequestValidationError)
 async def request_validation_error_handler(
     request: Request, exc: RequestValidationError,
-) -> JSONResponse:
+) -> Response:
     """Return a stable Chinese 422 response without echoing submitted values."""
     errors = []
     for error in exc.errors()[:20]:
@@ -398,7 +400,7 @@ def predict_batch(rows: List[Dict[str, Any]]) -> BatchPredictResponse:
 @app.get("/api/features", response_model=FeaturesResponse)
 def features() -> FeaturesResponse:
     assets = load_assets()
-    metas = predictor.feature_metas()
+    metas = [FeatureMeta(**meta) for meta in predictor.feature_metas()]
     return FeaturesResponse(
         features=assets["features"],
         metas=metas,
@@ -568,7 +570,7 @@ def _read_csv_records(path: Path) -> List[Dict[str, Any]]:
         for k, v in row.items():
             if v is None or (isinstance(v, float) and math.isnan(v)):
                 clean[k] = None
-            elif hasattr(v, "item"):  # numpy scalar -> Python scalar
+            elif isinstance(v, np.generic):  # numpy scalar -> Python scalar
                 clean[k] = v.item()
             else:
                 clean[k] = v
@@ -719,9 +721,17 @@ def app_meta() -> Dict[str, Any]:
         df = pd.read_csv(cv_csv)
         auc_col = "50次CV AUC均值" if "50次CV AUC均值" in df.columns else "AUC"
         if auc_col in df.columns:
-            value = df[auc_col].max()
-            if pd.notna(value):
-                best_auc = float(value)
+            column = cast(pd.Series, df[auc_col])
+            numeric: List[float] = []
+            for raw in column.tolist():
+                try:
+                    value = float(raw)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(value):
+                    numeric.append(value)
+            if numeric:
+                best_auc = max(numeric)
     return {
         "n_features": len(assets["features"]),
         "n_models": 4,

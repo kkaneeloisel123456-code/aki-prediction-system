@@ -27,6 +27,7 @@ import os
 import warnings
 from datetime import datetime
 from pathlib import Path
+from typing import Any, cast
 
 warnings.filterwarnings("ignore")
 
@@ -127,7 +128,7 @@ class ShadowBorutaSelector(BaseEstimator, TransformerMixin):
             shadow = np.column_stack(
                 [rng.permutation(X[:, j]) for j in range(X.shape[1])]
             )
-            est = clone(base)
+            est: Any = clone(base)
             est.fit(np.hstack([X, shadow]), y)
             imp = est.feature_importances_
             real = imp[: X.shape[1]]
@@ -319,7 +320,7 @@ class BlendingClassifier(BaseEstimator, ClassifierMixin):
                 best_auc, best_w = score, w
         self.weights_ = np.asarray(best_w)
         self.inner_auc_ = best_auc
-        self.base_models_ = [clone(m).fit(X, y) for m in self.estimators]
+        self.base_models_ = [cast(Any, clone(m)).fit(X, y) for m in self.estimators]
         return self
 
     def predict_proba(self, X):

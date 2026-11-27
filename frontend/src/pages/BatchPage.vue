@@ -594,7 +594,7 @@ async function confirmCommit() {
   font-size: var(--pilot-font-xs);
 }
 .import-mapping-strip strong { color: var(--pilot-ink); font-size: var(--pilot-font-sm); }
-.import-note { margin: var(--pilot-space-2) 0 0; color: var(--pilot-muted); font-size: var(--pilot-font-xs); line-height: 1.6; }
+.import-note { margin: var(--pilot-space-3) 0 var(--pilot-space-4); color: var(--pilot-muted); font-size: var(--pilot-font-xs); line-height: 1.6; }
 .import-alert { margin: var(--pilot-space-3) 0 0; }
 .import-alert-warn {
   padding: var(--pilot-space-3) var(--pilot-space-4);

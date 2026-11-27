@@ -10,6 +10,7 @@ import matplotlib
 matplotlib.use('Agg')
 import sys
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -45,7 +46,7 @@ def main():
         ax.text(float(xi), float(y_pos), f"{row['AUC均值']:.4f}\u00b1{row['AUC标准差']:.4f}",
                 ha='center', va='bottom', fontsize=10, color=txt_color, fontweight='bold' if row['配置'] == 'Voting' else 'normal')
 
-    best_auc = df['AUC均值'].max()
+    best_auc = float(cast(pd.Series, df['AUC均值']).max())
     ax.axhline(best_auc, color=HIGHLIGHT, ls='--', lw=1.1, alpha=0.45)
     ax.set_xticks(x)
     ax.set_xticklabels(df['配置'], fontsize=11)

@@ -631,7 +631,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
                   <span class="pilot-muted">{{ previousLabel }}</span>
                   <span class="pilot-muted">复制上次就诊只补空项，不覆盖已填值。</span>
                 </div>
-                <p class="rail-hint">请按术前、术中、入 ICU 和术后核对指标时点。本系统未逐项记录采样时间，需结合原始病历确认。</p>
+                <p class="metric-timing-hint">请按术前、术中、入 ICU 和术后核对指标时点。本系统未逐项记录采样时间，需结合原始病历确认。</p>
                 <div v-if="invalidCount()" class="pilot-error metric-error">有 {{ invalidCount() }} 项数值超出临床合理范围，请修正后再保存或预测。</div>
 
                 <div v-for="g in groups" :key="g.key" class="metric-group">
@@ -879,6 +879,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
 .metric-track { flex: 1; height: 4px; border-radius: 999px; background: var(--pilot-surface-2); overflow: hidden; }
 .metric-track span { display: block; height: 100%; background: var(--pilot-accent); }
 .metric-source { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--pilot-space-1) var(--pilot-space-3); margin-bottom: var(--pilot-space-3); font-size: var(--pilot-font-xs); }
+.metric-timing-hint { margin: var(--pilot-space-2) 0 var(--pilot-space-4); color: var(--pilot-muted); font-size: var(--pilot-font-xs); line-height: 1.6; }
 .metric-source .pilot-muted:last-child { text-align: right; }
 .metric-error { margin-bottom: var(--pilot-space-3); }
 

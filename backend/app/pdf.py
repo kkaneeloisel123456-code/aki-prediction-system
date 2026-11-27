@@ -433,7 +433,8 @@ def generate_clinical_report(snapshot: Dict[str, Any]) -> bytes:
 
     heading("医生复核与发布")
     decision_map = {"agree": "采纳模型结果", "adjust": "调整风险判断", "defer": "暂不发布", "manual": "人工记录"}
-    line("复核结论", decision_map.get(review.get("decision"), review.get("decision") or "未记录"))
+    review_decision = str(review.get("decision") or "")
+    line("复核结论", decision_map.get(review_decision, review_decision or "未记录"))
     line("复核说明", review.get("reason") or "未填写")
     line("复核时间", review.get("created_at") or "未记录")
     line("发布人", published_by.get("name") or "未记录")

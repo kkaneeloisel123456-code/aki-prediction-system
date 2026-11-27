@@ -558,7 +558,7 @@ onMounted(load)
 .report-shap-value.is-down { background: var(--pilot-low); color: var(--pilot-low); }
 .report-shap-value { font-size: 11px; text-align: right; white-space: nowrap; }
 .report-text { margin: 0; color: var(--pilot-ink-soft); font-size: var(--pilot-font-sm); line-height: 1.8; white-space: pre-wrap; }
-.report-note { margin: var(--pilot-space-3) 0 0; color: var(--pilot-muted); font-size: var(--pilot-font-xs); line-height: 1.7; }
+.report-note { margin: var(--pilot-space-3) 0 var(--pilot-space-4); color: var(--pilot-muted); font-size: var(--pilot-font-xs); line-height: 1.7; }
 .report-declaration { color: var(--pilot-ink-soft); font-size: var(--pilot-font-sm); }
 .report-fill-tag { margin-left: var(--pilot-space-1); padding: 1px 5px; border: 1px solid var(--pilot-line-strong); color: var(--pilot-mid); font-size: 10px; font-weight: 500; white-space: nowrap; }
 .report-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--pilot-space-5); }

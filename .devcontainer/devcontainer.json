@@ -1,4 +1,5 @@
 {
+  "$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.schema.json",
   "name": "AKI Prediction (FastAPI + Vue 3)",
   "image": "mcr.microsoft.com/devcontainers/python:1-3.11-bookworm",
   "features": {

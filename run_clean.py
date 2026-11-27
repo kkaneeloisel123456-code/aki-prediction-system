@@ -24,6 +24,7 @@ import numpy as np
 import os
 import joblib
 from datetime import datetime
+from typing import cast
 
 from src.config import TARGET, is_leakage
 from src.data.prepare import prepare_raw_numeric, prepare_training_data, save_app_data
@@ -319,7 +320,7 @@ for name, model in models.items():
     scores = cross_val_score(
         build_honest_pipeline(model), X_raw, y, cv=rskf,
         scoring='roc_auc', n_jobs=1 if name == 'XGBoost' else -1,
-        error_score='raise'
+        error_score='raise'  # type: ignore[arg-type]  # sklearn 接受 'raise'，存根写的是 float
     )
     all_results[name] = {'mean': scores.mean(), 'std': scores.std()}
     print(f"  {name:<22} {scores.mean():.4f}       {scores.std():.4f}")
@@ -327,7 +328,7 @@ for name, model in models.items():
 # Voting评估
 voting_scores = cross_val_score(
     build_honest_pipeline(voting), X_raw, y, cv=rskf,
-    scoring='roc_auc', n_jobs=-1, error_score='raise'
+    scoring='roc_auc', n_jobs=-1, error_score='raise'  # type: ignore[arg-type]
 )
 all_results['Voting Ensemble'] = {'mean': voting_scores.mean(), 'std': voting_scores.std()}
 print(f"  {'Voting Ensemble':<22} {voting_scores.mean():.4f}       {voting_scores.std():.4f}  <-- 最佳")
@@ -370,9 +371,9 @@ y_pred = voting_pipe.predict(X_test)
 print(f"  {'Voting Ensemble':<22} {train_auc:<10.4f} {test_auc:<10.4f} {gap:<10.4f} {'[OK] 良好' if gap < 0.08 else ('[~] 可接受' if gap < 0.15 else '[!] 需处理')}")
 print(f"\n  测试集详细指标:")
 print(f"    Accuracy:  {accuracy_score(y_test, y_pred):.4f}")
-print(f"    Precision: {precision_score(y_test, y_pred, zero_division=0):.4f}")
-print(f"    Recall:    {recall_score(y_test, y_pred, zero_division=0):.4f}")
-print(f"    F1:        {f1_score(y_test, y_pred, zero_division=0):.4f}")
+print(f"    Precision: {precision_score(y_test, y_pred, zero_division=0):.4f}")  # type: ignore[arg-type]
+print(f"    Recall:    {recall_score(y_test, y_pred, zero_division=0):.4f}")  # type: ignore[arg-type]
+print(f"    F1:        {f1_score(y_test, y_pred, zero_division=0):.4f}")  # type: ignore[arg-type]
 
 # ============================================================
 # 模块5.5：生成最终ROC曲线图（4基模型 + Voting Ensemble）
@@ -407,15 +408,21 @@ model_colors = {
 from sklearn.model_selection import StratifiedKFold
 cv5 = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
+
+def _oof_positive_proba(estimator) -> np.ndarray:
+    """5 折 OOF 正类概率；sklearn 存根把返回类型标成一维，运行时是二维。"""
+    proba = cross_val_predict(
+        estimator, X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
+    )
+    return cast(np.ndarray, proba)[:, 1]
+
 print("  正在计算OOF预测概率（5折分层CV）...")
 
 roc_results = {}
 
 for name, model in models.items():
     print(f"    {name}...")
-    y_prob_oof = cross_val_predict(
-        build_honest_pipeline(model), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
-    )[:, 1]
+    y_prob_oof = _oof_positive_proba(build_honest_pipeline(model))
     fpr, tpr, _ = roc_curve(y, y_prob_oof)
     roc_auc = auc(fpr, tpr)
     roc_results[name] = {'fpr': fpr, 'tpr': tpr, 'auc': roc_auc}
@@ -426,9 +433,7 @@ for name, model in models.items():
 
 # Voting Ensemble (OOF) — 标注用50次嵌套CV AUC
 print("    Voting Ensemble...")
-y_prob_voting_oof = cross_val_predict(
-    build_honest_pipeline(voting), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
-)[:, 1]
+y_prob_voting_oof = _oof_positive_proba(build_honest_pipeline(voting))
 
 # ============================================================
 # 模块5.6：概率校准（基于5折OOF概率，交叉验证式估计校准增益）
@@ -541,9 +546,7 @@ ax_roc.spines['top'].set_visible(False); ax_roc.spines['right'].set_visible(Fals
 ap_results = {}
 pr_data = {}
 for name, model in models.items():
-    y_prob_oof = cross_val_predict(
-        build_honest_pipeline(model), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
-    )[:, 1]
+    y_prob_oof = _oof_positive_proba(build_honest_pipeline(model))
     precision, recall, _ = precision_recall_curve(y, y_prob_oof)
     ap = average_precision_score(y, y_prob_oof)
     ap_results[name] = ap
@@ -552,9 +555,7 @@ for name, model in models.items():
                label=f'{name} (AP = {ap:.4f})')
 
 # Voting PR
-y_prob_v = cross_val_predict(
-    build_honest_pipeline(voting), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
-)[:, 1]
+y_prob_v = _oof_positive_proba(build_honest_pipeline(voting))
 precision_v, recall_v, _ = precision_recall_curve(y, y_prob_v)
 ap_v = average_precision_score(y, y_prob_v)
 ap_results['Voting Ensemble'] = ap_v
@@ -635,20 +636,16 @@ for idx, name in enumerate(model_order):
 
     # Get OOF predictions
     if name == 'Voting Ensemble':
-        y_prob = cross_val_predict(
-            build_honest_pipeline(voting), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
-        )[:, 1]
+        y_prob = _oof_positive_proba(build_honest_pipeline(voting))
     else:
-        y_prob = cross_val_predict(
-            build_honest_pipeline(models[name]), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
-        )[:, 1]
+        y_prob = _oof_positive_proba(build_honest_pipeline(models[name]))
     y_pred = (y_prob >= 0.5).astype(int)
     cm = confusion_matrix(y, y_pred)
     cm_norm = cm.astype('float') / cm.sum(axis=1, keepdims=True).clip(min=1)
 
     # Display
     disp = ConfusionMatrixDisplay(confusion_matrix=cm_norm, display_labels=['Non-AKI', 'AKI'])
-    disp.plot(ax=ax, cmap=plt.cm.Blues, colorbar=False, values_format='.2f')
+    disp.plot(ax=ax, cmap='Blues', colorbar=False, values_format='.2f')
 
     # Overlay raw counts
     for i in range(2):
@@ -696,13 +693,9 @@ for idx, name in enumerate(model_order):
 
     # OOF predictions
     if name == 'Voting Ensemble':
-        y_prob = cross_val_predict(
-            build_honest_pipeline(voting), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
-        )[:, 1]
+        y_prob = _oof_positive_proba(build_honest_pipeline(voting))
     else:
-        y_prob = cross_val_predict(
-            build_honest_pipeline(models[name]), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
-        )[:, 1]
+        y_prob = _oof_positive_proba(build_honest_pipeline(models[name]))
 
     prob_true, prob_pred = calibration_curve(y, y_prob, n_bins=10, strategy='uniform')
     brier = brier_score_loss(y, y_prob)
@@ -742,13 +735,9 @@ ax6.set_facecolor('#F8F9FA')
 for name in model_order:
     # Reuse OOF predictions from above (re-compute for simplicity)
     if name == 'Voting Ensemble':
-        y_prob = cross_val_predict(
-            build_honest_pipeline(voting), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
-        )[:, 1]
+        y_prob = _oof_positive_proba(build_honest_pipeline(voting))
     else:
-        y_prob = cross_val_predict(
-            build_honest_pipeline(models[name]), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
-        )[:, 1]
+        y_prob = _oof_positive_proba(build_honest_pipeline(models[name]))
 
     prob_true, prob_pred = calibration_curve(y, y_prob, n_bins=10, strategy='uniform')
     brier = brier_score_loss(y, y_prob)
@@ -783,9 +772,7 @@ for name in model_order:
     if name == 'Voting Ensemble':
         y_prob = y_prob_voting_oof
     else:
-        y_prob = cross_val_predict(
-            build_honest_pipeline(models[name]), X_raw, y, cv=cv5, method='predict_proba', n_jobs=-1
-        )[:, 1]
+        y_prob = _oof_positive_proba(build_honest_pipeline(models[name]))
 
     prob_true, prob_pred = calibration_curve(y, y_prob, n_bins=10, strategy='uniform')
     brier = brier_score_loss(y, y_prob)

@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import os
 import shutil
-from typing import Dict, List, Tuple, TypedDict
+from pathlib import Path
+from typing import Dict, List, Tuple, TypedDict, cast
 
 import numpy as np
 import pandas as pd
@@ -122,7 +123,7 @@ def flag_impossible_values(
         if key not in ranges:
             continue
         lo, hi = ranges[key]
-        s = pd.to_numeric(df[col], errors='coerce')
+        s = cast(pd.Series, pd.to_numeric(df[col], errors='coerce'))
         invalid = (s < lo) | (s > hi)
         if invalid.any():
             for idx in df.index[invalid]:
@@ -157,7 +158,7 @@ def prepare_training_data(
     df_clean, flags = flag_impossible_values(df)
 
     leaked = [c for c in df_clean.columns if is_leakage(c) and c != target]
-    y = df_clean[target].copy()
+    y = cast(pd.Series, df_clean[target].copy())
     X = prepare_raw_numeric(df_clean, target=target)
     impute_values: Dict[str, float] = {
         str(col): float(val) for col, val in X.median().items()
