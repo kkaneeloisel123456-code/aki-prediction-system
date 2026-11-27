@@ -620,7 +620,7 @@ async function confirmCommit() {
 .import-confirm-meta > div { display: flex; justify-content: space-between; gap: var(--pilot-space-4); font-size: var(--pilot-font-sm); }
 .import-confirm-meta span { color: var(--pilot-muted); }
 .import-confirm-meta strong { color: var(--pilot-ink); overflow-wrap: anywhere; text-align: right; }
-.dialog-actions { display: flex; justify-content: flex-end; gap: var(--pilot-space-2); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: var(--pilot-space-4); }
 
 .sheet-choice-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--pilot-space-3); }
 .sheet-choice {

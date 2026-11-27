@@ -649,7 +649,7 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.schedule-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--pilot-space-1); }
+.schedule-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--pilot-space-2); }
 .schedule-actions .pilot-btn { height: 30px; padding: 0 var(--pilot-space-2); font-size: var(--pilot-font-xs); }
 .schedule-split { align-items: stretch; }
 .slot-form { display: grid; gap: var(--pilot-space-4); }
@@ -659,7 +659,7 @@ onMounted(() => {
 .dialog-sub { margin: 0 0 var(--pilot-space-4); color: var(--pilot-muted); font-size: var(--pilot-font-sm); line-height: 1.6; }
 .dialog-empty { margin-bottom: var(--pilot-space-4); }
 .dialog-error { margin: var(--pilot-space-4) 0 0; }
-.dialog-actions { display: flex; justify-content: flex-end; gap: var(--pilot-space-2); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: var(--pilot-space-4); }
 .status-confirm-row { display: flex; align-items: center; gap: var(--pilot-space-2); flex-wrap: wrap; margin-top: var(--pilot-space-4); }
 .rating-stars { color: var(--pilot-mid); letter-spacing: 1px; white-space: nowrap; }
 .feedback-content { max-width: 320px; overflow-wrap: anywhere; }

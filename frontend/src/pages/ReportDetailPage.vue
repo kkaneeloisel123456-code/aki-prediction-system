@@ -590,7 +590,7 @@ onMounted(load)
 .report-dialog-field { display: flex; flex-direction: column; gap: var(--pilot-space-2); }
 .report-dialog-field label { color: var(--pilot-ink-soft); font-size: var(--pilot-font-xs); font-weight: 600; }
 .report-dialog-hint { color: var(--pilot-muted); font-size: var(--pilot-font-xs); text-align: right; }
-.report-dialog-actions { display: flex; justify-content: flex-end; gap: var(--pilot-space-2); }
+.report-dialog-actions { display: flex; justify-content: flex-end; gap: var(--pilot-space-4); }
 @media (max-width: 1024px) {
   .report-page { max-width: 820px; }
   .report-paper { padding: 32px; }

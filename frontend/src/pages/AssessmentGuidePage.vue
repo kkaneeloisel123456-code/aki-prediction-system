@@ -69,7 +69,7 @@ onMounted(load)
 </template>
 
 <style scoped>
-.guide-content { max-width: 960px; }
+.guide-content { max-width: 960px; margin-inline: auto; }
 .guide-content p { margin: 0 0 12px; color: var(--pilot-ink-soft); line-height: 1.85; }
 .guide-content p:last-child { margin-bottom: 0; }
 .guide-bands { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }

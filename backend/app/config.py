@@ -23,13 +23,12 @@ IMPUTE_VALUES = APP_DATA / "impute_values.json"
 RISK_LOW = 0.30
 RISK_HIGH = 0.70
 
-# Clinical plausibility ranges for the model features, ported verbatim from
-# src/data/prepare.py CLINICAL_RANGES (the training pipeline flagged values
-# outside these as missing). The inference path applies the same rule so that
-# a typo like SBP=1200 is median-filled here exactly like it was in training,
-# instead of driving the prediction.
+# Clinical plausibility ranges. Most match the training filter in
+# src/data/prepare.py CLINICAL_RANGES: a typo like SBP=1200 is rejected
+# instead of driving the prediction. APACHE II uses the full clinical
+# scale, 0–71; the old training cap of 50 rejected real high scores.
 FEATURE_RANGES: dict[str, tuple[float, float]] = {
-    "APACHEII": (0, 50),
+    "APACHEII": (0, 71),
     "手术时间": (30, 1440),
     "术中失血量": (0, 5000),
     "术中晶体液量": (0, 10000),

@@ -676,22 +676,24 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
                   <div v-if="hasModelPrediction"><dt>模型版本</dt><dd class="pilot-mono" style="overflow-wrap:anywhere">{{ activePrediction?.model_version || '—' }}</dd></div>
                   <div><dt>预测编号</dt><dd class="pilot-mono">{{ encounter.current_prediction_id || '—' }}</dd></div>
                 </dl>
-                <p v-if="hasModelPrediction" class="rail-hint">模型风险估计供医生复核，临床诊断与医嘱在就诊文书中单独记录。</p>
-                <p v-if="hasModelPrediction && dirty" class="rail-warning">当前页面有未保存修改，以上为上次运行结果。请保存并核对指标是否需要重新评估。</p>
-                <details v-if="hasModelPrediction && missingCount" class="rail-hint">
-                  <summary>查看 {{ missingCount }} 项非实测输入</summary>
-                  <p>{{ (activePrediction?.missing_filled ?? []).map(shapLabel).join('、') }}。模型按训练中位数填充。</p>
-                </details>
-                <RouterLink to="/assessment-guide" class="pilot-link">评估说明与使用局限 →</RouterLink>
-                <div class="rail-actions">
-                  <button class="pilot-btn pilot-btn-primary" type="button" :disabled="predicting || !canEdit || metricsLocked" @click="runPrediction">
-                    {{ predicting ? '计算中…' : (hasPrediction ? '重新运行模型' : '运行模型') }}
-                  </button>
-                  <button v-if="!hasPrediction && !reviewDone" class="pilot-btn" type="button" :disabled="!canEdit || measuredCount === 0" @click="startManualReview">无模型时人工记录</button>
-                  <button class="pilot-btn" type="button" :disabled="saving || !canEdit || metricsLocked" @click="persistDraft(false)">{{ saving ? '保存中…' : '保存草稿' }}</button>
+                <div class="rail-follow">
+                  <p v-if="hasModelPrediction" class="rail-hint">模型风险估计供医生复核，临床诊断与医嘱在就诊文书中单独记录。</p>
+                  <p v-if="hasModelPrediction && dirty" class="rail-warning">当前页面有未保存修改，以上为上次运行结果。请保存并核对指标是否需要重新评估。</p>
+                  <details v-if="hasModelPrediction && missingCount">
+                    <summary>查看 {{ missingCount }} 项非实测输入</summary>
+                    <p>{{ (activePrediction?.missing_filled ?? []).map(shapLabel).join('、') }}。模型按训练中位数填充。</p>
+                  </details>
+                  <RouterLink to="/assessment-guide" class="pilot-link">评估说明与使用局限 →</RouterLink>
+                  <div class="rail-actions">
+                    <button class="pilot-btn pilot-btn-primary" type="button" :disabled="predicting || !canEdit || metricsLocked" @click="runPrediction">
+                      {{ predicting ? '计算中…' : (hasPrediction ? '重新运行模型' : '运行模型') }}
+                    </button>
+                    <button v-if="!hasPrediction && !reviewDone" class="pilot-btn" type="button" :disabled="!canEdit || measuredCount === 0" @click="startManualReview">无模型时人工记录</button>
+                    <button class="pilot-btn" type="button" :disabled="saving || !canEdit || metricsLocked" @click="persistDraft(false)">{{ saving ? '保存中…' : '保存草稿' }}</button>
+                  </div>
+                  <p v-if="isPublished" class="rail-hint">报告已发布，内容已锁定。点“继续修订”后可再编辑；已发出的报告保持不变，再次发布会生成新版本。</p>
+                  <p v-else-if="reviewDone" class="rail-hint">复核之后仍可修改诊断、医嘱和指标。改过指标后需要重新运行模型并再次复核，才能发布。</p>
                 </div>
-                <p v-if="isPublished" class="rail-hint">报告已发布，内容已锁定。点“继续修订”后可再编辑；已发出的报告保持不变，再次发布会生成新版本。</p>
-                <p v-else-if="reviewDone" class="rail-hint">复核之后仍可修改诊断、医嘱和指标。改过指标后需要重新运行模型并再次复核，才能发布。</p>
               </div>
             </section>
 
@@ -866,7 +868,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
 .rail-panel { margin: 0; }
 
 .doc-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--pilot-space-4); }
-.form-field { display: flex; flex-direction: column; gap: var(--pilot-space-1); }
+.form-field { display: flex; flex-direction: column; gap: var(--pilot-space-2); }
 .form-field label { color: var(--pilot-ink-soft); font-size: var(--pilot-font-xs); font-weight: 600; }
 
 .metrics-title { display: flex; align-items: center; gap: var(--pilot-space-2); flex-wrap: wrap; }
@@ -932,8 +934,17 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
 .risk-meta div { min-width: 0; }
 .risk-meta dt { color: var(--pilot-muted); font-size: var(--pilot-font-xs); }
 .risk-meta dd { margin-top: var(--pilot-space-1); overflow: hidden; color: var(--pilot-ink); font-size: var(--pilot-font-xs); font-weight: 600; text-overflow: ellipsis; }
-.rail-actions { display: flex; flex-direction: column; gap: var(--pilot-space-2); }
-.rail-hint { margin-top: var(--pilot-space-3); color: var(--pilot-muted); font-size: var(--pilot-font-xs); line-height: 1.6; }
+.rail-follow {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--pilot-space-4);
+}
+.rail-follow .pilot-link { align-self: flex-start; }
+.rail-follow details summary { cursor: pointer; line-height: 1.6; }
+.rail-follow details p { margin: var(--pilot-space-3) 0 0; color: var(--pilot-muted); font-size: var(--pilot-font-xs); line-height: 1.6; }
+.rail-actions { display: flex; flex-direction: column; gap: var(--pilot-space-3); }
+.rail-hint { margin: 0; color: var(--pilot-muted); font-size: var(--pilot-font-xs); line-height: 1.6; }
 
 .shap-list { display: flex; flex-direction: column; gap: var(--pilot-space-3); }
 .shap-row { display: grid; grid-template-columns: minmax(0, 1fr) 72px; gap: var(--pilot-space-2); align-items: center; }
@@ -947,7 +958,8 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
 .rail-warning { padding: var(--pilot-space-2) var(--pilot-space-3); border: 1px solid var(--pilot-mid); border-radius: var(--pilot-radius-control); background: var(--pilot-mid-soft); color: var(--pilot-mid); font-size: var(--pilot-font-xs); }
 .review-record { padding: var(--pilot-space-3); border: 1px solid var(--pilot-line); border-radius: var(--pilot-radius-control); background: var(--pilot-surface-2); color: var(--pilot-ink-soft); font-size: var(--pilot-font-xs); line-height: 1.6; }
 
-.checklist-body { display: flex; flex-direction: column; gap: var(--pilot-space-2); }
+.checklist-body { display: flex; flex-direction: column; gap: var(--pilot-space-3); }
+.publish-btn { margin-top: var(--pilot-space-2); }
 .check-row { display: flex; align-items: flex-start; gap: var(--pilot-space-2); }
 .check-mark { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex-shrink: 0; border-radius: 50%; background: var(--pilot-mid-soft); color: var(--pilot-mid); font-size: var(--pilot-font-xs); font-weight: 700; }
 .check-mark.ok { background: var(--pilot-low-soft); color: var(--pilot-low); }
@@ -957,7 +969,8 @@ onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
 .check-ack input { margin-top: 2px; accent-color: var(--pilot-accent); }
 .publish-error { margin: var(--pilot-space-2) 0 0; }
 .publish-result { margin-top: var(--pilot-space-2); padding: var(--pilot-space-3); border: 1px solid var(--pilot-line); border-radius: var(--pilot-radius-control); background: var(--pilot-accent-soft); color: var(--pilot-ink-soft); font-size: var(--pilot-font-xs); line-height: 1.6; }
-.publish-actions { display: flex; gap: var(--pilot-space-2); margin-top: var(--pilot-space-2); }
+.publish-actions { display: flex; gap: var(--pilot-space-3); margin-top: var(--pilot-space-3); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: var(--pilot-space-4); }
 .publish-btn { width: 100%; margin-top: var(--pilot-space-2); }
 
 .paste-copy { margin: 0 0 var(--pilot-space-3); color: var(--pilot-ink-soft); font-size: var(--pilot-font-sm); line-height: 1.6; }

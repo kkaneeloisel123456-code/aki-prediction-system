@@ -53,8 +53,7 @@ class FeatureMeta(BaseModel):
     unit: str | None = None
     reference: str | None = None
     input: str | None = "number"
-    # Clinical plausibility bounds for form validation (None when the
-    # training side had no range for this feature).
+    # Bounds for form validation. None when this feature has no hard limit.
     lo: float | None = None
     hi: float | None = None
 

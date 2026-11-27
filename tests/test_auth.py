@@ -1500,3 +1500,20 @@ def test_demo_import_files_keep_full_birth_dates(client):
     commit = client.post("/api/imports/commit", json={"batch_id": payload["batch_id"]})
     assert commit.status_code == 200, commit.text
     assert commit.json()["imported"] == payload["summary"]["valid"]
+
+
+def test_apache_ii_accepts_scores_through_71(client):
+    from fastapi import HTTPException
+    from backend.app.clinical_api import _normalise_values
+    login(client)
+    apache = next(item for item in client.get("/api/features").json()["metas"] if item["name"] == "APACHEII")
+    assert apache["lo"] == 0
+    assert apache["hi"] == 71
+    assert "71" in apache["reference"]
+    for score in (0, 50, 51, 71):
+        _, numeric, invalid = _normalise_values({"APACHEII": score}, allow_incomplete=False)
+        assert invalid == []
+        assert numeric["APACHEII"] == score
+    with pytest.raises(HTTPException) as rejected:
+        _normalise_values({"APACHEII": 72}, allow_incomplete=False)
+    assert "0–71" in rejected.value.detail
